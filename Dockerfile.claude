@@ -1,0 +1,25 @@
+FROM aztecprotocol/devbox:3.0
+
+USER root
+
+# Install Claude Code
+RUN npm install -g @anthropic-ai/claude-code
+
+# Stage default Claude settings (copied into volume at runtime by entrypoint)
+COPY claude/settings.json /opt/claude-defaults/settings.json
+COPY claude/claude.json /opt/claude-defaults/claude.json
+
+# Entry scripts
+COPY entrypoint-common.sh /usr/local/bin/entrypoint-common.sh
+COPY entrypoint-claude.sh /usr/local/bin/entrypoint-claude.sh
+RUN chmod +x /usr/local/bin/entrypoint-common.sh /usr/local/bin/entrypoint-claude.sh
+
+ENV CI=0
+
+# Git identity for agent commits
+RUN git config --system user.name "alexghr-bot" && \
+    git config --system user.email "alexghr-bot@users.noreply.github.com"
+
+WORKDIR /workspaces
+
+ENTRYPOINT ["/usr/local/bin/entrypoint-claude.sh"]
