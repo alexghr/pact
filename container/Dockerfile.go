@@ -12,12 +12,23 @@ RUN apt-get update && \
       libatomic1 \
       ripgrep && \
     rm -rf /var/lib/apt/lists/*
+
+ENV GO_VERSION=1.27.1
+ENV GO_SHASUM=63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+ENV GO_ARCHIVE=go${GO_VERSION}.linux-amd64.tar.gz
+
+RUN curl -fLSs --retry 5 --retry-delay 1 -o "/tmp/$GO_ARCHIVE" "https://go.dev/dl/$GO_ARCHIVE" && \
+  printf '%s  %s\n' "$GO_SHASUM" "/tmp/$GO_ARCHIVE" | sha256sum --check && \
+  mkdir /opt/go && tar -xf "/tmp/$GO_ARCHIVE" -C /opt/go --strip-components=1 && \
+  rm -f "/tmp/$GO_ARCHIVE"
+
+ENV PATH="/opt/go/bin:$PATH"
  
 ENV NODE_VERSION=26.8.1
 ENV NODE_SHASUM=b2b76660fa4ded4e0b2a41ee3c0c651cd52ea8170ead91ebac1e147ac3d55643
 ENV NODE_ARCHIVE=node-v${NODE_VERSION}-linux-x64.tar.gz
 
-RUN curl -fsS --retry 5 --retry-delay 1 -o "/tmp/$NODE_ARCHIVE" "https://nodejs.org/dist/v${NODE_VERSION}/$NODE_ARCHIVE" && \
+RUN curl -fLSs --retry 5 --retry-delay 1 -o "/tmp/$NODE_ARCHIVE" "https://nodejs.org/dist/v${NODE_VERSION}/$NODE_ARCHIVE" && \
   printf '%s  %s\n' "$NODE_SHASUM" "/tmp/$NODE_ARCHIVE" | sha256sum --check && \
   tar -xf "/tmp/$NODE_ARCHIVE" -C /usr/local --strip-components=1 && \
   rm -f "/tmp/$NODE_ARCHIVE" && \

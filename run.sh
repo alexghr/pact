@@ -5,11 +5,12 @@ workspace="$(realpath "$1")"
 prompt="$2"
 model="${3:-gpt-5.6-sol}"
 effort="${4:-low}"
+variant="${5:-generic}"
 
 docker build \
-  --tag pact-codex \
-  --file ./ubuntu/Dockerfile \
-  ./ubuntu
+  --tag pact-codex:$variant \
+  --file ./container/Dockerfile.${variant} \
+  ./container
 
 docker run --rm \
   --volume "$workspace:/home/pact/workspace" \
@@ -17,7 +18,7 @@ docker run --rm \
   --volume "$HOME/.codex/auth.json:/opt/pact/host-auth.json:ro" \
   --env "HOST_UID=$(id -u)" \
   --env "HOST_GID=$(id -g)" \
-  pact-codex \
+  pact-codex:$variant \
   "$prompt" \
   "$model" \
   "$effort"
