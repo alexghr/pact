@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+mode="run"
+if [[ "${1:-}" == "--resume-last" ]]; then
+  mode="resume-last"
+  shift
+fi
+
 workspace="$(realpath "$1")"
 prompt="$2"
 model="${3:-gpt-5.6-sol}"
@@ -19,6 +25,7 @@ docker run --rm \
   --env "HOST_UID=$(id -u)" \
   --env "HOST_GID=$(id -g)" \
   pact-codex:$variant \
+  "$mode" \
   "$prompt" \
   "$model" \
   "$effort"
