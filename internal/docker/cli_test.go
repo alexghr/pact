@@ -8,13 +8,13 @@ import (
 func TestBuildArgs(t *testing.T) {
 	options := BuildOptions{
 		ContextDir: "./container",
-		Dockerfile: "container/Dockerfile.go",
+		Dockerfile: "container/go.Dockerfile",
 		Tag:        "pact-codex:go",
 	}
 	want := []string{
 		"build",
 		"--tag", "pact-codex:go",
-		"--file", "container/Dockerfile.go",
+		"--file", "container/go.Dockerfile",
 		"./container",
 	}
 

@@ -56,6 +56,9 @@ Treat these independently when reviewing a change:
    Docker-managed state are intentionally mounted. The workspace is writable by
    design, so its contents can be destroyed or exfiltrated by the agent. An
    explicitly supplied workspace path is considered user approval for that run.
+   The host launcher also owns a private SQLite database at
+   `~/.local/state/pact/pact.db`. It is never mounted into the container and
+   persists run metadata until the user removes it.
 2. **Credentials.** The host auth file is mounted read-only, but its contents
    are copied to the persistent state volume and are readable by the agent.
    Read-only mounting prevents modification, not disclosure or exfiltration.
@@ -70,10 +73,20 @@ Treat these independently when reviewing a change:
    selected workspace.
 6. **Supply chain.** Go and Node archives are versioned and checksum-verified.
    The Ubuntu base tag and default `@openai/codex@latest` installation are not
-   immutable. Package-manager and image build downloads remain trusted inputs.
+   immutable. The host launcher uses the pinned `go-sqlite3` module and requires
+   CGO and a C compiler when built. Package-manager and image build downloads
+   remain trusted inputs.
 7. **Host Docker invocation.** Values are passed as argv, not evaluated by a
    shell. Still validate variants, paths, mounts, and option placement because
    Docker itself interprets their syntax.
+8. **Run metadata.** Immediately before `docker run`, the host records the
+   canonical workspace path, model, reasoning effort, Dockerfile variant, and
+   start time. When Docker exits, it records the terminal status, available exit
+   code, and completion time. An unavailable exit code remains null. Prompts and
+   container output are not stored. A host crash or forced termination may leave
+   a row in the `running` state.
+9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
+   entrypoint. There is no parallel shell implementation.
 
 ## Target contract
 
@@ -132,8 +145,6 @@ Treat these independently when reviewing a change:
   a shell command string.
 - For every containment control, add a test that demonstrates both permitted
   behavior and a denied escape or misuse case where practical.
-- Keep `run.sh` equivalent to `cmd/pact` or remove it deliberately once the Go
-  CLI is the sole supported entrypoint.
 - In terms of actual coding style: minimize change sets such that humans can review commits
 - Only add validation code where it is needed, where an input could be wrong
 - Do not pollute the code with overflow/underflow checks unless this scenario could happen in day to day running
@@ -147,4 +158,3 @@ The minimum local check is:
 go test ./...
 go vet ./...
 ```
-

@@ -12,5 +12,10 @@ in
 
     languages.go = {
       enable = true;
+      package = pkgs-unstable.go;
+      lsp = {
+        enable = true;
+        package = pkgs-unstable.gopls;
+      };
     };
   }

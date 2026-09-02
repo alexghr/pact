@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 
 	"github.com/alexghr/pact/internal/docker"
+	"github.com/alexghr/pact/internal/state"
 )
 
 func main() {
@@ -47,7 +50,7 @@ func run() error {
 	var engine docker.Engine = docker.NewCLI(os.Stdin, os.Stdout, os.Stderr)
 	if err := engine.Build(ctx, docker.BuildOptions{
 		ContextDir: "./container",
-		Dockerfile: filepath.Join("container", "Dockerfile."+variant),
+		Dockerfile: filepath.Join("container", variant+".Dockerfile"),
 		Tag:        image,
 	}); err != nil {
 		return err
@@ -57,7 +60,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return engine.Run(ctx, docker.RunOptions{
+
+	store, err := state.Open(ctx, filepath.Join(home, ".local", "state", "pact", "pact.db"))
+	if err != nil {
+		return err
+	}
+
+	runID, err := store.StartRun(ctx, state.Run{
+		WorkspaceDir:      workspace,
+		Model:             model,
+		Effort:            effort,
+		DockerfileVariant: variant,
+	})
+	if err != nil {
+		return errors.Join(err, store.Close())
+	}
+
+	runErr := engine.Run(ctx, docker.RunOptions{
 		Image: image,
 		Args:  []string{mode, prompt, model, effort},
 		Env: []string{
@@ -70,6 +89,26 @@ func run() error {
 			filepath.Join(home, ".codex/auth.json") + ":/opt/pact/host-auth.json:ro",
 		},
 	})
+
+	status := "finished"
+	exitCode := 0
+	var storedExitCode *int = &exitCode
+	if runErr != nil {
+		status = "error"
+		storedExitCode = processExitCode(runErr)
+	}
+	completeErr := store.CompleteRun(ctx, runID, status, storedExitCode)
+	closeErr := store.Close()
+	return errors.Join(runErr, completeErr, closeErr)
+}
+
+func processExitCode(err error) *int {
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) {
+		return nil
+	}
+	code := exitError.ExitCode()
+	return &code
 }
 
 func argument(args []string, index int, fallback string) string {
