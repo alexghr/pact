@@ -90,11 +90,12 @@ Treat these independently when reviewing a change:
    runs, the host stores authoritative item and turn lifecycle events, raw token
    usage updates, warnings, errors, and model events; high-volume streaming
    deltas are not stored. After the turn ends, the host requests and stores the
-   full `thread/read` result when the connection remains usable. When Docker
-   exits, it records the terminal status, available exit code, and completion
-   time. An unavailable exit code remains null. A host crash or forced
-   termination may leave a row in the `running` state and only a partial event
-   record. The database contents persist until the user removes them.
+	full `thread/read` result when the connection remains usable. When Docker
+	exits, it records the terminal status, available exit code, and completion
+	time. `pact list` displays the first 50 characters of the last agent message
+	from the final stored turn. An unavailable exit code remains null. A host crash
+	or forced termination may leave a row in the `running` state and only a partial
+	event record. The database contents persist until the user removes them.
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
    entrypoint. There is no parallel shell implementation. The host communicates
    with the unprivileged Codex app server over Docker's stdin and stdout; setup

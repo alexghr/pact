@@ -121,16 +121,31 @@ func TestWriteRunList(t *testing.T) {
 		Model:             "gpt-5.6-sol",
 		Effort:            "low",
 		DockerfileVariant: "go",
+		LastAgentMessage:  "first line\nsecond line",
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	got := output.String()
-	for _, value := range []string{"ID", "STATUS", "7", "running", "/tmp/project", "gpt-5.6-sol", "low", "go"} {
+	for _, value := range []string{"ID", "STATUS", "LAST TURN", "7", "running", "/tmp/project", "gpt-5.6-sol", "low", "go", "first line second line"} {
 		if !strings.Contains(got, value) {
 			t.Fatalf("run list %q does not contain %q", got, value)
 		}
+	}
+}
+
+func TestListPreviewTruncatesUnicodeCharacters(t *testing.T) {
+	got := listPreview("a\n" + strings.Repeat("界", 50))
+	want := "a " + strings.Repeat("界", 48)
+	if got != want {
+		t.Fatalf("listPreview() = %q, want %q", got, want)
+	}
+}
+
+func TestListPreviewRemovesTerminalControls(t *testing.T) {
+	if got, want := listPreview("\x1b[31mhello\nworld"), "[31mhello world"; got != want {
+		t.Fatalf("listPreview() = %q, want %q", got, want)
 	}
 }
 

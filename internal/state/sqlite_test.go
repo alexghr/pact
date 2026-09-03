@@ -96,6 +96,25 @@ func TestListRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := store.StartCodexSession(ctx, finishedID, CodexSession{
+		ThreadID:    "thr_finished",
+		SessionID:   "session_finished",
+		UserAgent:   "codex/0.149.0",
+		StateVolume: "pact-codex-state",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.StoreCodexTranscript(ctx, finishedID, []byte(`{
+		"thread": {"turns": [
+			{"items": [{"type": "agentMessage", "text": "older answer"}]},
+			{"items": [
+				{"type": "agentMessage", "text": "commentary"},
+				{"type": "agentMessage", "text": "latest answer"}
+			]}
+		]}
+	}`)); err != nil {
+		t.Fatal(err)
+	}
 	exitCode := 0
 	if err := store.CompleteRun(ctx, finishedID, "finished", &exitCode); err != nil {
 		t.Fatal(err)
@@ -123,7 +142,8 @@ func TestListRuns(t *testing.T) {
 		got.Effort != "high" || got.DockerfileVariant != "go" {
 		t.Fatalf("newest run = %#v", got)
 	}
-	if got := runs[1]; got.ID != finishedID || got.Status != "finished" {
+	if got := runs[1]; got.ID != finishedID || got.Status != "finished" ||
+		got.LastAgentMessage != "latest answer" {
 		t.Fatalf("finished run = %#v", got)
 	}
 }

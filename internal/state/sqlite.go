@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,6 +63,7 @@ type RunRecord struct {
 	Effort            string
 	DockerfileVariant string
 	Status            string
+	LastAgentMessage  string
 }
 
 type CodexSession struct {
@@ -134,9 +136,11 @@ func (s *Store) StartRun(ctx context.Context, run Run) (int64, error) {
 
 func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_dir, model, effort, dockerfile_variant, status
-		FROM runs
-		ORDER BY id DESC`)
+		SELECT r.id, r.workspace_dir, r.model, r.effort,
+			r.dockerfile_variant, r.status, s.transcript_json
+		FROM runs AS r
+		LEFT JOIN codex_sessions AS s ON s.run_id = r.id
+		ORDER BY r.id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
 	}
@@ -145,6 +149,7 @@ func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
 	var runs []RunRecord
 	for rows.Next() {
 		var run RunRecord
+		var transcript sql.NullString
 		if err := rows.Scan(
 			&run.ID,
 			&run.WorkspaceDir,
@@ -152,8 +157,15 @@ func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
 			&run.Effort,
 			&run.DockerfileVariant,
 			&run.Status,
+			&transcript,
 		); err != nil {
 			return nil, fmt.Errorf("list runs: scan row: %w", err)
+		}
+		if transcript.Valid {
+			run.LastAgentMessage, err = lastAgentMessage(transcript.String)
+			if err != nil {
+				return nil, fmt.Errorf("list runs: decode transcript for run %d: %w", run.ID, err)
+			}
 		}
 		runs = append(runs, run)
 	}
@@ -161,6 +173,32 @@ func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
 		return nil, fmt.Errorf("list runs: read rows: %w", err)
 	}
 	return runs, nil
+}
+
+func lastAgentMessage(transcript string) (string, error) {
+	var result struct {
+		Thread struct {
+			Turns []struct {
+				Items []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"items"`
+			} `json:"turns"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal([]byte(transcript), &result); err != nil {
+		return "", err
+	}
+	if len(result.Thread.Turns) == 0 {
+		return "", nil
+	}
+	items := result.Thread.Turns[len(result.Thread.Turns)-1].Items
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Type == "agentMessage" && items[i].Text != "" {
+			return items[i].Text, nil
+		}
+	}
+	return "", nil
 }
 
 func (s *Store) CompleteRun(ctx context.Context, id int64, status string, exitCode *int) error {

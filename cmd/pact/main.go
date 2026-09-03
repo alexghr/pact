@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/docker"
@@ -330,21 +331,39 @@ func listRuns(ctx context.Context, output io.Writer) error {
 
 func writeRunList(output io.Writer, runs []state.RunRecord) error {
 	w := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tWORKSPACE\tMODEL\tEFFORT\tIMAGE")
+	fmt.Fprintln(w, "ID\tSTATUS\tWORKSPACE\tMODEL\tEFFORT\tIMAGE\tLAST TURN")
 	for _, run := range runs {
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			run.ID,
 			run.Status,
 			run.WorkspaceDir,
 			run.Model,
 			run.Effort,
 			run.DockerfileVariant,
+			listPreview(run.LastAgentMessage),
 		)
 	}
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("write run list: %w", err)
 	}
 	return nil
+}
+
+func listPreview(message string) string {
+	message = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		if !unicode.IsPrint(r) {
+			return -1
+		}
+		return r
+	}, message)
+	characters := []rune(message)
+	if len(characters) > 50 {
+		characters = characters[:50]
+	}
+	return string(characters)
 }
 
 func openStore(ctx context.Context) (*state.Store, string, error) {
