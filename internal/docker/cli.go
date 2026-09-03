@@ -1,11 +1,13 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 )
 
 type CLI struct {
@@ -25,6 +27,24 @@ func (c *CLI) Build(ctx context.Context, options BuildOptions) error {
 		return fmt.Errorf("docker build: %w", err)
 	}
 	return nil
+}
+
+func (c *CLI) ImageExists(ctx context.Context, image string) (bool, error) {
+	command := exec.CommandContext(ctx, "docker", imageInspectArgs(image)...)
+	var stderr bytes.Buffer
+	command.Stdout = io.Discard
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		if strings.Contains(strings.ToLower(stderr.String()), "no such image") {
+			return false, nil
+		}
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			return false, fmt.Errorf("docker image inspect: %w", err)
+		}
+		return false, fmt.Errorf("docker image inspect: %w: %s", err, detail)
+	}
+	return true, nil
 }
 
 func (c *CLI) Run(ctx context.Context, options RunOptions, handleIO IOHandler) error {
@@ -68,6 +88,10 @@ func buildArgs(options BuildOptions) []string {
 		"--file", options.Dockerfile,
 		options.ContextDir,
 	}
+}
+
+func imageInspectArgs(image string) []string {
+	return []string{"image", "inspect", image}
 }
 
 func runArgs(options RunOptions) []string {

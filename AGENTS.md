@@ -94,7 +94,12 @@ Treat these independently when reviewing a change:
    The Ubuntu base tag and default `@openai/codex@latest` installation are not
    immutable. The host launcher uses the pinned `go-sqlite3` module and requires
    CGO and a C compiler when built. Package-manager and image build downloads
-   remain trusted inputs.
+   remain trusted inputs. Before either CLI or web starts a container, the image
+   resolver hashes the selected profile's Dockerfile and build context, derives
+   an input-addressed tag, and checks the local Docker image store. It builds
+   only when that exact tag is missing. Concurrent requests for the same tag
+   share one preparation attempt. These images and tags are Docker-managed, are
+   not recorded in SQLite, and are not currently removed by Pact.
 7. **Host Docker invocation.** Values are passed as argv, not evaluated by a
    shell. Still validate variants, paths, mounts, and option placement because
    Docker itself interprets their syntax.
@@ -122,7 +127,8 @@ Treat these independently when reviewing a change:
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
    entrypoint. It parses CLI input and wires together the internal packages;
    `internal/harness` owns workspace policy, Docker execution, and the Codex
-   protocol lifecycle, while `internal/web` owns HTTP routing and templates.
+   protocol lifecycle, `internal/imagebuilder` owns tool-profile build inputs
+   and image preparation, and `internal/web` owns HTTP routing and templates.
    There is no parallel shell implementation. The host communicates with the
    unprivileged Codex app server over Docker's stdin and stdout; setup diagnostics
    are kept on stderr so they cannot corrupt the protocol stream.

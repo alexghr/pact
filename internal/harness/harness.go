@@ -14,6 +14,7 @@ import (
 
 	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/docker"
+	"github.com/alexghr/pact/internal/imagebuilder"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -39,15 +40,33 @@ func DefaultOptions() Options {
 type Runner struct {
 	store  *state.Store
 	home   string
-	engine docker.Engine
+	engine docker.ContainerRunner
+	images imagebuilder.Resolver
 	output io.Writer
 }
 
 func New(store *state.Store, home string, engine docker.Engine, output io.Writer) *Runner {
+	return NewWithImageResolver(
+		store,
+		home,
+		engine,
+		output,
+		imagebuilder.NewOnDemand(engine, imagebuilder.BuiltinProfiles()),
+	)
+}
+
+func NewWithImageResolver(
+	store *state.Store,
+	home string,
+	engine docker.ContainerRunner,
+	output io.Writer,
+	images imagebuilder.Resolver,
+) *Runner {
 	return &Runner{
 		store:  store,
 		home:   home,
 		engine: engine,
+		images: images,
 		output: output,
 	}
 }
@@ -73,8 +92,8 @@ func (r *Runner) Run(
 	if options.Prompt == "" {
 		return 0, errors.New("prompt must not be empty")
 	}
-	if options.Image != "generic" && options.Image != "go" {
-		return 0, fmt.Errorf("unsupported image %q (must be generic or go)", options.Image)
+	if r.images == nil || !r.images.HasProfile(options.Image) {
+		return 0, fmt.Errorf("unsupported image %q", options.Image)
 	}
 	workspace, err := canonicalWorkspace(options.Workspace)
 	if err != nil {
@@ -96,12 +115,8 @@ func (r *Runner) Run(
 		return 0, err
 	}
 
-	image := "pact-codex:" + options.Image
-	if err := r.engine.Build(ctx, docker.BuildOptions{
-		ContextDir: "./container",
-		Dockerfile: filepath.Join("container", options.Image+".Dockerfile"),
-		Tag:        image,
-	}); err != nil {
+	image, err := r.images.Resolve(ctx, options.Image)
+	if err != nil {
 		return 0, err
 	}
 

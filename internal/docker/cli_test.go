@@ -23,6 +23,14 @@ func TestBuildArgs(t *testing.T) {
 	}
 }
 
+func TestImageInspectArgs(t *testing.T) {
+	want := []string{"image", "inspect", "pact-codex:generic-content"}
+
+	if got := imageInspectArgs("pact-codex:generic-content"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("imageInspectArgs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestRunArgs(t *testing.T) {
 	options := RunOptions{
 		Image: "pact-codex:generic",
