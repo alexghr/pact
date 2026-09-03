@@ -1,0 +1,13 @@
+{{define "content" -}}
+<header>
+  <h1>New session</h1>
+  <p>The workspace will be a new temporary directory.</p>
+</header>
+<form method="post" action="/sessions">
+  <label>
+    Message
+    <textarea name="message" rows="8" cols="80" required autofocus></textarea>
+  </label>
+  <div><button type="submit">Start session</button></div>
+</form>
+{{- end}}

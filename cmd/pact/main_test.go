@@ -2,31 +2,13 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"flag"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/state"
 )
-
-func TestParseRunOptionsDefaults(t *testing.T) {
-	options, err := parseRunOptions([]string{"fix the tests"}, &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if options.workspace != "." || options.prompt != "fix the tests" ||
-		options.model != "gpt-5.6-sol" || options.effort != "low" || options.image != "generic" {
-		t.Fatalf("parseRunOptions() = %#v", options)
-	}
-}
 
 func TestParseRunOptionsFlags(t *testing.T) {
 	options, err := parseRunOptions([]string{
@@ -41,9 +23,9 @@ func TestParseRunOptionsFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if options.workspace != "/tmp/project" || options.prompt != "write tests" ||
-		options.model != "codex-model" || options.effort != "high" || options.image != "go" ||
-		options.resumeRun != 42 {
+	if options.Workspace != "/tmp/project" || options.Prompt != "write tests" ||
+		options.Model != "codex-model" || options.Effort != "high" || options.Image != "go" ||
+		options.resumeSession != 42 {
 		t.Fatalf("parseRunOptions() = %#v", options)
 	}
 }
@@ -74,68 +56,28 @@ func TestParseRunOptionsHelp(t *testing.T) {
 	}
 }
 
-func TestCanonicalWorkspace(t *testing.T) {
-	dir := t.TempDir()
-	link := filepath.Join(t.TempDir(), "workspace")
-	if err := os.Symlink(dir, link); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := canonicalWorkspace(link)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatalf("canonicalWorkspace() = %q, want %q", got, want)
-	}
-}
-
-func TestCanonicalWorkspaceRejectsFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(path, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := canonicalWorkspace(path); err == nil {
-		t.Fatal("canonicalWorkspace() accepted a file")
-	}
-}
-
-func TestCanonicalWorkspaceRejectsUnsafeMountPath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "unsafe:path")
-	if err := os.Mkdir(path, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := canonicalWorkspace(path); err == nil {
-		t.Fatal("canonicalWorkspace() accepted a path containing ':'")
-	}
-}
-
 func TestParseRunOptionsFromUsesStoredDefaults(t *testing.T) {
 	defaults := defaultRunOptions()
-	defaults.model = "original-model"
-	defaults.effort = "high"
-	defaults.image = "go"
-	defaults.resumeRun = 7
+	defaults.Model = "original-model"
+	defaults.Effort = "high"
+	defaults.Image = "go"
+	defaults.resumeSession = 7
 
 	options, err := parseRunOptionsFrom([]string{"--resume", "7", "continue"}, &bytes.Buffer{}, defaults)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.model != "original-model" || options.effort != "high" || options.image != "go" {
+	if options.Model != "original-model" || options.Effort != "high" || options.Image != "go" {
 		t.Fatalf("parseRunOptionsFrom() = %#v", options)
 	}
 }
 
 func TestParseRunOptionsFromOverwritesStoredDefaults(t *testing.T) {
 	defaults := defaultRunOptions()
-	defaults.model = "original-model"
-	defaults.effort = "high"
-	defaults.image = "go"
-	defaults.resumeRun = 7
+	defaults.Model = "original-model"
+	defaults.Effort = "high"
+	defaults.Image = "go"
+	defaults.resumeSession = 7
 
 	options, err := parseRunOptionsFrom([]string{
 		"--resume", "7",
@@ -147,18 +89,8 @@ func TestParseRunOptionsFromOverwritesStoredDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.model != "new-model" || options.effort != "medium" || options.image != "generic" {
+	if options.Model != "new-model" || options.Effort != "medium" || options.Image != "generic" {
 		t.Fatalf("parseRunOptionsFrom() = %#v", options)
-	}
-}
-
-func TestValidateResumeWorkspaceRejectsDifferentWorkspace(t *testing.T) {
-	err := validateResumeWorkspace("/tmp/other", &state.ResumeTarget{
-		RunID:        7,
-		WorkspaceDir: "/tmp/project",
-	})
-	if err == nil || !strings.Contains(err.Error(), "belongs to workspace") {
-		t.Fatalf("validateResumeWorkspace() error = %v", err)
 	}
 }
 
@@ -166,101 +98,21 @@ func TestWriteRunList(t *testing.T) {
 	var output bytes.Buffer
 	err := writeRunList(&output, []state.RunRecord{{
 		ID:                7,
+		PactSessionID:     3,
 		Status:            "running",
 		WorkspaceDir:      "/tmp/project",
 		Model:             "gpt-5.6-sol",
 		Effort:            "low",
 		DockerfileVariant: "go",
-		LastAgentMessage:  "first line\nsecond line",
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	got := output.String()
-	for _, value := range []string{"ID", "STATUS", "LAST TURN", "7", "running", "/tmp/project", "gpt-5.6-sol", "low", "go", "first line second line"} {
+	for _, value := range []string{"ID", "SESSION", "STATUS", "7", "3", "running", "/tmp/project", "gpt-5.6-sol", "low", "go"} {
 		if !strings.Contains(got, value) {
 			t.Fatalf("run list %q does not contain %q", got, value)
-		}
-	}
-}
-
-func TestListPreviewTruncatesUnicodeCharacters(t *testing.T) {
-	got := listPreview("a\n" + strings.Repeat("界", 50))
-	want := "a " + strings.Repeat("界", 48)
-	if got != want {
-		t.Fatalf("listPreview() = %q, want %q", got, want)
-	}
-}
-
-func TestListPreviewRemovesTerminalControls(t *testing.T) {
-	if got, want := listPreview("\x1b[31mhello\nworld"), "[31mhello world"; got != want {
-		t.Fatalf("listPreview() = %q, want %q", got, want)
-	}
-}
-
-func TestProcessExitCode(t *testing.T) {
-	err := exec.Command("sh", "-c", "exit 23").Run()
-	code := processExitCode(err)
-	if code == nil || *code != 23 {
-		t.Fatalf("processExitCode() = %v, want 23", code)
-	}
-}
-
-func TestProcessExitCodeUnknown(t *testing.T) {
-	if code := processExitCode(errors.New("docker unavailable")); code != nil {
-		t.Fatalf("processExitCode() = %d, want nil", *code)
-	}
-}
-
-func TestWaitForCodexTurnStreamsAgentMessage(t *testing.T) {
-	messages := strings.NewReader(
-		`{"method":"item/agentMessage/delta","params":{"threadId":"other","turnId":"other","delta":"ignore"}}` + "\n" +
-			`{"method":"item/agentMessage/delta","params":{"threadId":"thr_123","turnId":"turn_456","delta":"done"}}` + "\n" +
-			`{"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"other","items":[],"status":"completed"}}}` + "\n" +
-			`{"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"turn_456","items":[],"status":"completed"}}}` + "\n",
-	)
-	client := codex.NewClient(messages, io.Discard)
-	var output bytes.Buffer
-
-	if err := waitForCodexTurn(context.Background(), client, &output, "thr_123", "turn_456", nil); err != nil {
-		t.Fatal(err)
-	}
-	if output.String() != "done" {
-		t.Fatalf("agent output = %q, want done", output.String())
-	}
-}
-
-func TestWaitForCodexTurnReturnsFailure(t *testing.T) {
-	messages := strings.NewReader(
-		`{"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"turn_456","items":[],"status":"failed","error":{"message":"model unavailable"}}}}` + "\n",
-	)
-	client := codex.NewClient(messages, io.Discard)
-
-	err := waitForCodexTurn(context.Background(), client, io.Discard, "thr_123", "turn_456", nil)
-	if err == nil || !strings.Contains(err.Error(), "model unavailable") {
-		t.Fatalf("waitForCodexTurn() error = %v", err)
-	}
-}
-
-func TestShouldRecordCodexEvent(t *testing.T) {
-	for _, method := range []string{
-		"item/completed",
-		"turn/completed",
-		"thread/tokenUsage/updated",
-		"model/rerouted",
-	} {
-		if !shouldRecordCodexEvent(codex.Message{Method: method}) {
-			t.Errorf("shouldRecordCodexEvent(%q) = false", method)
-		}
-	}
-	for _, method := range []string{
-		"item/agentMessage/delta",
-		"item/commandExecution/outputDelta",
-		"turn/diff/updated",
-	} {
-		if shouldRecordCodexEvent(codex.Message{Method: method}) {
-			t.Errorf("shouldRecordCodexEvent(%q) = true", method)
 		}
 	}
 }

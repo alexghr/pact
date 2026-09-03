@@ -1,0 +1,32 @@
+{{define "base" -}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · Pact</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; font-family: sans-serif; }
+    a, a:visited { color: black; }
+    button, input, select, textarea { font: inherit; }
+    textarea { max-width: 100%; }
+    pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    main { width: min(100% - 2rem, 64rem); margin-inline: auto; padding-block: 2rem; display: grid; gap: 1.5rem; }
+    nav { display: flex; gap: 1rem; }
+    section, form, label, .stack { display: grid; gap: 0.75rem; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; }
+    dd { margin: 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <nav aria-label="Main navigation">
+      <a href="/sessions">Sessions</a>
+      <a href="/sessions/new">New session</a>
+    </nav>
+    {{template "content" .}}
+  </main>
+</body>
+</html>
+{{- end}}

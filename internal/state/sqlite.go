@@ -13,27 +13,37 @@ import (
 )
 
 const schema = `
-CREATE TABLE IF NOT EXISTS runs (
+CREATE TABLE IF NOT EXISTS pact_sessions (
 	id INTEGER PRIMARY KEY,
 	workspace_dir TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS codex_threads (
+	thread_id TEXT PRIMARY KEY,
+	pact_session_id INTEGER NOT NULL,
+	session_id TEXT NOT NULL,
+	state_volume TEXT NOT NULL UNIQUE,
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	FOREIGN KEY (pact_session_id) REFERENCES pact_sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+	id INTEGER PRIMARY KEY,
+	pact_session_id INTEGER NOT NULL,
+	thread_id TEXT,
+	user_agent TEXT,
 	model TEXT NOT NULL,
 	effort TEXT NOT NULL,
 	dockerfile_variant TEXT NOT NULL,
 	status TEXT NOT NULL CHECK (status IN ('running', 'finished', 'error')),
 	exit_code INTEGER,
-	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-	completed_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS codex_sessions (
-	run_id INTEGER PRIMARY KEY,
-	thread_id TEXT NOT NULL,
-	session_id TEXT NOT NULL,
-	user_agent TEXT NOT NULL,
-	state_volume TEXT NOT NULL,
 	transcript_json TEXT,
 	transcript_captured_at TEXT,
-	FOREIGN KEY (run_id) REFERENCES runs(id)
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	completed_at TEXT,
+	FOREIGN KEY (pact_session_id) REFERENCES pact_sessions(id),
+	FOREIGN KEY (thread_id) REFERENCES codex_threads(thread_id)
 );
 
 CREATE TABLE IF NOT EXISTS codex_events (
@@ -46,12 +56,54 @@ CREATE TABLE IF NOT EXISTS codex_events (
 	FOREIGN KEY (run_id) REFERENCES runs(id)
 );`
 
+const sessionSelect = `
+	WITH session_view AS (
+		SELECT session.id, session.workspace_dir, session.created_at,
+			(
+				SELECT MAX(latest_run.id)
+				FROM runs AS latest_run
+				WHERE latest_run.pact_session_id = session.id
+			) AS latest_run_id,
+			(
+				SELECT latest_thread.thread_id
+				FROM runs AS latest_thread
+				WHERE latest_thread.pact_session_id = session.id
+					AND latest_thread.thread_id IS NOT NULL
+				ORDER BY latest_thread.id DESC
+				LIMIT 1
+			) AS thread_id
+		FROM pact_sessions AS session
+	)
+	SELECT session.id, COALESCE(run.id, 0), session.workspace_dir,
+		COALESCE(run.model, ''), COALESCE(run.effort, ''),
+		COALESCE(run.dockerfile_variant, ''), COALESCE(run.status, 'pending'),
+		session.created_at,
+		COALESCE(run.completed_at, run.created_at, session.created_at),
+		COALESCE(session.thread_id, ''), COALESCE(thread.session_id, ''),
+		COALESCE((
+			SELECT transcript_run.transcript_json
+			FROM runs AS transcript_run
+			WHERE transcript_run.pact_session_id = session.id
+				AND transcript_run.thread_id = session.thread_id
+				AND transcript_run.transcript_json IS NOT NULL
+			ORDER BY transcript_run.id DESC
+			LIMIT 1
+		), '')
+	FROM session_view AS session
+	LEFT JOIN runs AS run ON run.id = session.latest_run_id
+	LEFT JOIN codex_threads AS thread ON thread.thread_id = session.thread_id`
+
+var (
+	ErrSessionNotFound      = errors.New("session not found")
+	ErrResumeTargetNotFound = errors.New("resume target not found")
+)
+
 type Store struct {
 	db *sql.DB
 }
 
 type Run struct {
-	WorkspaceDir      string
+	PactSessionID     int64
 	Model             string
 	Effort            string
 	DockerfileVariant string
@@ -59,22 +111,47 @@ type Run struct {
 
 type RunRecord struct {
 	ID                int64
+	PactSessionID     int64
 	WorkspaceDir      string
 	Model             string
 	Effort            string
 	DockerfileVariant string
 	Status            string
-	LastAgentMessage  string
 }
 
-type CodexSession struct {
+type CodexThread struct {
 	ThreadID    string
 	SessionID   string
 	UserAgent   string
 	StateVolume string
 }
 
+type SessionRecord struct {
+	ID                int64
+	LatestRunID       int64
+	WorkspaceDir      string
+	Model             string
+	Effort            string
+	DockerfileVariant string
+	Status            string
+	CreatedAt         string
+	UpdatedAt         string
+	ThreadID          string
+	CodexSessionID    string
+	LastAgentMessage  string
+	TranscriptJSON    json.RawMessage
+}
+
+type CodexEventRecord struct {
+	RunID      int64
+	Sequence   int64
+	Method     string
+	ParamsJSON json.RawMessage
+	ReceivedAt string
+}
+
 type ResumeTarget struct {
+	PactSessionID     int64
 	RunID             int64
 	WorkspaceDir      string
 	Model             string
@@ -101,7 +178,6 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA foreign_keys = ON",
 		schema,
-		"PRAGMA user_version = 2",
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			db.Close()
@@ -121,24 +197,47 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) CreateSession(ctx context.Context, workspace string) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO pact_sessions (workspace_dir)
+		VALUES (?)`, workspace)
+	if err != nil {
+		return 0, fmt.Errorf("create session: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("read session id: %w", err)
+	}
+	return id, nil
+}
+
 func (s *Store) StartRun(ctx context.Context, run Run) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO runs (
-			workspace_dir,
+			pact_session_id,
 			model,
 			effort,
 			dockerfile_variant,
 			status
-		) VALUES (?, ?, ?, ?, 'running')`,
-		run.WorkspaceDir,
+		)
+		SELECT ?, ?, ?, ?, 'running'
+		WHERE EXISTS (SELECT 1 FROM pact_sessions WHERE id = ?)`,
+		run.PactSessionID,
 		run.Model,
 		run.Effort,
 		run.DockerfileVariant,
+		run.PactSessionID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert run: %w", err)
 	}
-
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("insert run: read affected rows: %w", err)
+	}
+	if rows != 1 {
+		return 0, fmt.Errorf("insert run: session %d not found", run.PactSessionID)
+	}
 	id, err := result.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("read run id: %w", err)
@@ -148,11 +247,12 @@ func (s *Store) StartRun(ctx context.Context, run Run) (int64, error) {
 
 func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT r.id, r.workspace_dir, r.model, r.effort,
-			r.dockerfile_variant, r.status, s.transcript_json
-		FROM runs AS r
-		LEFT JOIN codex_sessions AS s ON s.run_id = r.id
-		ORDER BY r.id DESC`)
+		SELECT run.id, run.pact_session_id, session.workspace_dir,
+			run.model, run.effort, run.dockerfile_variant,
+			run.status
+		FROM runs AS run
+		JOIN pact_sessions AS session ON session.id = run.pact_session_id
+		ORDER BY run.id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
 	}
@@ -161,23 +261,16 @@ func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
 	var runs []RunRecord
 	for rows.Next() {
 		var run RunRecord
-		var transcript sql.NullString
 		if err := rows.Scan(
 			&run.ID,
+			&run.PactSessionID,
 			&run.WorkspaceDir,
 			&run.Model,
 			&run.Effort,
 			&run.DockerfileVariant,
 			&run.Status,
-			&transcript,
 		); err != nil {
 			return nil, fmt.Errorf("list runs: scan row: %w", err)
-		}
-		if transcript.Valid {
-			run.LastAgentMessage, err = lastAgentMessage(transcript.String)
-			if err != nil {
-				return nil, fmt.Errorf("list runs: decode transcript for run %d: %w", run.ID, err)
-			}
 		}
 		runs = append(runs, run)
 	}
@@ -187,14 +280,125 @@ func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
 	return runs, nil
 }
 
-func (s *Store) GetResumeTarget(ctx context.Context, runID int64) (ResumeTarget, error) {
+func (s *Store) ListSessions(ctx context.Context) ([]SessionRecord, error) {
+	rows, err := s.db.QueryContext(ctx, sessionSelect+" ORDER BY session.id DESC")
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []SessionRecord
+	for rows.Next() {
+		session, err := scanSession(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list sessions: %w", err)
+		}
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list sessions: read rows: %w", err)
+	}
+	return sessions, nil
+}
+
+func (s *Store) GetSession(ctx context.Context, sessionID int64) (SessionRecord, error) {
+	session, err := scanSession(s.db.QueryRowContext(ctx, sessionSelect+" WHERE session.id = ?", sessionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return SessionRecord{}, fmt.Errorf("get session %d: %w", sessionID, ErrSessionNotFound)
+	}
+	if err != nil {
+		return SessionRecord{}, fmt.Errorf("get session %d: %w", sessionID, err)
+	}
+	return session, nil
+}
+
+type scanner interface {
+	Scan(...any) error
+}
+
+func scanSession(row scanner) (SessionRecord, error) {
+	var session SessionRecord
+	var transcript string
+	if err := row.Scan(
+		&session.ID,
+		&session.LatestRunID,
+		&session.WorkspaceDir,
+		&session.Model,
+		&session.Effort,
+		&session.DockerfileVariant,
+		&session.Status,
+		&session.CreatedAt,
+		&session.UpdatedAt,
+		&session.ThreadID,
+		&session.CodexSessionID,
+		&transcript,
+	); err != nil {
+		return SessionRecord{}, err
+	}
+	if transcript != "" {
+		session.TranscriptJSON = json.RawMessage(transcript)
+		lastMessage, err := lastAgentMessage(transcript)
+		if err != nil {
+			return SessionRecord{}, fmt.Errorf("decode transcript: %w", err)
+		}
+		session.LastAgentMessage = lastMessage
+	}
+	return session, nil
+}
+
+func (s *Store) ListSessionEvents(ctx context.Context, sessionID int64) ([]CodexEventRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT event.run_id, event.sequence, event.method,
+			event.params_json, event.received_at
+		FROM codex_events AS event
+		JOIN runs AS run ON run.id = event.run_id
+		WHERE run.pact_session_id = ?
+		ORDER BY event.run_id, event.sequence`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list events for session %d: %w", sessionID, err)
+	}
+	defer rows.Close()
+
+	var events []CodexEventRecord
+	for rows.Next() {
+		var event CodexEventRecord
+		var params string
+		if err := rows.Scan(
+			&event.RunID,
+			&event.Sequence,
+			&event.Method,
+			&params,
+			&event.ReceivedAt,
+		); err != nil {
+			return nil, fmt.Errorf("list events for session %d: scan row: %w", sessionID, err)
+		}
+		event.ParamsJSON = json.RawMessage(params)
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list events for session %d: read rows: %w", sessionID, err)
+	}
+	return events, nil
+}
+
+func (s *Store) GetResumeTarget(ctx context.Context, sessionID int64) (ResumeTarget, error) {
 	var target ResumeTarget
 	err := s.db.QueryRowContext(ctx, `
-		SELECT r.id, r.workspace_dir, r.model, r.effort,
-			r.dockerfile_variant, s.thread_id, s.session_id, s.state_volume
-		FROM runs AS r
-		JOIN codex_sessions AS s ON s.run_id = r.id
-		WHERE r.id = ?`, runID).Scan(
+		SELECT session.id, run.id, session.workspace_dir,
+			run.model, run.effort, run.dockerfile_variant,
+			run.thread_id, thread.session_id, thread.state_volume
+		FROM pact_sessions AS session
+		JOIN runs AS run ON run.id = (
+			SELECT latest.id
+			FROM runs AS latest
+			WHERE latest.pact_session_id = session.id
+				AND latest.thread_id IS NOT NULL
+			ORDER BY latest.id DESC
+			LIMIT 1
+		)
+		JOIN codex_threads AS thread ON thread.thread_id = run.thread_id
+		WHERE session.id = ?`, sessionID).Scan(
+		&target.PactSessionID,
 		&target.RunID,
 		&target.WorkspaceDir,
 		&target.Model,
@@ -205,10 +409,10 @@ func (s *Store) GetResumeTarget(ctx context.Context, runID int64) (ResumeTarget,
 		&target.StateVolume,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ResumeTarget{}, fmt.Errorf("resume run %d: not found or no Codex session was recorded", runID)
+		return ResumeTarget{}, fmt.Errorf("resume session %d: %w", sessionID, ErrResumeTargetNotFound)
 	}
 	if err != nil {
-		return ResumeTarget{}, fmt.Errorf("resume run %d: %w", runID, err)
+		return ResumeTarget{}, fmt.Errorf("resume session %d: %w", sessionID, err)
 	}
 	return target, nil
 }
@@ -267,35 +471,71 @@ func (s *Store) CompleteRun(ctx context.Context, id int64, status string, exitCo
 	return nil
 }
 
-func (s *Store) StartCodexSession(ctx context.Context, runID int64, session CodexSession) error {
-	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO codex_sessions (
-			run_id,
-			thread_id,
-			session_id,
-			user_agent,
-			state_volume
-		)
-		SELECT ?, ?, ?, ?, ?
-		WHERE EXISTS (
-			SELECT 1 FROM runs WHERE id = ? AND status = 'running'
-		)`,
+func (s *Store) LinkCodexThread(ctx context.Context, runID int64, thread CodexThread) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("link Codex thread: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO codex_threads (thread_id, pact_session_id, session_id, state_volume)
+		SELECT ?, run.pact_session_id, ?, ?
+		FROM runs AS run
+		WHERE run.id = ? AND run.status = 'running'
+		ON CONFLICT(thread_id) DO NOTHING`,
+		thread.ThreadID,
+		thread.SessionID,
+		thread.StateVolume,
 		runID,
-		session.ThreadID,
-		session.SessionID,
-		session.UserAgent,
-		session.StateVolume,
+	); err != nil {
+		return fmt.Errorf("link Codex thread: insert thread: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE codex_threads
+		SET session_id = ?
+		WHERE thread_id = ? AND state_volume = ?
+			AND pact_session_id = (
+				SELECT pact_session_id FROM runs
+				WHERE id = ? AND status = 'running'
+			)`,
+		thread.SessionID,
+		thread.ThreadID,
+		thread.StateVolume,
 		runID,
 	)
 	if err != nil {
-		return fmt.Errorf("insert Codex session: %w", err)
+		return fmt.Errorf("link Codex thread: validate thread: %w", err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("insert Codex session: read affected rows: %w", err)
+		return fmt.Errorf("link Codex thread: read thread rows: %w", err)
 	}
 	if rows != 1 {
-		return fmt.Errorf("insert Codex session: running row %d not found", runID)
+		return fmt.Errorf("link Codex thread: thread belongs to another session or state volume")
+	}
+
+	result, err = tx.ExecContext(ctx, `
+		UPDATE runs
+		SET thread_id = ?, user_agent = ?
+		WHERE id = ? AND status = 'running'`,
+		thread.ThreadID,
+		thread.UserAgent,
+		runID,
+	)
+	if err != nil {
+		return fmt.Errorf("link Codex thread: update run: %w", err)
+	}
+	rows, err = result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("link Codex thread: read run rows: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("link Codex thread: running row %d not found", runID)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("link Codex thread: commit: %w", err)
 	}
 	return nil
 }
@@ -326,10 +566,10 @@ func (s *Store) AppendCodexEvent(
 
 func (s *Store) StoreCodexTranscript(ctx context.Context, runID int64, transcript []byte) error {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE codex_sessions
+		UPDATE runs
 		SET transcript_json = ?,
 			transcript_captured_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-		WHERE run_id = ?`,
+		WHERE id = ? AND thread_id IS NOT NULL`,
 		string(transcript),
 		runID,
 	)
@@ -341,7 +581,7 @@ func (s *Store) StoreCodexTranscript(ctx context.Context, runID int64, transcrip
 		return fmt.Errorf("store Codex transcript: read affected rows: %w", err)
 	}
 	if rows != 1 {
-		return fmt.Errorf("store Codex transcript: session for run %d not found", runID)
+		return fmt.Errorf("store Codex transcript: thread for run %d not found", runID)
 	}
 	return nil
 }

@@ -1,0 +1,69 @@
+{{define "content" -}}
+<header>
+  <h1>Session {{.Session.ID}}</h1>
+  <dl>
+    <dt>Status</dt><dd>{{.Session.Status}}</dd>
+    <dt>Latest run</dt><dd>{{if .Session.LatestRunID}}{{.Session.LatestRunID}}{{else}}None{{end}}</dd>
+    <dt>Codex thread</dt><dd>{{if .Session.ThreadID}}{{.Session.ThreadID}}{{else}}Not started{{end}}</dd>
+    <dt>Created</dt><dd><time datetime="{{.Session.CreatedAt}}">{{.Session.CreatedAt}}</time></dd>
+    <dt>Updated</dt><dd><time datetime="{{.Session.UpdatedAt}}">{{.Session.UpdatedAt}}</time></dd>
+    <dt>Workspace</dt><dd>{{.Session.WorkspaceDir}}</dd>
+    <dt>Model</dt><dd>{{.Session.Model}}</dd>
+    <dt>Effort</dt><dd>{{.Session.Effort}}</dd>
+  </dl>
+</header>
+
+<section>
+  <h2>Messages</h2>
+  {{if or .Messages .Pending}}
+  <div class="stack">
+    {{range .Messages}}
+    <article>
+      <h3>{{.Role}}</h3>
+      <pre>{{.Text}}</pre>
+    </article>
+    {{end}}
+    {{if .Pending}}
+    <article>
+      <h3>{{if .Failure}}You{{else}}You (pending){{end}}</h3>
+      <pre>{{.Pending}}</pre>
+    </article>
+    <article>
+      <h3>Agent</h3>
+      {{if .Failure}}
+      <p>Turn failed: {{.Failure}}</p>
+      {{else}}
+      <p>Thinking… Refresh this page later to see the response.</p>
+      {{end}}
+    </article>
+    {{end}}
+  </div>
+  {{else}}
+  <p>No completed messages yet. Refresh this page to check again.</p>
+  {{end}}
+</section>
+
+<form method="post" action="{{.SessionURL}}/messages">
+  <label>
+    Message
+    <textarea name="message" rows="6" cols="80" required></textarea>
+  </label>
+  <div><button type="submit">Send</button></div>
+</form>
+
+<section>
+  <h2>Events</h2>
+  {{if .Events}}
+  <div class="stack">
+    {{range .Events}}
+    <details>
+      <summary><time datetime="{{.ReceivedAt}}">{{.ReceivedAt}}</time> — {{.Method}}</summary>
+      <pre>{{.ParamsJSON}}</pre>
+    </details>
+    {{end}}
+  </div>
+  {{else}}
+  <p>No stored events.</p>
+  {{end}}
+</section>
+{{- end}}

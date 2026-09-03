@@ -2,27 +2,18 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"text/tabwriter"
-	"unicode"
 
-	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/docker"
+	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/state"
-)
-
-const (
-	containerWorkspace = "/home/pact/workspace"
-	codexStateVolume   = "pact-codex-state"
+	"github.com/alexghr/pact/internal/web"
 )
 
 func main() {
@@ -53,7 +44,12 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		return startRun(ctx, options, resumeTarget)
+		return startRun(ctx, options.Options, resumeTarget)
+	case "web":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: pact web")
+		}
+		return startWeb(ctx)
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stdout, usage())
 		return nil
@@ -63,31 +59,22 @@ func run() error {
 }
 
 type runOptions struct {
-	workspace string
-	prompt    string
-	model     string
-	effort    string
-	image     string
-	resumeRun int64
+	harness.Options
+	resumeSession int64
 }
 
 func defaultRunOptions() runOptions {
-	return runOptions{
-		workspace: ".",
-		model:     "gpt-5.6-sol",
-		effort:    "low",
-		image:     "generic",
-	}
+	return runOptions{Options: harness.DefaultOptions()}
 }
 
 func newRunFlagSet(options *runOptions, output io.Writer) *flag.FlagSet {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(output)
-	flags.StringVar(&options.workspace, "dir", options.workspace, "working directory to mount")
-	flags.StringVar(&options.model, "model", options.model, "Codex model")
-	flags.StringVar(&options.effort, "effort", options.effort, "model reasoning effort")
-	flags.StringVar(&options.image, "image", options.image, "container image profile (generic or go)")
-	flags.Int64Var(&options.resumeRun, "resume", options.resumeRun, "run ID whose Codex session to resume")
+	flags.StringVar(&options.Workspace, "dir", options.Workspace, "working directory to mount")
+	flags.StringVar(&options.Model, "model", options.Model, "Codex model")
+	flags.StringVar(&options.Effort, "effort", options.Effort, "model reasoning effort")
+	flags.StringVar(&options.Image, "image", options.Image, "container image profile (generic or go)")
+	flags.Int64Var(&options.resumeSession, "resume", options.resumeSession, "Pact session ID to resume")
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact run [options] PROMPT")
 		flags.PrintDefaults()
@@ -95,13 +82,13 @@ func newRunFlagSet(options *runOptions, output io.Writer) *flag.FlagSet {
 	return flags
 }
 
-func resumeRunID(args []string, output io.Writer) (int64, error) {
+func resumeSessionID(args []string, output io.Writer) (int64, error) {
 	options := defaultRunOptions()
 	flags := newRunFlagSet(&options, output)
 	if err := flags.Parse(args); err != nil {
 		return 0, err
 	}
-	return options.resumeRun, nil
+	return options.resumeSession, nil
 }
 
 func parseRunOptions(args []string, output io.Writer) (runOptions, error) {
@@ -116,22 +103,22 @@ func parseRunOptionsFrom(args []string, output io.Writer, options runOptions) (r
 	if flags.NArg() != 1 {
 		return runOptions{}, fmt.Errorf("usage: pact run [options] PROMPT")
 	}
-	options.prompt = flags.Arg(0)
-	if options.prompt == "" {
+	options.Prompt = flags.Arg(0)
+	if options.Prompt == "" {
 		return runOptions{}, fmt.Errorf("prompt must not be empty")
 	}
-	if options.image != "generic" && options.image != "go" {
-		return runOptions{}, fmt.Errorf("unsupported image %q (must be generic or go)", options.image)
+	if options.Image != "generic" && options.Image != "go" {
+		return runOptions{}, fmt.Errorf("unsupported image %q (must be generic or go)", options.Image)
 	}
 	return options, nil
 }
 
 func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (runOptions, *state.ResumeTarget, error) {
-	runID, err := resumeRunID(args, output)
+	sessionID, err := resumeSessionID(args, output)
 	if err != nil {
 		return runOptions{}, nil, err
 	}
-	if runID == 0 {
+	if sessionID == 0 {
 		options, err := parseRunOptions(args, output)
 		return options, nil, err
 	}
@@ -140,16 +127,16 @@ func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (ru
 	if err != nil {
 		return runOptions{}, nil, err
 	}
-	target, targetErr := store.GetResumeTarget(ctx, runID)
+	target, targetErr := store.GetResumeTarget(ctx, sessionID)
 	if err := errors.Join(targetErr, store.Close()); err != nil {
 		return runOptions{}, nil, err
 	}
 
 	defaults := defaultRunOptions()
-	defaults.model = target.Model
-	defaults.effort = target.Effort
-	defaults.image = target.DockerfileVariant
-	defaults.resumeRun = target.RunID
+	defaults.Model = target.Model
+	defaults.Effort = target.Effort
+	defaults.Image = target.DockerfileVariant
+	defaults.resumeSession = target.PactSessionID
 	options, err := parseRunOptionsFrom(args, output, defaults)
 	if err != nil {
 		return runOptions{}, nil, err
@@ -157,251 +144,37 @@ func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (ru
 	return options, &target, nil
 }
 
-func startRun(ctx context.Context, options runOptions, resumeTarget *state.ResumeTarget) error {
-	workspace, err := canonicalWorkspace(options.workspace)
-	if err != nil {
-		return err
-	}
-	if err := validateResumeWorkspace(workspace, resumeTarget); err != nil {
-		return err
-	}
-
+func startRun(ctx context.Context, options harness.Options, resumeTarget *state.ResumeTarget) error {
 	store, home, err := openStore(ctx)
 	if err != nil {
 		return err
 	}
-	stateVolume := codexStateVolume
-	if resumeTarget != nil {
-		stateVolume = resumeTarget.StateVolume
-	}
-
-	image := "pact-codex:" + options.image
-	var engine docker.Engine = docker.NewCLI(os.Stdin, os.Stdout, os.Stderr)
-	if err := engine.Build(ctx, docker.BuildOptions{
-		ContextDir: "./container",
-		Dockerfile: filepath.Join("container", options.image+".Dockerfile"),
-		Tag:        image,
-	}); err != nil {
-		return errors.Join(err, store.Close())
-	}
-
-	runID, err := store.StartRun(ctx, state.Run{
-		WorkspaceDir:      workspace,
-		Model:             options.model,
-		Effort:            options.effort,
-		DockerfileVariant: options.image,
-	})
-	if err != nil {
-		return errors.Join(err, store.Close())
-	}
-
-	runErr := engine.Run(ctx, docker.RunOptions{
-		Image: image,
-		Env: []string{
-			"HOST_UID=" + strconv.Itoa(os.Getuid()),
-			"HOST_GID=" + strconv.Itoa(os.Getgid()),
-		},
-		Volumes: []string{
-			workspace + ":" + containerWorkspace,
-			stateVolume + ":/home/pact/.codex",
-			filepath.Join(home, ".codex/auth.json") + ":/opt/pact/host-auth.json:ro",
-		},
-	}, func(ctx context.Context, reader io.Reader, writer io.Writer) error {
-		return runCodexTurn(ctx, reader, writer, os.Stdout, options, store, runID, stateVolume, resumeTarget)
-	})
-
-	status := "finished"
-	exitCode := 0
-	var storedExitCode *int = &exitCode
-	if runErr != nil {
-		status = "error"
-		storedExitCode = processExitCode(runErr)
-	}
-	completeErr := store.CompleteRun(ctx, runID, status, storedExitCode)
-	closeErr := store.Close()
-	return errors.Join(runErr, completeErr, closeErr)
-}
-
-func runCodexTurn(
-	ctx context.Context,
-	reader io.Reader,
-	writer io.Writer,
-	output io.Writer,
-	options runOptions,
-	store *state.Store,
-	runID int64,
-	stateVolume string,
-	resumeTarget *state.ResumeTarget,
-) error {
-	client := codex.NewClient(reader, writer)
-	initialized, err := client.Initialize(ctx, codex.ClientInfo{
-		Name:    "pact",
-		Title:   "Pact",
-		Version: "0.1.0",
-	})
-	if err != nil {
-		return err
-	}
-
-	var thread codex.Thread
+	runner := harness.New(store, home, docker.NewCLI(os.Stdin, os.Stdout, os.Stderr), os.Stdout)
+	var sessionID int64
 	if resumeTarget == nil {
-		thread, err = client.StartThread(ctx, codex.ThreadOptions{
-			Model:          options.model,
-			CWD:            containerWorkspace,
-			ApprovalPolicy: codex.ApprovalNever,
-			ServiceName:    "pact",
-		})
-	} else {
-		thread, err = client.ResumeThread(ctx, resumeTarget.ThreadID, codex.ThreadResumeOptions{
-			Model:          options.model,
-			CWD:            containerWorkspace,
-			ApprovalPolicy: codex.ApprovalNever,
-		})
-	}
-	if err != nil {
-		return err
-	}
-	if err := store.StartCodexSession(ctx, runID, state.CodexSession{
-		ThreadID:    thread.ID,
-		SessionID:   thread.SessionID,
-		UserAgent:   initialized.UserAgent,
-		StateVolume: stateVolume,
-	}); err != nil {
-		return err
-	}
-	turn, err := client.StartTurn(ctx, thread.ID, options.prompt, codex.TurnOptions{
-		Model:          options.model,
-		Effort:         options.effort,
-		CWD:            containerWorkspace,
-		ApprovalPolicy: codex.ApprovalNever,
-		SandboxPolicy: &codex.SandboxPolicy{
-			Type:          codex.SandboxExternal,
-			NetworkAccess: codex.NetworkEnabled,
-		},
-	})
-	if err != nil {
-		return err
-	}
-
-	waitErr := waitForCodexTurn(
-		ctx,
-		client,
-		output,
-		thread.ID,
-		turn.ID,
-		func(sequence int64, message codex.Message) error {
-			return store.AppendCodexEvent(ctx, runID, sequence, message.Method, message.Params)
-		},
-	)
-	transcript, readErr := client.ReadThread(ctx, thread.ID)
-	var storeErr error
-	if readErr == nil {
-		storeErr = store.StoreCodexTranscript(ctx, runID, transcript)
-	}
-	return errors.Join(waitErr, readErr, storeErr)
-}
-
-func validateResumeWorkspace(workspace string, target *state.ResumeTarget) error {
-	if target != nil && target.WorkspaceDir != workspace {
-		return fmt.Errorf(
-			"resume run %d belongs to workspace %q, not selected workspace %q",
-			target.RunID,
-			target.WorkspaceDir,
-			workspace,
-		)
-	}
-	return nil
-}
-
-func waitForCodexTurn(
-	ctx context.Context,
-	client *codex.Client,
-	output io.Writer,
-	threadID string,
-	turnID string,
-	recordEvent func(int64, codex.Message) error,
-) error {
-	var sequence int64
-	for {
-		message, err := client.NextMessage(ctx)
+		sessionID, options.Workspace, err = runner.CreateSession(ctx, options.Workspace)
 		if err != nil {
-			return err
+			return errors.Join(err, store.Close())
 		}
-		if recordEvent != nil && shouldRecordCodexEvent(message) {
-			sequence++
-			if err := recordEvent(sequence, message); err != nil {
-				return err
-			}
-		}
-		if message.Method != "" && len(message.ID) != 0 {
-			return fmt.Errorf("unsupported app-server request %q", message.Method)
-		}
-
-		switch message.Method {
-		case "item/agentMessage/delta":
-			var delta struct {
-				ThreadID string `json:"threadId"`
-				TurnID   string `json:"turnId"`
-				Delta    string `json:"delta"`
-			}
-			if err := json.Unmarshal(message.Params, &delta); err != nil {
-				return fmt.Errorf("decode %s: %w", message.Method, err)
-			}
-			if delta.ThreadID == threadID && delta.TurnID == turnID {
-				if _, err := io.WriteString(output, delta.Delta); err != nil {
-					return fmt.Errorf("write agent message: %w", err)
-				}
-			}
-
-		case "turn/completed":
-			var completed struct {
-				ThreadID string     `json:"threadId"`
-				Turn     codex.Turn `json:"turn"`
-			}
-			if err := json.Unmarshal(message.Params, &completed); err != nil {
-				return fmt.Errorf("decode %s: %w", message.Method, err)
-			}
-			if completed.ThreadID != threadID || completed.Turn.ID != turnID {
-				continue
-			}
-			switch completed.Turn.Status {
-			case "completed":
-				return nil
-			case "failed":
-				if completed.Turn.Error != nil && completed.Turn.Error.Message != "" {
-					return fmt.Errorf("codex turn failed: %s", completed.Turn.Error.Message)
-				}
-				return errors.New("codex turn failed")
-			case "interrupted":
-				return errors.New("codex turn interrupted")
-			default:
-				return fmt.Errorf("codex turn completed with unexpected status %q", completed.Turn.Status)
-			}
-		}
+	} else {
+		sessionID = resumeTarget.PactSessionID
 	}
+	fmt.Fprintf(os.Stderr, "Pact session %d\n", sessionID)
+	_, runErr := runner.Run(ctx, sessionID, options, resumeTarget)
+	return errors.Join(runErr, store.Close())
 }
 
-func shouldRecordCodexEvent(message codex.Message) bool {
-	if len(message.ID) != 0 && message.Method != "" {
-		return true
+func startWeb(ctx context.Context) error {
+	store, home, err := openStore(ctx)
+	if err != nil {
+		return err
 	}
-	if strings.HasPrefix(message.Method, "model/") {
-		return true
+	runner := harness.New(store, home, docker.NewCLI(nil, os.Stdout, os.Stderr), io.Discard)
+	server, err := web.New(ctx, store, runner)
+	if err != nil {
+		return errors.Join(err, store.Close())
 	}
-	switch message.Method {
-	case "thread/started",
-		"thread/tokenUsage/updated",
-		"turn/started",
-		"turn/completed",
-		"item/started",
-		"item/completed",
-		"warning",
-		"configWarning",
-		"error":
-		return true
-	default:
-		return false
-	}
+	return errors.Join(server.ListenAndServe(os.Stderr), store.Close())
 }
 
 func listRuns(ctx context.Context, output io.Writer) error {
@@ -419,39 +192,22 @@ func listRuns(ctx context.Context, output io.Writer) error {
 
 func writeRunList(output io.Writer, runs []state.RunRecord) error {
 	w := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tWORKSPACE\tMODEL\tEFFORT\tIMAGE\tLAST TURN")
+	fmt.Fprintln(w, "ID\tSESSION\tSTATUS\tWORKSPACE\tMODEL\tEFFORT\tIMAGE")
 	for _, run := range runs {
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%s\t%s\t%s\n",
 			run.ID,
+			run.PactSessionID,
 			run.Status,
 			run.WorkspaceDir,
 			run.Model,
 			run.Effort,
 			run.DockerfileVariant,
-			listPreview(run.LastAgentMessage),
 		)
 	}
 	if err := w.Flush(); err != nil {
 		return fmt.Errorf("write run list: %w", err)
 	}
 	return nil
-}
-
-func listPreview(message string) string {
-	message = strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) {
-			return ' '
-		}
-		if !unicode.IsPrint(r) {
-			return -1
-		}
-		return r
-	}, message)
-	characters := []rune(message)
-	if len(characters) > 50 {
-		characters = characters[:50]
-	}
-	return string(characters)
 }
 
 func openStore(ctx context.Context) (*state.Store, string, error) {
@@ -466,41 +222,10 @@ func openStore(ctx context.Context) (*state.Store, string, error) {
 	return store, home, nil
 }
 
-func canonicalWorkspace(path string) (string, error) {
-	workspace, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve working directory: %w", err)
-	}
-	workspace, err = filepath.EvalSymlinks(workspace)
-	if err != nil {
-		return "", fmt.Errorf("resolve working directory: %w", err)
-	}
-	info, err := os.Stat(workspace)
-	if err != nil {
-		return "", fmt.Errorf("inspect working directory: %w", err)
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("working directory %q is not a directory", workspace)
-	}
-	if strings.Contains(workspace, ":") {
-		return "", fmt.Errorf("working directory %q contains ':' and cannot be mounted safely", workspace)
-	}
-	return workspace, nil
-}
-
 func usageError() error {
 	return errors.New(usage())
 }
 
 func usage() string {
-	return "Usage:\n  pact list\n  pact run [options] PROMPT\n"
-}
-
-func processExitCode(err error) *int {
-	var exitError *exec.ExitError
-	if !errors.As(err, &exitError) {
-		return nil
-	}
-	code := exitError.ExitCode()
-	return &code
+	return "Usage:\n  pact list\n  pact run [options] PROMPT\n  pact web\n"
 }

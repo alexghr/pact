@@ -1,0 +1,23 @@
+{{define "content" -}}
+<header>
+  <h1>Sessions</h1>
+  <p>{{.SessionCount}} total</p>
+</header>
+{{if .Sessions}}
+<ol class="stack">
+  {{range .Sessions}}
+  <li>
+    <a href="{{.URL}}">Session {{.ID}}</a>
+    <dl>
+      <dt>Status</dt><dd>{{.Status}}</dd>
+      <dt>Updated</dt><dd><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></dd>
+      <dt>Model</dt><dd>{{.Model}}</dd>
+    </dl>
+    {{if .Preview}}<p>{{.Preview}}</p>{{end}}
+  </li>
+  {{end}}
+</ol>
+{{else}}
+<p>No sessions yet.</p>
+{{end}}
+{{- end}}
