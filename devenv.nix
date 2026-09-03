@@ -18,4 +18,26 @@ in
         package = pkgs-unstable.gopls;
       };
     };
+
+    scripts = {
+      pact_build.exec = ''
+        go build ./cmd/pact
+      '';
+
+      pact_test.exec = ''
+        go test ./...
+      '';
+
+      pact_lint.exec = ''
+        go vet ./...
+      '';
+
+      pact_ci.exec = ''
+        set -euo pipefail
+
+        pact_lint
+        pact_test
+        pact_build
+      '';
+    };
   }
