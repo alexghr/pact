@@ -65,8 +65,10 @@ Treat these independently when reviewing a change:
 3. **Network.** Docker's default network is currently enabled. Disabling Codex
    web search does not disable shell tools or arbitrary outbound traffic.
 4. **Container privilege.** Setup runs as container root; the agent runs as the
-   remapped unprivileged user. Docker's default capabilities, seccomp policy,
-   writable root filesystem, and resource behavior currently apply.
+   remapped unprivileged user. Codex is configured for `danger-full-access`
+   because the container is its external sandbox. Docker's default capabilities,
+   seccomp policy, writable root filesystem, and resource behavior currently
+   apply.
 5. **Persistent state.** A single named volume is shared by all invocations and
    workspaces. This violates the agent-isolation goal: one agent may observe
    another agent's state. Resume is not currently exposed by the launcher.
@@ -85,7 +87,9 @@ Treat these independently when reviewing a change:
    container output are not stored. A host crash or forced termination may leave
    a row in the `running` state.
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
-   entrypoint. There is no parallel shell implementation.
+   entrypoint. There is no parallel shell implementation. The host communicates
+   with the unprivileged Codex app server over Docker's stdin and stdout; setup
+   diagnostics are kept on stderr so they cannot corrupt the protocol stream.
 
 ## Target contract
 
@@ -140,8 +144,8 @@ Treat these independently when reviewing a change:
   controls as typed options and render them in `internal/docker`.
 - Keep project, profile, grant, and session identifiers stable and serializable
   so the CLI and a future UI use the same policy API and persisted configuration.
-- Keep prompts and model arguments as discrete argv entries; do not reconstruct
-  a shell command string.
+- Keep prompts and model arguments as discrete protocol fields or argv entries;
+  do not reconstruct a shell command string.
 - For every containment control, add a test that demonstrates both permitted
   behavior and a denied escape or misuse case where practical.
 - In terms of actual coding style: minimize change sets such that humans can review commits

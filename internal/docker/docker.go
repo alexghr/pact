@@ -1,10 +1,15 @@
 package docker
 
-import "context"
+import (
+	"context"
+	"io"
+)
+
+type IOHandler func(context.Context, io.Reader, io.Writer) error
 
 type Engine interface {
 	Build(context.Context, BuildOptions) error
-	Run(context.Context, RunOptions) error
+	Run(context.Context, RunOptions, IOHandler) error
 }
 
 type BuildOptions struct {
@@ -15,7 +20,6 @@ type BuildOptions struct {
 
 type RunOptions struct {
 	Image   string
-	Args    []string
 	Env     []string
 	Volumes []string
 }

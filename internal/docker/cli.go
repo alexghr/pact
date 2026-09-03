@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -26,8 +27,27 @@ func (c *CLI) Build(ctx context.Context, options BuildOptions) error {
 	return nil
 }
 
-func (c *CLI) Run(ctx context.Context, options RunOptions) error {
-	if err := c.run(ctx, runArgs(options)); err != nil {
+func (c *CLI) Run(ctx context.Context, options RunOptions, handleIO IOHandler) error {
+	command := exec.CommandContext(ctx, "docker", runArgs(options)...)
+	// we need stdout and stdin to communicate with the Codex app-server
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("docker run stdout: %w", err)
+	}
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("docker run stdin: %w", err)
+	}
+	// stderr can just be forwarded to the terminal
+	command.Stderr = c.stderr
+
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("docker run: %w", err)
+	}
+	handleErr := handleIO(ctx, stdout, stdin)
+	closeErr := stdin.Close()
+	waitErr := command.Wait()
+	if err := errors.Join(handleErr, closeErr, waitErr); err != nil {
 		return fmt.Errorf("docker run: %w", err)
 	}
 	return nil
@@ -51,7 +71,7 @@ func buildArgs(options BuildOptions) []string {
 }
 
 func runArgs(options RunOptions) []string {
-	args := []string{"run", "--rm"}
+	args := []string{"run", "--rm", "--interactive"}
 	for _, volume := range options.Volumes {
 		args = append(args, "--volume", volume)
 	}
@@ -59,5 +79,5 @@ func runArgs(options RunOptions) []string {
 		args = append(args, "--env", environment)
 	}
 	args = append(args, options.Image)
-	return append(args, options.Args...)
+	return args
 }

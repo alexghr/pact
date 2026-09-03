@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,9 +14,12 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/state"
 )
+
+const containerWorkspace = "/home/pact/workspace"
 
 func main() {
 	if err := run(); err != nil {
@@ -124,16 +128,17 @@ func startRun(ctx context.Context, options runOptions) error {
 
 	runErr := engine.Run(ctx, docker.RunOptions{
 		Image: image,
-		Args:  []string{options.prompt, options.model, options.effort},
 		Env: []string{
 			"HOST_UID=" + strconv.Itoa(os.Getuid()),
 			"HOST_GID=" + strconv.Itoa(os.Getgid()),
 		},
 		Volumes: []string{
-			workspace + ":/home/pact/workspace",
+			workspace + ":" + containerWorkspace,
 			"pact-codex-state:/home/pact/.codex",
 			filepath.Join(home, ".codex/auth.json") + ":/opt/pact/host-auth.json:ro",
 		},
+	}, func(ctx context.Context, reader io.Reader, writer io.Writer) error {
+		return runCodexTurn(ctx, reader, writer, os.Stdout, options)
 	})
 
 	status := "finished"
@@ -146,6 +151,108 @@ func startRun(ctx context.Context, options runOptions) error {
 	completeErr := store.CompleteRun(ctx, runID, status, storedExitCode)
 	closeErr := store.Close()
 	return errors.Join(runErr, completeErr, closeErr)
+}
+
+func runCodexTurn(
+	ctx context.Context,
+	reader io.Reader,
+	writer io.Writer,
+	output io.Writer,
+	options runOptions,
+) error {
+	client := codex.NewClient(reader, writer)
+	if _, err := client.Initialize(ctx, codex.ClientInfo{
+		Name:    "pact",
+		Title:   "Pact",
+		Version: "0.1.0",
+	}); err != nil {
+		return err
+	}
+
+	thread, err := client.StartThread(ctx, codex.ThreadOptions{
+		Model:          options.model,
+		CWD:            containerWorkspace,
+		ApprovalPolicy: codex.ApprovalNever,
+		ServiceName:    "pact",
+	})
+	if err != nil {
+		return err
+	}
+	turn, err := client.StartTurn(ctx, thread.ID, options.prompt, codex.TurnOptions{
+		Model:          options.model,
+		Effort:         options.effort,
+		CWD:            containerWorkspace,
+		ApprovalPolicy: codex.ApprovalNever,
+		SandboxPolicy: &codex.SandboxPolicy{
+			Type:          codex.SandboxExternal,
+			NetworkAccess: codex.NetworkEnabled,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	return waitForCodexTurn(ctx, client, output, thread.ID, turn.ID)
+}
+
+func waitForCodexTurn(
+	ctx context.Context,
+	client *codex.Client,
+	output io.Writer,
+	threadID string,
+	turnID string,
+) error {
+	for {
+		message, err := client.NextMessage(ctx)
+		if err != nil {
+			return err
+		}
+		if message.Method != "" && len(message.ID) != 0 {
+			return fmt.Errorf("unsupported app-server request %q", message.Method)
+		}
+
+		switch message.Method {
+		case "item/agentMessage/delta":
+			var delta struct {
+				ThreadID string `json:"threadId"`
+				TurnID   string `json:"turnId"`
+				Delta    string `json:"delta"`
+			}
+			if err := json.Unmarshal(message.Params, &delta); err != nil {
+				return fmt.Errorf("decode %s: %w", message.Method, err)
+			}
+			if delta.ThreadID == threadID && delta.TurnID == turnID {
+				if _, err := io.WriteString(output, delta.Delta); err != nil {
+					return fmt.Errorf("write agent message: %w", err)
+				}
+			}
+
+		case "turn/completed":
+			var completed struct {
+				ThreadID string     `json:"threadId"`
+				Turn     codex.Turn `json:"turn"`
+			}
+			if err := json.Unmarshal(message.Params, &completed); err != nil {
+				return fmt.Errorf("decode %s: %w", message.Method, err)
+			}
+			if completed.ThreadID != threadID || completed.Turn.ID != turnID {
+				continue
+			}
+			switch completed.Turn.Status {
+			case "completed":
+				return nil
+			case "failed":
+				if completed.Turn.Error != nil && completed.Turn.Error.Message != "" {
+					return fmt.Errorf("codex turn failed: %s", completed.Turn.Error.Message)
+				}
+				return errors.New("codex turn failed")
+			case "interrupted":
+				return errors.New("codex turn interrupted")
+			default:
+				return fmt.Errorf("codex turn completed with unexpected status %q", completed.Turn.Status)
+			}
+		}
+	}
 }
 
 func listRuns(ctx context.Context, output io.Writer) error {

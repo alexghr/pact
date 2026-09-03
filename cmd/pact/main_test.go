@@ -2,14 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -142,5 +145,35 @@ func TestProcessExitCode(t *testing.T) {
 func TestProcessExitCodeUnknown(t *testing.T) {
 	if code := processExitCode(errors.New("docker unavailable")); code != nil {
 		t.Fatalf("processExitCode() = %d, want nil", *code)
+	}
+}
+
+func TestWaitForCodexTurnStreamsAgentMessage(t *testing.T) {
+	messages := strings.NewReader(
+		`{"method":"item/agentMessage/delta","params":{"threadId":"other","turnId":"other","delta":"ignore"}}` + "\n" +
+			`{"method":"item/agentMessage/delta","params":{"threadId":"thr_123","turnId":"turn_456","delta":"done"}}` + "\n" +
+			`{"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"other","items":[],"status":"completed"}}}` + "\n" +
+			`{"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"turn_456","items":[],"status":"completed"}}}` + "\n",
+	)
+	client := codex.NewClient(messages, io.Discard)
+	var output bytes.Buffer
+
+	if err := waitForCodexTurn(context.Background(), client, &output, "thr_123", "turn_456"); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "done" {
+		t.Fatalf("agent output = %q, want done", output.String())
+	}
+}
+
+func TestWaitForCodexTurnReturnsFailure(t *testing.T) {
+	messages := strings.NewReader(
+		`{"method":"turn/completed","params":{"threadId":"thr_123","turn":{"id":"turn_456","items":[],"status":"failed","error":{"message":"model unavailable"}}}}` + "\n",
+	)
+	client := codex.NewClient(messages, io.Discard)
+
+	err := waitForCodexTurn(context.Background(), client, io.Discard, "thr_123", "turn_456")
+	if err == nil || !strings.Contains(err.Error(), "model unavailable") {
+		t.Fatalf("waitForCodexTurn() error = %v", err)
 	}
 }
