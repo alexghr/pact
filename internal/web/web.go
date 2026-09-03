@@ -19,6 +19,7 @@ import (
 
 	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/state"
+	"github.com/starfederation/datastar-go/datastar"
 )
 
 const (
@@ -57,6 +58,7 @@ type pageData struct {
 type pendingTurn struct {
 	Prompt  string
 	Failure string
+	Done    chan struct{}
 }
 
 type sessionListItem struct {
@@ -121,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions", s.startSession)
 	mux.HandleFunc("GET /sessions/{sessionID}", s.showSession)
 	mux.HandleFunc("POST /sessions/{sessionID}/messages", s.sendMessage)
+	mux.HandleFunc("GET /sessions/{sessionID}/chat", s.streamSessionChat)
 	return mux
 }
 
@@ -274,7 +277,79 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go s.runTurn(sessionID, options, target)
+	if r.Header.Get("Datastar-Request") ==  "true" {
+		http.Redirect(w, r, sessionURL(sessionID)+"/chat", http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, sessionURL(sessionID), http.StatusSeeOther)
+}
+
+func (s *Server) streamSessionChat(w http.ResponseWriter, r *http.Request) {
+	sessionID, ok := sessionIDFromRequest(w, r)
+	if !ok {
+		return
+	}
+
+	tmpl, err := s.templates.get("session")
+	if err != nil {
+		s.serverError(w, r, "load session template", err)
+		return
+	}
+
+	data, done, err := s.sessionChatData(r.Context(), sessionID)
+	if errors.Is(err, state.ErrSessionNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.serverError(w, r, "load session chat", err, "session_id", sessionID)
+		return
+	}
+
+	sse := datastar.NewSSE(w, r)
+	for {
+		var fragment bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&fragment, "session-chat", data); err != nil {
+			s.logger.ErrorContext(r.Context(), "render session chat", "session_id", sessionID, "error", err)
+			return
+		}
+		if err := sse.PatchElements(fragment.String()); err != nil {
+			s.logger.ErrorContext(r.Context(), "patch session chat", "session_id", sessionID, "error", err)
+			return
+		}
+		if done == nil || data.Failure != "" {
+			return
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-done:
+		}
+
+		data, done, err = s.sessionChatData(r.Context(), sessionID)
+		if err != nil {
+			s.logger.ErrorContext(r.Context(), "refresh session chat", "session_id", sessionID, "error", err)
+			return
+		}
+	}
+}
+
+func (s *Server) sessionChatData(ctx context.Context, sessionID int64) (pageData, <-chan struct{}, error) {
+	pending := s.pendingTurn(sessionID)
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return pageData{}, nil, err
+	}
+	messages, err := conversationMessages(session.TranscriptJSON)
+	if err != nil {
+		return pageData{}, nil, fmt.Errorf("decode session transcript: %w", err)
+	}
+	return pageData{
+		Messages: messages,
+		Pending:  pending.Prompt,
+		Failure:  pending.Failure,
+	}, pending.Done, nil
 }
 
 func (s *Server) beginTurn(sessionID int64, prompt string) bool {
@@ -283,20 +358,23 @@ func (s *Server) beginTurn(sessionID int64, prompt string) bool {
 	if pending, ok := s.pending[sessionID]; ok && pending.Failure == "" {
 		return false
 	}
-	s.pending[sessionID] = pendingTurn{Prompt: prompt}
+	s.pending[sessionID] = pendingTurn{Prompt: prompt, Done: make(chan struct{})}
 	return true
 }
 
 func (s *Server) finishTurn(sessionID int64, err error) {
 	s.pendingMu.Lock()
+	pending := s.pending[sessionID]
 	if err == nil {
 		delete(s.pending, sessionID)
 	} else {
-		pending := s.pending[sessionID]
 		pending.Failure = err.Error()
 		s.pending[sessionID] = pending
 	}
 	s.pendingMu.Unlock()
+	if pending.Done != nil {
+		close(pending.Done)
+	}
 }
 
 func (s *Server) pendingTurn(sessionID int64) pendingTurn {
@@ -434,4 +512,37 @@ func prettyJSON(raw json.RawMessage) string {
 		return string(raw)
 	}
 	return output.String()
+}
+
+func (s *Server) sessionPageData(ctx context.Context, sessionID int64) (pageData, error) {
+	session, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return pageData{}, err
+	}
+	events, err := s.store.ListSessionEvents(ctx, sessionID)
+	if err != nil {
+		return pageData{}, err
+	}
+	messages, err := conversationMessages(session.TranscriptJSON)
+	if err != nil {
+		return pageData{}, fmt.Errorf("decode session transcript: %w", err)
+	}
+	eventViews := make([]eventView, 0, len(events))
+	for _, event := range events {
+		eventViews = append(eventViews, eventView{
+			Method:     event.Method,
+			ParamsJSON: prettyJSON(event.ParamsJSON),
+			ReceivedAt: event.ReceivedAt,
+		})
+	}
+	pending := s.pendingTurn(sessionID)
+	return pageData{
+		Title:      fmt.Sprintf("Session %d", session.ID),
+		Session:    session,
+		Messages:   messages,
+		Events:     eventViews,
+		SessionURL: sessionURL(sessionID),
+		Pending:    pending.Prompt,
+		Failure:    pending.Failure,
+	}, nil
 }

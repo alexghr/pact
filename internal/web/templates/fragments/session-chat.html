@@ -1,0 +1,31 @@
+{{define "session-chat" -}}
+<section id="session-chat">
+  <h2>Messages</h2>
+  {{if or .Messages .Pending}}
+  <div class="stack">
+    {{range .Messages}}
+    <article>
+      <h3>{{.Role}}</h3>
+      <pre>{{.Text}}</pre>
+    </article>
+    {{end}}
+    {{if .Pending}}
+    <article>
+      <h3>{{if .Failure}}You{{else}}You (pending){{end}}</h3>
+      <pre>{{.Pending}}</pre>
+    </article>
+    <article>
+      <h3>Agent</h3>
+      {{if .Failure}}
+      <p>Turn failed: {{.Failure}}</p>
+      {{else}}
+      <p>Thinking…</p>
+      {{end}}
+    </article>
+    {{end}}
+  </div>
+  {{else}}
+  <p>No completed messages yet.</p>
+  {{end}}
+</section>
+{{- end}}

@@ -31,7 +31,7 @@ func staticFS() (fs.FS, error) {
 	}
 }
 
-//go:embed templates/*.html
+//go:embed templates
 var embeddedTemplates embed.FS
 
 func debugTemplates() (fs.FS, error) {
@@ -81,7 +81,7 @@ func (t *templates) get(name string) (*template.Template, error) {
 		}
 	}
 
-	tmpl, err := template.ParseFS(t.fs, "base.html", name+".html")
+	tmpl, err := template.ParseFS(t.fs, "base.html", name+".html", "fragments/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse template %s: %w", name, err)
 	}

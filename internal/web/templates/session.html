@@ -13,37 +13,12 @@
   </dl>
 </header>
 
-<section>
-  <h2>Messages</h2>
-  {{if or .Messages .Pending}}
-  <div class="stack">
-    {{range .Messages}}
-    <article>
-      <h3>{{.Role}}</h3>
-      <pre>{{.Text}}</pre>
-    </article>
-    {{end}}
-    {{if .Pending}}
-    <article>
-      <h3>{{if .Failure}}You{{else}}You (pending){{end}}</h3>
-      <pre>{{.Pending}}</pre>
-    </article>
-    <article>
-      <h3>Agent</h3>
-      {{if .Failure}}
-      <p>Turn failed: {{.Failure}}</p>
-      {{else}}
-      <p>Thinking… Refresh this page later to see the response.</p>
-      {{end}}
-    </article>
-    {{end}}
-  </div>
-  {{else}}
-  <p>No completed messages yet. Refresh this page to check again.</p>
-  {{end}}
-</section>
+<div{{if .Pending}} data-init="@get('{{.SessionURL}}/chat')"{{end}}>
+  {{template "session-chat" .}}
+</div>
 
-<form method="post" action="{{.SessionURL}}/messages">
+<form method="post" action="{{.SessionURL}}/messages"
+      data-on:submit="@post('{{.SessionURL}}/messages', {contentType: 'form'})">
   <label>
     Message
     <textarea name="message" rows="6" cols="80" required></textarea>
@@ -66,4 +41,5 @@
   <p>No stored events.</p>
   {{end}}
 </section>
+
 {{- end}}

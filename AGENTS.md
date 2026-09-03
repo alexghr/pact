@@ -135,12 +135,17 @@ Treat these independently when reviewing a change:
    `pact web` serves an unauthenticated HTML interface on the fixed loopback
    address `127.0.0.1:8080`. Starting a session first persists its integer Pact
    session ID, then redirects to that session's stable URL while the first turn
-   runs in the background. Follow-up messages are also acknowledged immediately.
-   Pending prompts are held in server memory; refreshing a completed session
-   reads its response from stored state. The web server writes a structured
-   startup notice plus HTTP server, request-operation, and background-run errors
-   to stderr; request logs include paths and session identifiers where
-   available, but not prompt bodies.
+   runs in the background. Follow-up message forms use Datastar when JavaScript
+   is available; the POST starts the turn and redirects the Datastar request to
+   the chat event stream, while ordinary form submission redirects to the full
+   session page. Pending prompts are held in server memory; refreshing a
+   completed session reads its response from stored state. When a page loads
+   during a pending turn, it opens a server-sent event stream that sends the
+   pending chat, waits for the background turn to finish without polling, then
+   sends the completed or failed chat and closes.
+   The web server writes a structured startup notice plus HTTP server,
+   request-operation, and background-run errors to stderr; request logs include
+   paths and session identifiers where available, but not prompt bodies.
 
 ## Target contract
 
@@ -205,6 +210,8 @@ Treat these independently when reviewing a change:
 - Do not add premature complexity
 - Do not pursue 100% test coverage. Add tests only when they provide stable,
   high-value confidence without creating disproportionate maintenance work.
+- In `internal/web`, test application behavior only. Do not add tests that assert
+  HTML output, template structure, or how templates are rendered.
 - Do not test constants or default-value constructors whose only behavior is
   returning those constants.
 - Do not add automated tests that execute Bash scripts. Keep shell changes small
