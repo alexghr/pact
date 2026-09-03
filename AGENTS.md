@@ -137,7 +137,10 @@ Treat these independently when reviewing a change:
    session ID, then redirects to that session's stable URL while the first turn
    runs in the background. Follow-up messages are also acknowledged immediately.
    Pending prompts are held in server memory; refreshing a completed session
-   reads its response from stored state.
+   reads its response from stored state. The web server writes a structured
+   startup notice plus HTTP server, request-operation, and background-run errors
+   to stderr; request logs include paths and session identifiers where
+   available, but not prompt bodies.
 
 ## Target contract
 

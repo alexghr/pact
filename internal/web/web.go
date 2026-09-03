@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,7 +36,7 @@ type Server struct {
 	runner    Runner
 	templates *templates
 	static    http.Handler
-	logOutput io.Writer
+	logger    *slog.Logger
 	pendingMu sync.Mutex
 	pending   map[int64]pendingTurn
 }
@@ -92,19 +93,20 @@ func New(ctx context.Context, store *state.Store, runner Runner) (*Server, error
 		runner:    runner,
 		templates: templates,
 		static:    http.FileServerFS(static),
-		logOutput: io.Discard,
+		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 		pending:   make(map[int64]pendingTurn),
 	}, nil
 }
 
 func (s *Server) ListenAndServe(logOutput io.Writer) error {
-	s.logOutput = logOutput
+	s.logger = slog.New(slog.NewTextHandler(logOutput, nil))
 	server := &http.Server{
 		Addr:              Address,
 		Handler:           s.Handler(),
+		ErrorLog:          slog.NewLogLogger(s.logger.Handler(), slog.LevelError),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	fmt.Fprintf(logOutput, "Pact web interface listening on http://%s\n", Address)
+	s.logger.Info("Pact web interface listening", "address", "http://"+Address)
 	return server.ListenAndServe()
 }
 
@@ -134,7 +136,7 @@ func cacheStaticFiles(next http.Handler) http.Handler {
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	sessions, err := s.store.ListSessions(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.serverError(w, r, "list sessions", err)
 		return
 	}
 	items := make([]sessionListItem, 0, len(sessions))
@@ -145,15 +147,15 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 			Preview:       listPreview(session.LastAgentMessage),
 		})
 	}
-	s.render(w, "sessions", pageData{
+	s.render(w, r, "sessions", pageData{
 		Title:        "Sessions",
 		Sessions:     items,
 		SessionCount: len(items),
 	})
 }
 
-func (s *Server) newSession(w http.ResponseWriter, _ *http.Request) {
-	s.render(w, "new-session", pageData{Title: "New session"})
+func (s *Server) newSession(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "new-session", pageData{Title: "New session"})
 }
 
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
@@ -161,15 +163,17 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	workspace, err := os.MkdirTemp("", "pact-session-")
+	workspaceDir, err := os.MkdirTemp("", "pact-session-")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("create session workspace: %v", err), http.StatusInternalServerError)
+		s.serverError(w, r, "create session workspace", err)
 		return
 	}
-	sessionID, workspace, err := s.runner.CreateSession(r.Context(), workspace)
+	sessionID, workspace, err := s.runner.CreateSession(r.Context(), workspaceDir)
 	if err != nil {
-		os.Remove(workspace)
-		http.Error(w, fmt.Sprintf("create session: %v", err), http.StatusInternalServerError)
+		if removeErr := os.Remove(workspaceDir); removeErr != nil {
+			s.logger.ErrorContext(r.Context(), "remove failed session workspace", requestLogAttrs(r, "error", removeErr)...)
+		}
+		s.serverError(w, r, "create session", err)
 		return
 	}
 	options := harness.DefaultOptions()
@@ -181,10 +185,10 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runTurn(sessionID int64, options harness.Options, target *state.ResumeTarget) {
-	_, err := s.runner.Run(s.ctx, sessionID, options, target)
+	runID, err := s.runner.Run(s.ctx, sessionID, options, target)
 	s.finishTurn(sessionID, err)
 	if err != nil {
-		fmt.Fprintf(s.logOutput, "run session %d: %v\n", sessionID, err)
+		s.logger.ErrorContext(s.ctx, "run session", "session_id", sessionID, "run_id", runID, "error", err)
 	}
 }
 
@@ -199,17 +203,17 @@ func (s *Server) showSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.serverError(w, r, "get session", err, "session_id", sessionID)
 		return
 	}
 	events, err := s.store.ListSessionEvents(r.Context(), sessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.serverError(w, r, "list session events", err, "session_id", sessionID)
 		return
 	}
 	messages, err := conversationMessages(session.TranscriptJSON)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("decode session transcript: %v", err), http.StatusInternalServerError)
+		s.serverError(w, r, "decode session transcript", err, "session_id", sessionID)
 		return
 	}
 	eventViews := make([]eventView, 0, len(events))
@@ -221,7 +225,7 @@ func (s *Server) showSession(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	pending := s.pendingTurn(sessionID)
-	s.render(w, "session", pageData{
+	s.render(w, r, "session", pageData{
 		Title:      fmt.Sprintf("Session %d", session.ID),
 		Session:    session,
 		Messages:   messages,
@@ -247,7 +251,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.serverError(w, r, "get session", err, "session_id", sessionID)
 		return
 	}
 	if !s.beginTurn(sessionID, prompt) {
@@ -266,7 +270,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		options.Image = resumeTarget.DockerfileVariant
 	} else if !errors.Is(err, state.ErrResumeTargetNotFound) {
 		s.finishTurn(sessionID, nil)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.serverError(w, r, "get resume target", err, "session_id", sessionID)
 		return
 	}
 	go s.runTurn(sessionID, options, target)
@@ -301,17 +305,27 @@ func (s *Server) pendingTurn(sessionID int64) pendingTurn {
 	return s.pending[sessionID]
 }
 
-func (s *Server) render(w http.ResponseWriter, name string, data pageData) {
+func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, data pageData) {
 	t, err := s.templates.get(name)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("render page: %v", err), http.StatusInternalServerError)
+		s.serverError(w, r, "load page template", err, "template", name)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := t.ExecuteTemplate(w, "base", data); err != nil {
-		http.Error(w, fmt.Sprintf("render page: %v", err), http.StatusInternalServerError)
+		s.logger.ErrorContext(r.Context(), "render page", requestLogAttrs(r, "template", name, "error", err)...)
 	}
+}
+
+func (s *Server) serverError(w http.ResponseWriter, r *http.Request, operation string, err error, attrs ...any) {
+	attrs = append(attrs, "error", err)
+	s.logger.ErrorContext(r.Context(), operation, requestLogAttrs(r, attrs...)...)
+	http.Error(w, fmt.Sprintf("%s: %v", operation, err), http.StatusInternalServerError)
+}
+
+func requestLogAttrs(r *http.Request, attrs ...any) []any {
+	return append([]any{"method", r.Method, "path", r.URL.Path}, attrs...)
 }
 
 func promptFromForm(w http.ResponseWriter, r *http.Request) (string, bool) {
