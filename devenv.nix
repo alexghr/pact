@@ -6,6 +6,7 @@ in
     packages = with pkgs;
       [
         git
+        sqlite
         pkgs-unstable.codex
         pkgs-unstable.gh
       ];
