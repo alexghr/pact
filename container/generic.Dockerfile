@@ -1,6 +1,7 @@
 FROM ubuntu:26.04
 
 ARG CODEX_VERSION=latest
+ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
@@ -14,10 +15,14 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
  
 ENV NODE_VERSION=26.8.1
-ENV NODE_SHASUM=b2b76660fa4ded4e0b2a41ee3c0c651cd52ea8170ead91ebac1e147ac3d55643
-ENV NODE_ARCHIVE=node-v${NODE_VERSION}-linux-x64.tar.gz
 
-RUN curl -fLSs --retry 5 --retry-delay 1 -o "/tmp/$NODE_ARCHIVE" "https://nodejs.org/dist/v${NODE_VERSION}/$NODE_ARCHIVE" && \
+RUN case "$TARGETARCH" in \
+    amd64) NODE_ARCH=x64; NODE_SHASUM=b2b76660fa4ded4e0b2a41ee3c0c651cd52ea8170ead91ebac1e147ac3d55643 ;; \
+    arm64) NODE_ARCH=arm64; NODE_SHASUM=d5f973ce975e4bd03e6c2038260f7e9201615aa8e1ee293c72f8dcc2a6d9fddb ;; \
+    *) echo "unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
+  esac && \
+  NODE_ARCHIVE="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.gz" && \
+  curl -fLSs --retry 5 --retry-delay 1 -o "/tmp/$NODE_ARCHIVE" "https://nodejs.org/dist/v${NODE_VERSION}/$NODE_ARCHIVE" && \
   printf '%s  %s\n' "$NODE_SHASUM" "/tmp/$NODE_ARCHIVE" | sha256sum --check && \
   tar -xf "/tmp/$NODE_ARCHIVE" -C /usr/local --strip-components=1 && \
   rm -f "/tmp/$NODE_ARCHIVE" && \
