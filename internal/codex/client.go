@@ -66,6 +66,12 @@ type ThreadOptions struct {
 	ServiceName    string         `json:"serviceName,omitempty"`
 }
 
+type ThreadResumeOptions struct {
+	Model          string         `json:"model,omitempty"`
+	CWD            string         `json:"cwd,omitempty"`
+	ApprovalPolicy ApprovalPolicy `json:"approvalPolicy,omitempty"`
+}
+
 type Thread struct {
 	ID        string `json:"id"`
 	SessionID string `json:"sessionId"`
@@ -137,6 +143,27 @@ func (c *Client) StartThread(ctx context.Context, options ThreadOptions) (Thread
 	}
 	if result.Thread.ID == "" {
 		return Thread{}, errors.New("thread/start: response did not include a thread id")
+	}
+	return result.Thread, nil
+}
+
+func (c *Client) ResumeThread(ctx context.Context, threadID string, options ThreadResumeOptions) (Thread, error) {
+	params := struct {
+		ThreadID string `json:"threadId"`
+		ThreadResumeOptions
+	}{ThreadID: threadID, ThreadResumeOptions: options}
+
+	var result struct {
+		Thread Thread `json:"thread"`
+	}
+	if err := c.call(ctx, "thread/resume", params, &result); err != nil {
+		return Thread{}, err
+	}
+	if result.Thread.ID == "" {
+		return Thread{}, errors.New("thread/resume: response did not include a thread id")
+	}
+	if result.Thread.ID != threadID {
+		return Thread{}, fmt.Errorf("thread/resume: response returned thread %q, want %q", result.Thread.ID, threadID)
 	}
 	return result.Thread, nil
 }

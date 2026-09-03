@@ -74,7 +74,11 @@ Treat these independently when reviewing a change:
    apply.
 5. **Persistent state.** A single named volume is shared by all invocations and
    workspaces. This violates the agent-isolation goal: one agent may observe
-   another agent's state. Resume is not currently exposed by the launcher.
+   another agent's state. `pact run --resume RUN_ID` mounts the state volume
+   recorded for that run and asks Codex to resume its thread. The launcher
+   requires the newly selected canonical workspace to exactly match the
+   workspace recorded for the resumed run. Model, reasoning effort, and image
+   profile are inherited unless the caller explicitly overrides them.
 6. **Supply chain.** Go and Node archives are versioned and checksum-verified.
    The Ubuntu base tag and default `@openai/codex@latest` installation are not
    immutable. The host launcher uses the pinned `go-sqlite3` module and requires
@@ -93,9 +97,12 @@ Treat these independently when reviewing a change:
 	full `thread/read` result when the connection remains usable. When Docker
 	exits, it records the terminal status, available exit code, and completion
 	time. `pact list` displays the first 50 characters of the last agent message
-	from the final stored turn. An unavailable exit code remains null. A host crash
-	or forced termination may leave a row in the `running` state and only a partial
-	event record. The database contents persist until the user removes them.
+	from the final stored turn. A resumed invocation is recorded as a new run with
+	its own session metadata, events, and transcript snapshot; the supplied run ID
+	selects the existing Codex thread rather than a historical snapshot of that
+	run. An unavailable exit code remains null. A host crash or forced termination
+	may leave a row in the `running` state and only a partial event record. The
+	database contents persist until the user removes them.
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
    entrypoint. There is no parallel shell implementation. The host communicates
    with the unprivileged Codex app server over Docker's stdin and stdout; setup

@@ -141,6 +141,64 @@ func TestClientReturnsRPCError(t *testing.T) {
 	}
 }
 
+func TestClientResumesThread(t *testing.T) {
+	clientReader, serverWriter := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	t.Cleanup(func() {
+		clientReader.Close()
+		clientWriter.Close()
+		serverReader.Close()
+		serverWriter.Close()
+	})
+
+	serverDone := make(chan error, 1)
+	go func() {
+		decoder := json.NewDecoder(serverReader)
+		encoder := json.NewEncoder(serverWriter)
+		request, err := readWireMessage(decoder, "thread/resume", 1)
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		var params struct {
+			ThreadID string `json:"threadId"`
+			ThreadResumeOptions
+		}
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			serverDone <- err
+			return
+		}
+		if params.ThreadID != "thr_123" || params.Model != "gpt-5.6-sol" ||
+			params.CWD != "/home/pact/workspace" || params.ApprovalPolicy != ApprovalNever {
+			serverDone <- fmt.Errorf("thread/resume params = %#v", params)
+			return
+		}
+		serverDone <- encoder.Encode(map[string]any{
+			"id": 1,
+			"result": map[string]any{
+				"thread": map[string]any{"id": "thr_123", "sessionId": "session_123"},
+			},
+		})
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	thread, err := NewClient(clientReader, clientWriter).ResumeThread(ctx, "thr_123", ThreadResumeOptions{
+		Model:          "gpt-5.6-sol",
+		CWD:            "/home/pact/workspace",
+		ApprovalPolicy: ApprovalNever,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thread.ID != "thr_123" || thread.SessionID != "session_123" {
+		t.Fatalf("ResumeThread() = %#v", thread)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMessageBufferWrapsAndRejectsOverflow(t *testing.T) {
 	var buffer messageBuffer
 	for i := range messageBufferSize {

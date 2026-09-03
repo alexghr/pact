@@ -226,6 +226,60 @@ func TestCodexSessionLifecycle(t *testing.T) {
 	}
 }
 
+func TestGetResumeTarget(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	runID, err := store.StartRun(ctx, Run{
+		WorkspaceDir:      "/tmp/project",
+		Model:             "model",
+		Effort:            "high",
+		DockerfileVariant: "go",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetResumeTarget(ctx, runID); err == nil {
+		t.Fatal("GetResumeTarget succeeded before a Codex session was recorded")
+	}
+
+	if err := store.StartCodexSession(ctx, runID, CodexSession{
+		ThreadID:    "thr_123",
+		SessionID:   "session_123",
+		UserAgent:   "codex/0.149.0",
+		StateVolume: "pact-codex-state",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	target, err := store.GetResumeTarget(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.RunID != runID || target.WorkspaceDir != "/tmp/project" ||
+		target.Model != "model" || target.Effort != "high" ||
+		target.DockerfileVariant != "go" || target.ThreadID != "thr_123" ||
+		target.SessionID != "session_123" || target.StateVolume != "pact-codex-state" {
+		t.Fatalf("GetResumeTarget() = %#v", target)
+	}
+}
+
+func TestGetResumeTargetRejectsUnknownRun(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	if _, err := store.GetResumeTarget(ctx, 99); err == nil {
+		t.Fatal("GetResumeTarget succeeded for an unknown run")
+	}
+}
+
 func TestCompleteRunRejectsInvalidTransition(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,6 +72,17 @@ type CodexSession struct {
 	SessionID   string
 	UserAgent   string
 	StateVolume string
+}
+
+type ResumeTarget struct {
+	RunID             int64
+	WorkspaceDir      string
+	Model             string
+	Effort            string
+	DockerfileVariant string
+	ThreadID          string
+	SessionID         string
+	StateVolume       string
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -173,6 +185,32 @@ func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
 		return nil, fmt.Errorf("list runs: read rows: %w", err)
 	}
 	return runs, nil
+}
+
+func (s *Store) GetResumeTarget(ctx context.Context, runID int64) (ResumeTarget, error) {
+	var target ResumeTarget
+	err := s.db.QueryRowContext(ctx, `
+		SELECT r.id, r.workspace_dir, r.model, r.effort,
+			r.dockerfile_variant, s.thread_id, s.session_id, s.state_volume
+		FROM runs AS r
+		JOIN codex_sessions AS s ON s.run_id = r.id
+		WHERE r.id = ?`, runID).Scan(
+		&target.RunID,
+		&target.WorkspaceDir,
+		&target.Model,
+		&target.Effort,
+		&target.DockerfileVariant,
+		&target.ThreadID,
+		&target.SessionID,
+		&target.StateVolume,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ResumeTarget{}, fmt.Errorf("resume run %d: not found or no Codex session was recorded", runID)
+	}
+	if err != nil {
+		return ResumeTarget{}, fmt.Errorf("resume run %d: %w", runID, err)
+	}
+	return target, nil
 }
 
 func lastAgentMessage(transcript string) (string, error) {

@@ -34,6 +34,7 @@ func TestParseRunOptionsFlags(t *testing.T) {
 		"--model", "codex-model",
 		"--effort", "high",
 		"--image", "go",
+		"--resume", "42",
 		"write tests",
 	}, &bytes.Buffer{})
 	if err != nil {
@@ -41,7 +42,8 @@ func TestParseRunOptionsFlags(t *testing.T) {
 	}
 
 	if options.workspace != "/tmp/project" || options.prompt != "write tests" ||
-		options.model != "codex-model" || options.effort != "high" || options.image != "go" {
+		options.model != "codex-model" || options.effort != "high" || options.image != "go" ||
+		options.resumeRun != 42 {
 		t.Fatalf("parseRunOptions() = %#v", options)
 	}
 }
@@ -109,6 +111,54 @@ func TestCanonicalWorkspaceRejectsUnsafeMountPath(t *testing.T) {
 	}
 	if _, err := canonicalWorkspace(path); err == nil {
 		t.Fatal("canonicalWorkspace() accepted a path containing ':'")
+	}
+}
+
+func TestParseRunOptionsFromUsesStoredDefaults(t *testing.T) {
+	defaults := defaultRunOptions()
+	defaults.model = "original-model"
+	defaults.effort = "high"
+	defaults.image = "go"
+	defaults.resumeRun = 7
+
+	options, err := parseRunOptionsFrom([]string{"--resume", "7", "continue"}, &bytes.Buffer{}, defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.model != "original-model" || options.effort != "high" || options.image != "go" {
+		t.Fatalf("parseRunOptionsFrom() = %#v", options)
+	}
+}
+
+func TestParseRunOptionsFromOverwritesStoredDefaults(t *testing.T) {
+	defaults := defaultRunOptions()
+	defaults.model = "original-model"
+	defaults.effort = "high"
+	defaults.image = "go"
+	defaults.resumeRun = 7
+
+	options, err := parseRunOptionsFrom([]string{
+		"--resume", "7",
+		"--model", "new-model",
+		"--effort", "medium",
+		"--image", "generic",
+		"continue",
+	}, &bytes.Buffer{}, defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.model != "new-model" || options.effort != "medium" || options.image != "generic" {
+		t.Fatalf("parseRunOptionsFrom() = %#v", options)
+	}
+}
+
+func TestValidateResumeWorkspaceRejectsDifferentWorkspace(t *testing.T) {
+	err := validateResumeWorkspace("/tmp/other", &state.ResumeTarget{
+		RunID:        7,
+		WorkspaceDir: "/tmp/project",
+	})
+	if err == nil || !strings.Contains(err.Error(), "belongs to workspace") {
+		t.Fatalf("validateResumeWorkspace() error = %v", err)
 	}
 }
 

@@ -49,11 +49,11 @@ func run() error {
 		}
 		return listRuns(ctx, os.Stdout)
 	case "run":
-		options, err := parseRunOptions(args[1:], os.Stderr)
+		options, resumeTarget, err := prepareRunOptions(ctx, args[1:], os.Stderr)
 		if err != nil {
 			return err
 		}
-		return startRun(ctx, options)
+		return startRun(ctx, options, resumeTarget)
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stdout, usage())
 		return nil
@@ -68,21 +68,48 @@ type runOptions struct {
 	model     string
 	effort    string
 	image     string
+	resumeRun int64
 }
 
-func parseRunOptions(args []string, output io.Writer) (runOptions, error) {
-	options := runOptions{}
+func defaultRunOptions() runOptions {
+	return runOptions{
+		workspace: ".",
+		model:     "gpt-5.6-sol",
+		effort:    "low",
+		image:     "generic",
+	}
+}
+
+func newRunFlagSet(options *runOptions, output io.Writer) *flag.FlagSet {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(output)
-	flags.StringVar(&options.workspace, "dir", ".", "working directory to mount")
-	flags.StringVar(&options.model, "model", "gpt-5.6-sol", "Codex model")
-	flags.StringVar(&options.effort, "effort", "low", "model reasoning effort")
-	flags.StringVar(&options.image, "image", "generic", "container image profile (generic or go)")
+	flags.StringVar(&options.workspace, "dir", options.workspace, "working directory to mount")
+	flags.StringVar(&options.model, "model", options.model, "Codex model")
+	flags.StringVar(&options.effort, "effort", options.effort, "model reasoning effort")
+	flags.StringVar(&options.image, "image", options.image, "container image profile (generic or go)")
+	flags.Int64Var(&options.resumeRun, "resume", options.resumeRun, "run ID whose Codex session to resume")
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact run [options] PROMPT")
 		flags.PrintDefaults()
 	}
+	return flags
+}
 
+func resumeRunID(args []string, output io.Writer) (int64, error) {
+	options := defaultRunOptions()
+	flags := newRunFlagSet(&options, output)
+	if err := flags.Parse(args); err != nil {
+		return 0, err
+	}
+	return options.resumeRun, nil
+}
+
+func parseRunOptions(args []string, output io.Writer) (runOptions, error) {
+	return parseRunOptionsFrom(args, output, defaultRunOptions())
+}
+
+func parseRunOptionsFrom(args []string, output io.Writer, options runOptions) (runOptions, error) {
+	flags := newRunFlagSet(&options, output)
 	if err := flags.Parse(args); err != nil {
 		return runOptions{}, err
 	}
@@ -99,10 +126,53 @@ func parseRunOptions(args []string, output io.Writer) (runOptions, error) {
 	return options, nil
 }
 
-func startRun(ctx context.Context, options runOptions) error {
+func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (runOptions, *state.ResumeTarget, error) {
+	runID, err := resumeRunID(args, output)
+	if err != nil {
+		return runOptions{}, nil, err
+	}
+	if runID == 0 {
+		options, err := parseRunOptions(args, output)
+		return options, nil, err
+	}
+
+	store, _, err := openStore(ctx)
+	if err != nil {
+		return runOptions{}, nil, err
+	}
+	target, targetErr := store.GetResumeTarget(ctx, runID)
+	if err := errors.Join(targetErr, store.Close()); err != nil {
+		return runOptions{}, nil, err
+	}
+
+	defaults := defaultRunOptions()
+	defaults.model = target.Model
+	defaults.effort = target.Effort
+	defaults.image = target.DockerfileVariant
+	defaults.resumeRun = target.RunID
+	options, err := parseRunOptionsFrom(args, output, defaults)
+	if err != nil {
+		return runOptions{}, nil, err
+	}
+	return options, &target, nil
+}
+
+func startRun(ctx context.Context, options runOptions, resumeTarget *state.ResumeTarget) error {
 	workspace, err := canonicalWorkspace(options.workspace)
 	if err != nil {
 		return err
+	}
+	if err := validateResumeWorkspace(workspace, resumeTarget); err != nil {
+		return err
+	}
+
+	store, home, err := openStore(ctx)
+	if err != nil {
+		return err
+	}
+	stateVolume := codexStateVolume
+	if resumeTarget != nil {
+		stateVolume = resumeTarget.StateVolume
 	}
 
 	image := "pact-codex:" + options.image
@@ -112,12 +182,7 @@ func startRun(ctx context.Context, options runOptions) error {
 		Dockerfile: filepath.Join("container", options.image+".Dockerfile"),
 		Tag:        image,
 	}); err != nil {
-		return err
-	}
-
-	store, home, err := openStore(ctx)
-	if err != nil {
-		return err
+		return errors.Join(err, store.Close())
 	}
 
 	runID, err := store.StartRun(ctx, state.Run{
@@ -138,11 +203,11 @@ func startRun(ctx context.Context, options runOptions) error {
 		},
 		Volumes: []string{
 			workspace + ":" + containerWorkspace,
-			codexStateVolume + ":/home/pact/.codex",
+			stateVolume + ":/home/pact/.codex",
 			filepath.Join(home, ".codex/auth.json") + ":/opt/pact/host-auth.json:ro",
 		},
 	}, func(ctx context.Context, reader io.Reader, writer io.Writer) error {
-		return runCodexTurn(ctx, reader, writer, os.Stdout, options, store, runID)
+		return runCodexTurn(ctx, reader, writer, os.Stdout, options, store, runID, stateVolume, resumeTarget)
 	})
 
 	status := "finished"
@@ -165,6 +230,8 @@ func runCodexTurn(
 	options runOptions,
 	store *state.Store,
 	runID int64,
+	stateVolume string,
+	resumeTarget *state.ResumeTarget,
 ) error {
 	client := codex.NewClient(reader, writer)
 	initialized, err := client.Initialize(ctx, codex.ClientInfo{
@@ -176,12 +243,21 @@ func runCodexTurn(
 		return err
 	}
 
-	thread, err := client.StartThread(ctx, codex.ThreadOptions{
-		Model:          options.model,
-		CWD:            containerWorkspace,
-		ApprovalPolicy: codex.ApprovalNever,
-		ServiceName:    "pact",
-	})
+	var thread codex.Thread
+	if resumeTarget == nil {
+		thread, err = client.StartThread(ctx, codex.ThreadOptions{
+			Model:          options.model,
+			CWD:            containerWorkspace,
+			ApprovalPolicy: codex.ApprovalNever,
+			ServiceName:    "pact",
+		})
+	} else {
+		thread, err = client.ResumeThread(ctx, resumeTarget.ThreadID, codex.ThreadResumeOptions{
+			Model:          options.model,
+			CWD:            containerWorkspace,
+			ApprovalPolicy: codex.ApprovalNever,
+		})
+	}
 	if err != nil {
 		return err
 	}
@@ -189,7 +265,7 @@ func runCodexTurn(
 		ThreadID:    thread.ID,
 		SessionID:   thread.SessionID,
 		UserAgent:   initialized.UserAgent,
-		StateVolume: codexStateVolume,
+		StateVolume: stateVolume,
 	}); err != nil {
 		return err
 	}
@@ -223,6 +299,18 @@ func runCodexTurn(
 		storeErr = store.StoreCodexTranscript(ctx, runID, transcript)
 	}
 	return errors.Join(waitErr, readErr, storeErr)
+}
+
+func validateResumeWorkspace(workspace string, target *state.ResumeTarget) error {
+	if target != nil && target.WorkspaceDir != workspace {
+		return fmt.Errorf(
+			"resume run %d belongs to workspace %q, not selected workspace %q",
+			target.RunID,
+			target.WorkspaceDir,
+			workspace,
+		)
+	}
+	return nil
 }
 
 func waitForCodexTurn(
