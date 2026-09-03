@@ -3,11 +3,9 @@ package web
 import (
 	"bytes"
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"net/url"
@@ -22,10 +20,9 @@ import (
 	"github.com/alexghr/pact/internal/state"
 )
 
-const Address = "127.0.0.1:8080"
-
-//go:embed templates/*.html
-var templateFiles embed.FS
+const (
+	Address = "127.0.0.1:8080"
+)
 
 type Runner interface {
 	CreateSession(context.Context, string) (int64, string, error)
@@ -36,7 +33,8 @@ type Server struct {
 	ctx       context.Context
 	store     *state.Store
 	runner    Runner
-	templates map[string]*template.Template
+	templates *templates
+	static    http.Handler
 	logOutput io.Writer
 	pendingMu sync.Mutex
 	pending   map[int64]pendingTurn
@@ -78,23 +76,22 @@ type eventView struct {
 }
 
 func New(ctx context.Context, store *state.Store, runner Runner) (*Server, error) {
-	templates := make(map[string]*template.Template)
-	for _, name := range []string{"sessions", "new-session", "session"} {
-		parsed, err := template.ParseFS(
-			templateFiles,
-			"templates/base.html",
-			"templates/"+name+".html",
-		)
-		if err != nil {
-			return nil, fmt.Errorf("parse %s template: %w", name, err)
-		}
-		templates[name] = parsed
+	static, err := staticFS()
+	if err != nil {
+		return nil, fmt.Errorf("open static files: %w", err)
 	}
+
+	templates, err := newTemplates()
+	if err != nil {
+		return nil, fmt.Errorf("open templates: %w", err)
+	}
+
 	return &Server{
 		ctx:       ctx,
 		store:     store,
 		runner:    runner,
 		templates: templates,
+		static:    http.FileServerFS(static),
 		logOutput: io.Discard,
 		pending:   make(map[int64]pendingTurn),
 	}, nil
@@ -116,12 +113,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/sessions", http.StatusSeeOther)
 	})
+	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheStaticFiles(s.static)))
 	mux.HandleFunc("GET /sessions", s.listSessions)
 	mux.HandleFunc("GET /sessions/new", s.newSession)
 	mux.HandleFunc("POST /sessions", s.startSession)
 	mux.HandleFunc("GET /sessions/{sessionID}", s.showSession)
 	mux.HandleFunc("POST /sessions/{sessionID}/messages", s.sendMessage)
 	return mux
+}
+
+func cacheStaticFiles(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if Debug != "true" {
+			w.Header().Set("Cache-Control", "public, max-age=600")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -295,8 +302,14 @@ func (s *Server) pendingTurn(sessionID int64) pendingTurn {
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {
+	t, err := s.templates.get(name)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("render page: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates[name].ExecuteTemplate(w, "base", data); err != nil {
+	if err := t.ExecuteTemplate(w, "base", data); err != nil {
 		http.Error(w, fmt.Sprintf("render page: %v", err), http.StatusInternalServerError)
 	}
 }

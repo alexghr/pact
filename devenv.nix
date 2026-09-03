@@ -21,6 +21,15 @@ in
     };
 
     scripts = {
+      pact_dev = {
+        exec = ''
+          watchexec -e go -r -n -- go run \
+            "-ldflags=-X github.com/alexghr/pact/internal/web.Debug=true" \
+            ./cmd/pact web
+        '';
+        packages = [pkgs.watchexec];
+      };
+
       pact_build.exec = ''
         go build ./cmd/pact
       '';
