@@ -158,7 +158,7 @@ func TestWaitForCodexTurnStreamsAgentMessage(t *testing.T) {
 	client := codex.NewClient(messages, io.Discard)
 	var output bytes.Buffer
 
-	if err := waitForCodexTurn(context.Background(), client, &output, "thr_123", "turn_456"); err != nil {
+	if err := waitForCodexTurn(context.Background(), client, &output, "thr_123", "turn_456", nil); err != nil {
 		t.Fatal(err)
 	}
 	if output.String() != "done" {
@@ -172,8 +172,30 @@ func TestWaitForCodexTurnReturnsFailure(t *testing.T) {
 	)
 	client := codex.NewClient(messages, io.Discard)
 
-	err := waitForCodexTurn(context.Background(), client, io.Discard, "thr_123", "turn_456")
+	err := waitForCodexTurn(context.Background(), client, io.Discard, "thr_123", "turn_456", nil)
 	if err == nil || !strings.Contains(err.Error(), "model unavailable") {
 		t.Fatalf("waitForCodexTurn() error = %v", err)
+	}
+}
+
+func TestShouldRecordCodexEvent(t *testing.T) {
+	for _, method := range []string{
+		"item/completed",
+		"turn/completed",
+		"thread/tokenUsage/updated",
+		"model/rerouted",
+	} {
+		if !shouldRecordCodexEvent(codex.Message{Method: method}) {
+			t.Errorf("shouldRecordCodexEvent(%q) = false", method)
+		}
+	}
+	for _, method := range []string{
+		"item/agentMessage/delta",
+		"item/commandExecution/outputDelta",
+		"turn/diff/updated",
+	} {
+		if shouldRecordCodexEvent(codex.Message{Method: method}) {
+			t.Errorf("shouldRecordCodexEvent(%q) = true", method)
+		}
 	}
 }

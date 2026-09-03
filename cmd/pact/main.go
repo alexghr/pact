@@ -19,7 +19,10 @@ import (
 	"github.com/alexghr/pact/internal/state"
 )
 
-const containerWorkspace = "/home/pact/workspace"
+const (
+	containerWorkspace = "/home/pact/workspace"
+	codexStateVolume   = "pact-codex-state"
+)
 
 func main() {
 	if err := run(); err != nil {
@@ -134,11 +137,11 @@ func startRun(ctx context.Context, options runOptions) error {
 		},
 		Volumes: []string{
 			workspace + ":" + containerWorkspace,
-			"pact-codex-state:/home/pact/.codex",
+			codexStateVolume + ":/home/pact/.codex",
 			filepath.Join(home, ".codex/auth.json") + ":/opt/pact/host-auth.json:ro",
 		},
 	}, func(ctx context.Context, reader io.Reader, writer io.Writer) error {
-		return runCodexTurn(ctx, reader, writer, os.Stdout, options)
+		return runCodexTurn(ctx, reader, writer, os.Stdout, options, store, runID)
 	})
 
 	status := "finished"
@@ -159,13 +162,16 @@ func runCodexTurn(
 	writer io.Writer,
 	output io.Writer,
 	options runOptions,
+	store *state.Store,
+	runID int64,
 ) error {
 	client := codex.NewClient(reader, writer)
-	if _, err := client.Initialize(ctx, codex.ClientInfo{
+	initialized, err := client.Initialize(ctx, codex.ClientInfo{
 		Name:    "pact",
 		Title:   "Pact",
 		Version: "0.1.0",
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
@@ -176,6 +182,14 @@ func runCodexTurn(
 		ServiceName:    "pact",
 	})
 	if err != nil {
+		return err
+	}
+	if err := store.StartCodexSession(ctx, runID, state.CodexSession{
+		ThreadID:    thread.ID,
+		SessionID:   thread.SessionID,
+		UserAgent:   initialized.UserAgent,
+		StateVolume: codexStateVolume,
+	}); err != nil {
 		return err
 	}
 	turn, err := client.StartTurn(ctx, thread.ID, options.prompt, codex.TurnOptions{
@@ -192,7 +206,22 @@ func runCodexTurn(
 		return err
 	}
 
-	return waitForCodexTurn(ctx, client, output, thread.ID, turn.ID)
+	waitErr := waitForCodexTurn(
+		ctx,
+		client,
+		output,
+		thread.ID,
+		turn.ID,
+		func(sequence int64, message codex.Message) error {
+			return store.AppendCodexEvent(ctx, runID, sequence, message.Method, message.Params)
+		},
+	)
+	transcript, readErr := client.ReadThread(ctx, thread.ID)
+	var storeErr error
+	if readErr == nil {
+		storeErr = store.StoreCodexTranscript(ctx, runID, transcript)
+	}
+	return errors.Join(waitErr, readErr, storeErr)
 }
 
 func waitForCodexTurn(
@@ -201,11 +230,19 @@ func waitForCodexTurn(
 	output io.Writer,
 	threadID string,
 	turnID string,
+	recordEvent func(int64, codex.Message) error,
 ) error {
+	var sequence int64
 	for {
 		message, err := client.NextMessage(ctx)
 		if err != nil {
 			return err
+		}
+		if recordEvent != nil && shouldRecordCodexEvent(message) {
+			sequence++
+			if err := recordEvent(sequence, message); err != nil {
+				return err
+			}
 		}
 		if message.Method != "" && len(message.ID) != 0 {
 			return fmt.Errorf("unsupported app-server request %q", message.Method)
@@ -252,6 +289,29 @@ func waitForCodexTurn(
 				return fmt.Errorf("codex turn completed with unexpected status %q", completed.Turn.Status)
 			}
 		}
+	}
+}
+
+func shouldRecordCodexEvent(message codex.Message) bool {
+	if len(message.ID) != 0 && message.Method != "" {
+		return true
+	}
+	if strings.HasPrefix(message.Method, "model/") {
+		return true
+	}
+	switch message.Method {
+	case "thread/started",
+		"thread/tokenUsage/updated",
+		"turn/started",
+		"turn/completed",
+		"item/started",
+		"item/completed",
+		"warning",
+		"configWarning",
+		"error":
+		return true
+	default:
+		return false
 	}
 }
 

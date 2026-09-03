@@ -170,6 +170,17 @@ func (c *Client) StartTurn(ctx context.Context, threadID, prompt string, options
 	return result.Turn, nil
 }
 
+func (c *Client) ReadThread(ctx context.Context, threadID string) (json.RawMessage, error) {
+	var result json.RawMessage
+	if err := c.call(ctx, "thread/read", struct {
+		ThreadID     string `json:"threadId"`
+		IncludeTurns bool   `json:"includeTurns"`
+	}{ThreadID: threadID, IncludeTurns: true}, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (c *Client) NextMessage(ctx context.Context) (Message, error) {
 	for {
 		c.stateMu.Lock()
@@ -195,16 +206,24 @@ func (c *Client) NextMessage(ctx context.Context) (Message, error) {
 func (c *Client) call(ctx context.Context, method string, params, result any) error {
 	response := make(chan Message, 1)
 
-	c.stateMu.Lock()
-	if c.readErr != nil {
-		err := c.readErr
-		c.stateMu.Unlock()
-		return fmt.Errorf("%s: %w", method, err)
+	// do this inside a function to deal with mutexes nicely
+	id, err := (func() (int64, error) {
+		c.stateMu.Lock()
+		defer c.stateMu.Unlock()
+
+		if c.readErr != nil {
+			err := c.readErr
+			return 0, fmt.Errorf("%s: %w", method, err)
+		}
+		id := c.nextID
+		c.nextID++
+		c.pending[id] = response
+		return id, nil
+	}())
+
+	if err != nil {
+		return err
 	}
-	id := c.nextID
-	c.nextID++
-	c.pending[id] = response
-	c.stateMu.Unlock()
 
 	request := struct {
 		Method string `json:"method"`

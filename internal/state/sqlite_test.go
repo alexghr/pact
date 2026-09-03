@@ -128,6 +128,84 @@ func TestListRuns(t *testing.T) {
 	}
 }
 
+func TestCodexSessionLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	runID, err := store.StartRun(ctx, Run{
+		WorkspaceDir:      "/tmp/project",
+		Model:             "model",
+		Effort:            "low",
+		DockerfileVariant: "generic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.StartCodexSession(ctx, runID, CodexSession{
+		ThreadID:    "thr_123",
+		SessionID:   "session_123",
+		UserAgent:   "codex/0.149.0",
+		StateVolume: "pact-codex-state",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendCodexEvent(ctx, runID, 1, "item/completed", []byte(`{"item":{"id":"item_1"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	transcript := []byte(`{"thread":{"id":"thr_123","turns":[]}}`)
+	if err := store.StoreCodexTranscript(ctx, runID, transcript); err != nil {
+		t.Fatal(err)
+	}
+
+	var threadID, sessionID, userAgent, stateVolume, transcriptJSON string
+	var capturedAt sql.NullString
+	err = store.db.QueryRow(`
+		SELECT thread_id, session_id, user_agent, state_volume,
+			transcript_json, transcript_captured_at
+		FROM codex_sessions WHERE run_id = ?`, runID).Scan(
+		&threadID,
+		&sessionID,
+		&userAgent,
+		&stateVolume,
+		&transcriptJSON,
+		&capturedAt,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if threadID != "thr_123" || sessionID != "session_123" ||
+		userAgent != "codex/0.149.0" || stateVolume != "pact-codex-state" ||
+		transcriptJSON != string(transcript) || !capturedAt.Valid {
+		t.Fatalf("stored Codex session = %q %q %q %q %q %v",
+			threadID, sessionID, userAgent, stateVolume, transcriptJSON, capturedAt)
+	}
+
+	var sequence int64
+	var method, paramsJSON, receivedAt string
+	err = store.db.QueryRow(`
+		SELECT sequence, method, params_json, received_at
+		FROM codex_events WHERE run_id = ?`, runID).Scan(
+		&sequence,
+		&method,
+		&paramsJSON,
+		&receivedAt,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sequence != 1 || method != "item/completed" ||
+		paramsJSON != `{"item":{"id":"item_1"}}` {
+		t.Fatalf("stored Codex event = %d %q %q", sequence, method, paramsJSON)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, receivedAt); err != nil {
+		t.Fatalf("received_at %q is not RFC3339: %v", receivedAt, err)
+	}
+}
+
 func TestCompleteRunRejectsInvalidTransition(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))

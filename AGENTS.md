@@ -58,7 +58,10 @@ Treat these independently when reviewing a change:
    explicitly supplied workspace path is considered user approval for that run.
    The host launcher also owns a private SQLite database at
    `~/.local/state/pact/pact.db`. It is never mounted into the container and
-   persists run metadata until the user removes it.
+   persists run metadata, selected Codex lifecycle events, and full transcript
+   snapshots until the user removes it. Transcripts may contain prompts,
+   reasoning, workspace paths and contents, commands and output, file diffs,
+   and tool arguments and results.
 2. **Credentials.** The host auth file is mounted read-only, but its contents
    are copied to the persistent state volume and are readable by the agent.
    Read-only mounting prevents modification, not disclosure or exfiltration.
@@ -82,10 +85,16 @@ Treat these independently when reviewing a change:
    Docker itself interprets their syntax.
 8. **Run metadata.** Immediately before `docker run`, the host records the
    canonical workspace path, model, reasoning effort, Dockerfile variant, and
-   start time. When Docker exits, it records the terminal status, available exit
-   code, and completion time. An unavailable exit code remains null. Prompts and
-   container output are not stored. A host crash or forced termination may leave
-   a row in the `running` state.
+   start time. Once Codex starts a thread, the host records its thread and
+   session ids, app-server user agent, and backing state volume. While the turn
+   runs, the host stores authoritative item and turn lifecycle events, raw token
+   usage updates, warnings, errors, and model events; high-volume streaming
+   deltas are not stored. After the turn ends, the host requests and stores the
+   full `thread/read` result when the connection remains usable. When Docker
+   exits, it records the terminal status, available exit code, and completion
+   time. An unavailable exit code remains null. A host crash or forced
+   termination may leave a row in the `running` state and only a partial event
+   record. The database contents persist until the user removes them.
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
    entrypoint. There is no parallel shell implementation. The host communicates
    with the unprivileged Codex app server over Docker's stdin and stdout; setup

@@ -79,6 +79,24 @@ func TestClientStartsPrompt(t *testing.T) {
 		t.Fatalf("NextMessage() method = %q, want thread/started", message.Method)
 	}
 
+	transcript, err := client.ReadThread(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var readResult struct {
+		Thread struct {
+			ID    string `json:"id"`
+			Turns []Turn `json:"turns"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(transcript, &readResult); err != nil {
+		t.Fatal(err)
+	}
+	if readResult.Thread.ID != "thr_123" || len(readResult.Thread.Turns) != 1 ||
+		readResult.Thread.Turns[0].ID != "turn_456" {
+		t.Fatalf("ReadThread() = %s", transcript)
+	}
+
 	if err := <-serverDone; err != nil {
 		t.Fatal(err)
 	}
@@ -251,10 +269,38 @@ func serveStartPrompt(reader io.Reader, writer io.Writer) error {
 		return fmt.Errorf("turn/start options = %#v", turnParams.TurnOptions)
 	}
 
-	return encoder.Encode(map[string]any{
+	if err := encoder.Encode(map[string]any{
 		"id": 3,
 		"result": map[string]any{
 			"turn": map[string]any{"id": "turn_456", "status": "inProgress"},
+		},
+	}); err != nil {
+		return err
+	}
+
+	readThread, err := readWireMessage(decoder, "thread/read", 4)
+	if err != nil {
+		return err
+	}
+	var readParams struct {
+		ThreadID     string `json:"threadId"`
+		IncludeTurns bool   `json:"includeTurns"`
+	}
+	if err := json.Unmarshal(readThread.Params, &readParams); err != nil {
+		return err
+	}
+	if readParams.ThreadID != "thr_123" || !readParams.IncludeTurns {
+		return fmt.Errorf("thread/read params = %#v", readParams)
+	}
+	return encoder.Encode(map[string]any{
+		"id": 4,
+		"result": map[string]any{
+			"thread": map[string]any{
+				"id": "thr_123",
+				"turns": []any{
+					map[string]any{"id": "turn_456", "items": []any{}, "status": "completed"},
+				},
+			},
 		},
 	})
 }
