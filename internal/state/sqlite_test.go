@@ -79,6 +79,55 @@ func TestRunErrorWithoutExitCode(t *testing.T) {
 	}
 }
 
+func TestListRuns(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	finishedID, err := store.StartRun(ctx, Run{
+		WorkspaceDir:      "/tmp/finished",
+		Model:             "model-a",
+		Effort:            "low",
+		DockerfileVariant: "generic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitCode := 0
+	if err := store.CompleteRun(ctx, finishedID, "finished", &exitCode); err != nil {
+		t.Fatal(err)
+	}
+
+	runningID, err := store.StartRun(ctx, Run{
+		WorkspaceDir:      "/tmp/running",
+		Model:             "model-b",
+		Effort:            "high",
+		DockerfileVariant: "go",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := store.ListRuns(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("ListRuns() returned %d runs, want 2", len(runs))
+	}
+	if got := runs[0]; got.ID != runningID || got.Status != "running" ||
+		got.WorkspaceDir != "/tmp/running" || got.Model != "model-b" ||
+		got.Effort != "high" || got.DockerfileVariant != "go" {
+		t.Fatalf("newest run = %#v", got)
+	}
+	if got := runs[1]; got.ID != finishedID || got.Status != "finished" {
+		t.Fatalf("finished run = %#v", got)
+	}
+}
+
 func TestCompleteRunRejectsInvalidTransition(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))

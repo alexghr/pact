@@ -68,9 +68,8 @@ Treat these independently when reviewing a change:
    remapped unprivileged user. Docker's default capabilities, seccomp policy,
    writable root filesystem, and resource behavior currently apply.
 5. **Persistent state.** A single named volume is shared by all invocations and
-   workspaces. This violates the agent-isolation goal: one agent may observe or
-   resume another agent's state, and `resume --last` need not refer to the
-   selected workspace.
+   workspaces. This violates the agent-isolation goal: one agent may observe
+   another agent's state. Resume is not currently exposed by the launcher.
 6. **Supply chain.** Go and Node archives are versioned and checksum-verified.
    The Ubuntu base tag and default `@openai/codex@latest` installation are not
    immutable. The host launcher uses the pinned `go-sqlite3` module and requires

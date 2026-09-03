@@ -26,7 +26,7 @@ func TestBuildArgs(t *testing.T) {
 func TestRunArgs(t *testing.T) {
 	options := RunOptions{
 		Image: "pact-codex:generic",
-		Args:  []string{"run", "write tests", "gpt-5.6-sol", "low"},
+		Args:  []string{"write tests", "gpt-5.6-sol", "low"},
 		Env:   []string{"HOST_UID=1000", "HOST_GID=1000"},
 		Volumes: []string{
 			"/tmp/project:/home/pact/workspace",
@@ -40,7 +40,7 @@ func TestRunArgs(t *testing.T) {
 		"--env", "HOST_UID=1000",
 		"--env", "HOST_GID=1000",
 		"pact-codex:generic",
-		"run", "write tests", "gpt-5.6-sol", "low",
+		"write tests", "gpt-5.6-sol", "low",
 	}
 
 	if got := runArgs(options); !reflect.DeepEqual(got, want) {

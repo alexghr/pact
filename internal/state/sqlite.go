@@ -34,6 +34,15 @@ type Run struct {
 	DockerfileVariant string
 }
 
+type RunRecord struct {
+	ID                int64
+	WorkspaceDir      string
+	Model             string
+	Effort            string
+	DockerfileVariant string
+	Status            string
+}
+
 func Open(ctx context.Context, path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
@@ -92,6 +101,37 @@ func (s *Store) StartRun(ctx context.Context, run Run) (int64, error) {
 		return 0, fmt.Errorf("read run id: %w", err)
 	}
 	return id, nil
+}
+
+func (s *Store) ListRuns(ctx context.Context) ([]RunRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, workspace_dir, model, effort, dockerfile_variant, status
+		FROM runs
+		ORDER BY id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []RunRecord
+	for rows.Next() {
+		var run RunRecord
+		if err := rows.Scan(
+			&run.ID,
+			&run.WorkspaceDir,
+			&run.Model,
+			&run.Effort,
+			&run.DockerfileVariant,
+			&run.Status,
+		); err != nil {
+			return nil, fmt.Errorf("list runs: scan row: %w", err)
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list runs: read rows: %w", err)
+	}
+	return runs, nil
 }
 
 func (s *Store) CompleteRun(ctx context.Context, id int64, status string, exitCode *int) error {

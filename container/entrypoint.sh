@@ -26,8 +26,8 @@ if [[ "$(id -u)" == "0" ]]; then
   exec gosu pact "$0" "$@"
 fi
 
-if [[ $# -ne 4 || -z "$1" || -z "$2" ]]; then
-  echo "Error: expected mode, prompt, model, and effort arguments." >&2
+if [[ $# -ne 3 || -z "$1" ]]; then
+  echo "Error: expected prompt, model, and effort arguments." >&2
   exit 1
 fi
 
@@ -37,10 +37,9 @@ if ! codex login status >/dev/null 2>&1; then
   exit 1
 fi
 
-mode="$1"
-prompt="$2"
-model="$3"
-effort="$4"
+prompt="$1"
+model="$2"
+effort="$3"
 
 args=(
    --skip-git-repo-check
@@ -52,18 +51,5 @@ args=(
    --cd /home/pact/workspace
 )
 
-case "$mode" in
-  run)
-    exec codex --ask-for-approval never \
-      exec "${args[@]}" "$prompt"
-    ;;
-  resume-last)
-    exec codex --ask-for-approval never \
-      exec "${args[@]}" resume --last "$prompt"
-    ;;
-  *)
-    echo "Error: unknown mode: $mode" >&2
-    exit 1
-    ;;
-esac
-
+exec codex --ask-for-approval never \
+  exec "${args[@]}" "$prompt"
