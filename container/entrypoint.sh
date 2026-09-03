@@ -10,15 +10,22 @@ if [[ "$(id -u)" == "0" ]]; then
 
   # remap container uid/gid to host to avoid sudo issues on the host
   if [[ -n "${HOST_UID:-}" ]]; then
-    groupmod --gid "${HOST_GID:-$HOST_UID}" pact
-    usermod --uid "$HOST_UID" --gid "${HOST_GID:-$HOST_UID}" pact
+    host_gid="${HOST_GID:-$HOST_UID}"
+    # the uid/gid might already be taken inside the container (ubuntu is uid 1000 inside the container)
+    if ! getent group "$host_gid" >/dev/null; then
+      groupmod --gid "$host_gid" pact
+    fi
+    # I'm taking on some risk here by having two users with the same uid
+    usermod --non-unique --uid "$HOST_UID" --gid "$host_gid" pact
   fi
 
+  pact_group="$(id --group --name pact)"
   mkdir -p "$CODEX_HOME"
-  chown -R pact:pact /home/pact
+  chown pact:"$pact_group" /home/pact
+  chown -R pact:"$pact_group" "$CODEX_HOME"
 
   if [[ -f /opt/pact/host-auth.json && ! -f "$CODEX_HOME/auth.json" ]]; then
-    install --owner=pact --group=pact --mode=0600 \
+    install --owner=pact --group="$pact_group" --mode=0600 \
       /opt/pact/host-auth.json "$CODEX_HOME/auth.json"
     echo "==> Initialized session authentication from the host Codex login."
   fi

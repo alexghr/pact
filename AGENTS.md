@@ -148,6 +148,10 @@ Treat these independently when reviewing a change:
 - Only add validation code where it is needed, where an input could be wrong
 - Do not pollute the code with overflow/underflow checks unless this scenario could happen in day to day running
 - Do not add premature complexity
+- Do not pursue 100% test coverage. Add tests only when they provide stable,
+  high-value confidence without creating disproportionate maintenance work.
+- Do not add automated tests that execute Bash scripts. Keep shell changes small
+  and verify them with syntax checks and focused manual smoke tests instead.
 
 ## Verification
 
