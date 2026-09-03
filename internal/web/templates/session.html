@@ -17,11 +17,20 @@
   {{template "session-chat" .}}
 </div>
 
-<form method="post" action="{{.SessionURL}}/messages"
+<form id="submit-message" method="post" action="{{.SessionURL}}/messages"
       data-on:submit="@post('{{.SessionURL}}/messages', {contentType: 'form'})">
   <label>
     Message
-    <textarea name="message" rows="6" cols="80" required></textarea>
+    <textarea
+      name="message"
+      rows="8"
+      required
+      data-bind:message
+      data-on:keydown="
+        evt.key === 'Enter' && (evt.metaKey || evt.ctrlKey)
+          ? (evt.preventDefault(), el.form.requestSubmit())
+          : void 0
+      "></textarea>
   </label>
   <div><button type="submit">Send</button></div>
 </form>

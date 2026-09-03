@@ -277,8 +277,8 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go s.runTurn(sessionID, options, target)
-	if r.Header.Get("Datastar-Request") ==  "true" {
-		http.Redirect(w, r, sessionURL(sessionID)+"/chat", http.StatusSeeOther)
+	if r.Header.Get("Datastar-Request") == "true" {
+		http.Redirect(w, r, sessionURL(sessionID)+"/chat?clear-message=true", http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, sessionURL(sessionID), http.StatusSeeOther)
@@ -307,6 +307,14 @@ func (s *Server) streamSessionChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sse := datastar.NewSSE(w, r)
+
+	if r.URL.Query().Has("clear-message") {
+		if err := sse.PatchSignals([]byte(`{message: ''}`)); err != nil {
+			s.logger.ErrorContext(r.Context(), "clear message", "session_id", sessionID, "error", err)
+			return
+		}
+	}
+
 	for {
 		var fragment bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&fragment, "session-chat", data); err != nil {
