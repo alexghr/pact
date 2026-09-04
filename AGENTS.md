@@ -170,9 +170,13 @@ Treat these independently when reviewing a change:
    `pact web` serves an unauthenticated HTML interface on the fixed loopback
    address `127.0.0.1:8080`. Starting a session first persists its integer Pact
    session ID, then redirects to that session's stable URL while the first turn
-   runs in the background. Session creation is a harness policy operation: an
-   explicitly supplied workspace is canonicalized and persisted, while an
-   omitted workspace creates a managed workspace under
+   runs in the background. The new-session form offers fixed model and reasoning
+   effort choices plus the built-in `generic` and `go` image profiles. It uses
+   the harness defaults when values are omitted. Model and effort values are
+   passed to Codex, whose rejection makes the background run fail; unsupported
+   image profiles are rejected before creating the session. Session creation is
+   a harness policy operation: an explicitly supplied workspace is canonicalized
+   and persisted, while an omitted workspace creates a managed workspace under
    `~/.local/state/pact/sessions` and optionally clones each selected
    repository's configured default branch synchronously into a named child
    directory. Clone failures remove the partial workspace and do not create a

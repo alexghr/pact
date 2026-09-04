@@ -13,11 +13,39 @@
     <small>Select none for an empty workspace.</small>
   </fieldset>
   {{end}}
+  {{if not .Repositories}}<p><a href="/repositories/new">Add a repository</a> to start from an existing project.</p>{{end}}
+  <label>
+    Image profile
+    <select name="image" required>
+      {{range .ImageProfiles}}<option value="{{.}}"{{if eq . $.DefaultImage}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>
+    Model
+    <select name="model" required>
+      {{range .Models}}<option value="{{.}}"{{if eq . $.DefaultModel}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>
+    Reasoning effort
+    <select name="effort" required>
+      {{range .EffortLevels}}<option value="{{.}}"{{if eq . $.DefaultEffort}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
   <label>
     Message
-    <textarea name="message" rows="8" cols="80" required autofocus></textarea>
+    <textarea
+      name="message"
+      rows="8"
+      cols="80"
+      required
+      autofocus
+      data-on:keydown="
+        evt.key === 'Enter' && (evt.metaKey || evt.ctrlKey)
+          ? (evt.preventDefault(), el.form.requestSubmit())
+          : void 0
+      "></textarea>
   </label>
-  {{if not .Repositories}}<p><a href="/repositories/new">Add a repository</a> to start from an existing project.</p>{{end}}
   <div><button type="submit">Start session</button></div>
 </form>
 {{- end}}

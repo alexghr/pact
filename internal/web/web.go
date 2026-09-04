@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"github.com/alexghr/pact/internal/harness"
+	"github.com/alexghr/pact/internal/imagebuilder"
 	"github.com/alexghr/pact/internal/state"
 	"github.com/starfederation/datastar-go/datastar"
 )
@@ -47,6 +48,12 @@ type pageData struct {
 	Title           string
 	Sessions        []sessionListItem
 	Repositories    []state.Repository
+	ImageProfiles   []string
+	DefaultImage    string
+	Models          []string
+	DefaultModel    string
+	EffortLevels    []string
+	DefaultEffort   string
 	Session         state.SessionRecord
 	Messages        []conversationMessage
 	Events          []eventView
@@ -201,9 +208,16 @@ func (s *Server) newSession(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "list repositories", err)
 		return
 	}
+	defaults := harness.DefaultOptions()
 	s.render(w, r, "new-session", pageData{
-		Title:        "New session",
-		Repositories: repositories,
+		Title:         "New session",
+		Repositories:  repositories,
+		ImageProfiles: builtinImageProfileNames(),
+		DefaultImage:  defaults.Image,
+		Models:        supportedModels(),
+		DefaultModel:  defaults.Model,
+		EffortLevels:  supportedEffortLevels(),
+		DefaultEffort: defaults.Effort,
 	})
 }
 
@@ -213,6 +227,10 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repositoryIDs, ok := repositoryIDsFromForm(w, r)
+	if !ok {
+		return
+	}
+	image, ok := imageFromForm(w, r)
 	if !ok {
 		return
 	}
@@ -230,6 +248,13 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 	options := harness.DefaultOptions()
 	options.Workspace = workspace
 	options.Prompt = prompt
+	options.Image = image
+	if model := strings.TrimSpace(r.FormValue("model")); model != "" {
+		options.Model = model
+	}
+	if effort := strings.TrimSpace(r.FormValue("effort")); effort != "" {
+		options.Effort = effort
+	}
 	s.beginTurn(sessionID, prompt)
 	go s.runTurn(sessionID, options, nil)
 	http.Redirect(w, r, sessionURL(sessionID), http.StatusSeeOther)
@@ -503,6 +528,37 @@ func repositoryIDsFromForm(w http.ResponseWriter, r *http.Request) ([]int64, boo
 		repositoryIDs = append(repositoryIDs, repositoryID)
 	}
 	return repositoryIDs, true
+}
+
+func imageFromForm(w http.ResponseWriter, r *http.Request) (string, bool) {
+	image := strings.TrimSpace(r.FormValue("image"))
+	if image == "" {
+		image = harness.DefaultOptions().Image
+	}
+	for _, profile := range imagebuilder.BuiltinProfiles() {
+		if image == profile.Name {
+			return image, true
+		}
+	}
+	http.Error(w, "unsupported image", http.StatusBadRequest)
+	return "", false
+}
+
+func builtinImageProfileNames() []string {
+	profiles := imagebuilder.BuiltinProfiles()
+	names := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		names = append(names, profile.Name)
+	}
+	return names
+}
+
+func supportedModels() []string {
+	return []string{"gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"}
+}
+
+func supportedEffortLevels() []string {
+	return []string{"none", "low", "medium", "high", "xhigh", "max"}
 }
 
 func sessionIDFromRequest(w http.ResponseWriter, r *http.Request) (int64, bool) {
