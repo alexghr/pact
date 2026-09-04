@@ -12,6 +12,10 @@
       <dt>Status</dt><dd>{{.Status}}</dd>
       <dt>Updated</dt><dd><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></dd>
       <dt>Model</dt><dd>{{.Model}}</dd>
+      {{if .Repositories}}
+      <dt>Repositories</dt>
+      <dd><ul>{{range .Repositories}}<li>{{.Repository.Name}} — {{.CheckoutDir}}</li>{{end}}</ul></dd>
+      {{end}}
     </dl>
     {{if .Preview}}<p>{{.Preview}}</p>{{end}}
   </li>

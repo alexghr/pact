@@ -64,6 +64,133 @@ func TestStartRunRequiresSession(t *testing.T) {
 	}
 }
 
+func TestRepositoryCatalogAndSessionAssociation(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	zetaID, err := store.CreateRepository(ctx, Repository{
+		URL:           "https://example.com/acme/zeta",
+		CloneURL:      "git@example.com:acme/zeta.git",
+		PushURL:       "git@example.com:fork/zeta.git",
+		Name:          "zeta",
+		DefaultBranch: "trunk",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaID, err := store.CreateRepository(ctx, Repository{
+		URL:           "https://example.com/acme/alpha",
+		CloneURL:      "https://example.com/acme/alpha.git",
+		PushURL:       "https://example.com/fork/alpha.git",
+		Name:          "Alpha",
+		DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repository, err := store.GetRepository(ctx, zetaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.ID != zetaID || repository.Name != "zeta" ||
+		repository.CloneURL != "git@example.com:acme/zeta.git" ||
+		repository.PushURL != "git@example.com:fork/zeta.git" ||
+		repository.DefaultBranch != "trunk" {
+		t.Fatalf("GetRepository() = %#v", repository)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, repository.CreatedAt); err != nil {
+		t.Fatalf("created_at %q is not RFC3339: %v", repository.CreatedAt, err)
+	}
+
+	repositories, err := store.ListRepositories(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repositories) != 2 || repositories[0].ID != alphaID || repositories[1].ID != zetaID {
+		t.Fatalf("ListRepositories() = %#v", repositories)
+	}
+
+	sessionID, err := store.CreateSessionForRepositories(ctx, "/tmp/projects", []SessionRepository{
+		{CheckoutDir: "zeta", Repository: Repository{ID: zetaID}},
+		{CheckoutDir: "alpha", Repository: Repository{ID: alphaID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.GetSession(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(session.Repositories) != 2 || session.Repositories[0].Repository.ID != zetaID ||
+		session.Repositories[0].CheckoutDir != "zeta" ||
+		session.Repositories[1].Repository.ID != alphaID || session.Repositories[1].CheckoutDir != "alpha" {
+		t.Fatalf("repository session = %#v", session)
+	}
+	linkedRepositories, err := store.ListSessionRepositories(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linkedRepositories) != 2 || linkedRepositories[0].ID == 0 || linkedRepositories[1].ID == 0 ||
+		linkedRepositories[0].ID == linkedRepositories[1].ID {
+		t.Fatalf("ListSessionRepositories() = %#v", linkedRepositories)
+	}
+	duplicateSessionID, err := store.CreateSessionForRepositories(ctx, "/tmp/two-copies", []SessionRepository{
+		{CheckoutDir: "zeta", Repository: Repository{ID: zetaID}},
+		{CheckoutDir: "zeta-2", Repository: Repository{ID: zetaID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateSession, err := store.GetSession(ctx, duplicateSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(duplicateSession.Repositories) != 2 || duplicateSession.Repositories[0].Repository.ID != zetaID ||
+		duplicateSession.Repositories[0].CheckoutDir != "zeta" ||
+		duplicateSession.Repositories[1].Repository.ID != zetaID ||
+		duplicateSession.Repositories[1].CheckoutDir != "zeta-2" {
+		t.Fatalf("duplicate repository checkouts = %#v", duplicateSession.Repositories)
+	}
+	sessions, err := store.ListSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 || len(sessions[0].Repositories) != 2 || len(sessions[1].Repositories) != 2 {
+		t.Fatalf("ListSessions() repositories = %#v", sessions)
+	}
+
+	emptySessionID := createTestSession(t, store, "/tmp/empty")
+	emptySession, err := store.GetSession(ctx, emptySessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emptySession.Repositories) != 0 {
+		t.Fatalf("empty session repository = %#v", emptySession)
+	}
+}
+
+func TestRepositoryLookupsRejectUnknownID(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	if _, err := store.GetRepository(ctx, 99); !errors.Is(err, ErrRepositoryNotFound) {
+		t.Fatalf("GetRepository() error = %v, want ErrRepositoryNotFound", err)
+	}
+	if _, err := store.CreateSessionForRepositories(ctx, "/tmp/project", []SessionRepository{
+		{CheckoutDir: "missing", Repository: Repository{ID: 99}},
+	}); !errors.Is(err, ErrRepositoryNotFound) {
+		t.Fatalf("CreateSessionForRepositories() error = %v, want ErrRepositoryNotFound", err)
+	}
+	sessions, err := store.ListSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("failed repository session created sessions = %#v", sessions)
+	}
+}
+
 func TestListRuns(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -281,8 +408,8 @@ func TestMigrateAppliesEachMigrationOnce(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 1 {
-		t.Fatalf("recorded migrations = %d, want 1", migrationCount)
+	if migrationCount != 2 {
+		t.Fatalf("recorded migrations = %d, want 2", migrationCount)
 	}
 	if session, err := store.GetSession(ctx, sessionID); err != nil || session.WorkspaceDir != "/tmp/project" {
 		t.Fatalf("session after second Migrate() = %#v, %v", session, err)
@@ -321,7 +448,8 @@ func TestMigrateAdoptsExistingSchema(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if session, err := store.GetSession(ctx, sessionID); err != nil || session.WorkspaceDir != "/tmp/existing" {
+	session, err := store.GetSession(ctx, sessionID)
+	if err != nil || session.WorkspaceDir != "/tmp/existing" {
 		t.Fatalf("existing session after Migrate() = %#v, %v", session, err)
 	}
 }

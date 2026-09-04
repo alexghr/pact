@@ -1,0 +1,31 @@
+{{define "content" -}}
+<header>
+  <h1>Add repository</h1>
+  <p>Pact uses the host Git configuration for the initial clone. Credentials are not mounted into agent containers.</p>
+</header>
+<form id="repository-form" method="post" action="/repositories">
+  <label>
+    Repository URL
+    <input name="url" type="url" required autofocus>
+  </label>
+  <label>
+    Clone URL
+    <input name="clone_url" autocomplete="off">
+  </label>
+  <label>
+    Push URL
+    <input name="push_url" autocomplete="off">
+    <small>Stored for future Git integration; Pact does not configure or use this URL yet.</small>
+  </label>
+  <label>
+    Name
+    <input name="name" autocomplete="off">
+  </label>
+  <label>
+    Default branch
+    <input name="default_branch" value="main" required autocomplete="off">
+  </label>
+  <div><button type="submit">Add repository</button></div>
+</form>
+<script type="module" src="/static/repository-form.js"></script>
+{{- end}}

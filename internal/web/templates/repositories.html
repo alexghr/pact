@@ -1,0 +1,23 @@
+{{define "content" -}}
+<header>
+  <h1>Repositories</h1>
+  <p>{{.RepositoryCount}} total</p>
+</header>
+{{if .Repositories}}
+<ol class="stack">
+  {{range .Repositories}}
+  <li>
+    <a href="{{.URL}}">{{.Name}}</a>
+    <dl>
+      <dt>Clone URL</dt><dd>{{.CloneURL}}</dd>
+      <dt>Push URL</dt><dd>{{.PushURL}}</dd>
+      <dt>Default branch</dt><dd>{{.DefaultBranch}}</dd>
+      <dt>Added</dt><dd><time datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></dd>
+    </dl>
+  </li>
+  {{end}}
+</ol>
+{{else}}
+<p>No repositories yet.</p>
+{{end}}
+{{- end}}

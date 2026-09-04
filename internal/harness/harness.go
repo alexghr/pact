@@ -28,6 +28,11 @@ type Options struct {
 	Image     string
 }
 
+type SessionOptions struct {
+	Workspace     string
+	RepositoryIDs []int64
+}
+
 func DefaultOptions() Options {
 	return Options{
 		Workspace: ".",
@@ -38,17 +43,20 @@ func DefaultOptions() Options {
 }
 
 type Runner struct {
-	store  *state.Store
-	home   string
-	engine docker.ContainerRunner
-	images imagebuilder.Resolver
-	output io.Writer
+	store       *state.Store
+	authFile    string
+	storageRoot string
+	engine      docker.ContainerRunner
+	images      imagebuilder.Resolver
+	checkout    repositoryCheckout
+	output      io.Writer
 }
 
-func New(store *state.Store, home string, engine docker.Engine, output io.Writer) *Runner {
+func New(store *state.Store, authFile, storageRoot string, engine docker.Engine, output io.Writer) *Runner {
 	return NewWithImageResolver(
 		store,
-		home,
+		authFile,
+		storageRoot,
 		engine,
 		output,
 		imagebuilder.NewOnDemand(engine, imagebuilder.BuiltinProfiles()),
@@ -57,22 +65,30 @@ func New(store *state.Store, home string, engine docker.Engine, output io.Writer
 
 func NewWithImageResolver(
 	store *state.Store,
-	home string,
+	authFile, storageRoot string,
 	engine docker.ContainerRunner,
 	output io.Writer,
 	images imagebuilder.Resolver,
 ) *Runner {
 	return &Runner{
-		store:  store,
-		home:   home,
-		engine: engine,
-		images: images,
-		output: output,
+		store:       store,
+		authFile:    authFile,
+		storageRoot: storageRoot,
+		engine:      engine,
+		images:      images,
+		checkout:    hostGitCheckout{},
+		output:      output,
 	}
 }
 
-func (r *Runner) CreateSession(ctx context.Context, workspace string) (int64, string, error) {
-	workspace, err := canonicalWorkspace(workspace)
+func (r *Runner) CreateSession(ctx context.Context, options SessionOptions) (int64, string, error) {
+	if options.Workspace == "" {
+		return r.createManagedSession(ctx, options.RepositoryIDs)
+	}
+	if len(options.RepositoryIDs) != 0 {
+		return 0, "", errors.New("repository checkouts require a managed workspace")
+	}
+	workspace, err := canonicalWorkspace(options.Workspace)
 	if err != nil {
 		return 0, "", err
 	}
@@ -145,7 +161,7 @@ func (r *Runner) Run(
 		Volumes: []string{
 			workspace + ":" + containerWorkspace,
 			stateVolume + ":/home/pact/.codex",
-			filepath.Join(r.home, ".codex/auth.json") + ":/opt/pact/host-auth.json:ro",
+			r.authFile + ":/opt/pact/host-auth.json:ro",
 		},
 	}, func(ctx context.Context, reader io.Reader, writer io.Writer) error {
 		return r.runCodexTurn(ctx, reader, writer, options, runID, stateVolume, resumeTarget)

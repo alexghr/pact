@@ -127,7 +127,7 @@ func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (ru
 		return options, nil, err
 	}
 
-	store, _, err := openStore(ctx, migrate)
+	store, _, _, err := openStore(ctx, migrate)
 	if err != nil {
 		return runOptions{}, nil, err
 	}
@@ -149,14 +149,16 @@ func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (ru
 }
 
 func startRun(ctx context.Context, options harness.Options, resumeTarget *state.ResumeTarget, migrate bool) error {
-	store, home, err := openStore(ctx, migrate)
+	store, authFile, stateRoot, err := openStore(ctx, migrate)
 	if err != nil {
 		return err
 	}
-	runner := harness.New(store, home, docker.NewCLI(os.Stdin, os.Stdout, os.Stderr), os.Stdout)
+	runner := harness.New(store, authFile, stateRoot, docker.NewCLI(os.Stdin, os.Stdout, os.Stderr), os.Stdout)
 	var sessionID int64
 	if resumeTarget == nil {
-		sessionID, options.Workspace, err = runner.CreateSession(ctx, options.Workspace)
+		sessionID, options.Workspace, err = runner.CreateSession(ctx, harness.SessionOptions{
+			Workspace: options.Workspace,
+		})
 		if err != nil {
 			return errors.Join(err, store.Close())
 		}
@@ -169,11 +171,11 @@ func startRun(ctx context.Context, options harness.Options, resumeTarget *state.
 }
 
 func startWeb(ctx context.Context, migrate bool) error {
-	store, home, err := openStore(ctx, migrate)
+	store, authFile, stateRoot, err := openStore(ctx, migrate)
 	if err != nil {
 		return err
 	}
-	runner := harness.New(store, home, docker.NewCLI(nil, os.Stdout, os.Stderr), io.Discard)
+	runner := harness.New(store, authFile, stateRoot, docker.NewCLI(nil, os.Stdout, os.Stderr), io.Discard)
 	server, err := web.New(ctx, store, runner)
 	if err != nil {
 		return errors.Join(err, store.Close())
@@ -182,7 +184,7 @@ func startWeb(ctx context.Context, migrate bool) error {
 }
 
 func listRuns(ctx context.Context, output io.Writer, migrate bool) error {
-	store, _, err := openStore(ctx, migrate)
+	store, _, _, err := openStore(ctx, migrate)
 	if err != nil {
 		return err
 	}
@@ -214,21 +216,23 @@ func writeRunList(output io.Writer, runs []state.RunRecord) error {
 	return nil
 }
 
-func openStore(ctx context.Context, migrate bool) (*state.Store, string, error) {
+func openStore(ctx context.Context, migrate bool) (*state.Store, string, string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", fmt.Errorf("find home directory: %w", err)
+		return nil, "", "", fmt.Errorf("find home directory: %w", err)
 	}
-	store, err := state.Open(ctx, filepath.Join(home, ".local", "state", "pact", "pact.db"))
+	stateRoot := filepath.Join(home, ".local", "state", "pact")
+	authFile := filepath.Join(home, ".codex", "auth.json")
+	store, err := state.Open(ctx, filepath.Join(stateRoot, "pact.db"))
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	if migrate {
 		if err := store.Migrate(ctx); err != nil {
-			return nil, "", errors.Join(err, store.Close())
+			return nil, "", "", errors.Join(err, store.Close())
 		}
 	}
-	return store, home, nil
+	return store, authFile, stateRoot, nil
 }
 
 func parseDatabaseOptions(command string, args []string, output io.Writer) (bool, error) {

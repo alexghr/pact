@@ -1,13 +1,23 @@
 {{define "content" -}}
 <header>
   <h1>New session</h1>
-  <p>The workspace will be a new temporary directory.</p>
+  <p>The workspace will be stored in Pact's state directory, optionally populated from saved repositories.</p>
 </header>
 <form method="post" action="/sessions">
+  {{if .Repositories}}
+  <fieldset class="stack">
+    <legend>Repositories</legend>
+    {{range .Repositories}}
+    <label><span><input type="checkbox" name="repository_id" value="{{.ID}}"> {{.Name}} — {{.URL}}</span></label>
+    {{end}}
+    <small>Select none for an empty workspace.</small>
+  </fieldset>
+  {{end}}
   <label>
     Message
     <textarea name="message" rows="8" cols="80" required autofocus></textarea>
   </label>
+  {{if not .Repositories}}<p><a href="/repositories/new">Add a repository</a> to start from an existing project.</p>{{end}}
   <div><button type="submit">Start session</button></div>
 </form>
 {{- end}}

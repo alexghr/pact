@@ -39,10 +39,14 @@ so either can configure them without constructing Docker arguments directly:
 - **Project:** the canonical host path explicitly selected for a run by the
   user. A UI may remember recent choices for convenience, but that is not
   an additional security authority or required allowlist.
+- **Repository:** a saved repository URL, clone URL, future push URL, display
+  name, and default branch. Selecting one for a new web session explicitly
+  authorizes Pact to clone it with host Git into that session's workspace.
 - **Tool profile:** an allowlisted image/tool set such as `generic` or `go`.
 - **Pact session:** a durable, integer-identified unit of work tied to one
-  canonical workspace. It owns every Docker run and Codex thread used for that
-  work.
+  canonical workspace and zero or more saved repositories. It owns every Docker
+  run and Codex thread used for that work. Repository links are checkout
+  instances: a session may link the same saved repository more than once.
 - **Agent/thread:** one Codex execution identity with its own persistent or
   ephemeral state. A Pact session may own multiple threads. Parallel agents must
   not share writable state unless explicitly joined.
@@ -60,22 +64,40 @@ Treat these independently when reviewing a change:
    Docker-managed state are intentionally mounted. The workspace is writable by
    design, so its contents can be destroyed or exfiltrated by the agent. An
    explicitly supplied workspace path is considered user approval for that run.
-   The local web interface instead creates an empty launcher-owned temporary
-   directory for each new session, displays its resolved path on the session
-   page, and reuses it for that session's later turns. Pact does not currently
-   remove these temporary directories.
+   The local web interface instead asks the harness to create a launcher-owned
+   directory under `~/.local/state/pact/sessions` for each new session. The
+   harness either leaves that workspace empty or uses host Git to clone every
+   repository explicitly selected from the saved repository catalog into a
+   named child directory.
+   Repository checkouts include `.git` and the clone's `origin`, so the agent can
+   inspect and modify local history and knows the clone URL. The interface
+   displays the resolved workspace path on the session page and reuses it for
+   that session's later turns. Pact does not currently remove these managed
+   session directories.
    The host launcher also owns a private SQLite database at
    `~/.local/state/pact/pact.db`. It is never mounted into the container and
-   persists Pact sessions, run metadata, Codex thread links, selected lifecycle
-   events, and full transcript snapshots until the user removes it. Transcripts
-   may contain prompts,
+   persists repository definitions and checkout-instance session links,
+   including each checkout's relative directory, Pact sessions, run metadata,
+   Codex thread links, selected lifecycle events, and full transcript snapshots
+   until the user removes it. A repository's push URL is stored for a future Git
+   integration and is not configured in the clone. Transcripts may contain prompts,
    reasoning, workspace paths and contents, commands and output, file diffs,
    and tool arguments and results.
 2. **Credentials.** The host auth file is mounted read-only, but its contents
    are copied to the persistent state volume and are readable by the agent.
    Read-only mounting prevents modification, not disclosure or exfiltration.
+   For a repository-backed session, host Git may use the device owner's SSH
+   agent, SSH configuration, or credential helper during the initial clone.
+   Explicitly selecting the saved repository authorizes that operation. Pact
+   rejects repository URLs containing embedded credentials and does not mount
+   host Git credentials, configuration, or the SSH agent into the agent
+   container. The checkout retains `origin`, but authenticated fetches and
+   pushes are unavailable to the agent unless another credential mechanism is
+   added later.
 3. **Network.** Docker's default network is currently enabled. Disabling Codex
-   web search does not disable shell tools or arbitrary outbound traffic.
+   web search does not disable shell tools or arbitrary outbound traffic. An
+   agent can use the retained Git remote for public access or add another public
+   remote even though it receives no host Git credentials.
 4. **Container privilege.** Setup runs as container root; the agent runs as the
    remapped unprivileged user. Codex is configured for `danger-full-access`
    because the container is its external sandbox. Docker's default capabilities,
@@ -94,18 +116,24 @@ Treat these independently when reviewing a change:
    The Ubuntu base tag and default `@openai/codex@latest` installation are not
    immutable. The host launcher uses the pinned `go-sqlite3` module and requires
    CGO and a C compiler when built. Package-manager and image build downloads
-   remain trusted inputs. Before either CLI or web starts a container, the image
-   resolver hashes the selected profile's Dockerfile and build context, derives
-   an input-addressed tag, and checks the local Docker image store. It builds
-   only when that exact tag is missing. Concurrent requests for the same tag
-   share one preparation attempt. These images and tags are Docker-managed, are
-   not recorded in SQLite, and are not currently removed by Pact.
+   remain trusted inputs. Repository-backed sessions additionally depend on the
+   host-installed Git client, which Pact does not pin; Git processes data from
+   the selected, potentially untrusted remote, although Pact disables checkout
+   hooks and submodule recursion. Before either CLI or web starts a container,
+   the image resolver hashes the selected profile's Dockerfile and build
+   context, derives an input-addressed tag, and checks the local Docker image
+   store. It builds only when that exact tag is missing. Concurrent requests for
+   the same tag share one preparation attempt. These images and tags are
+   Docker-managed, are not recorded in SQLite, and are not currently removed by
+   Pact.
 7. **Host Docker invocation.** Values are passed as argv, not evaluated by a
    shell. Still validate variants, paths, mounts, and option placement because
    Docker itself interprets their syntax.
 8. **Run metadata.** Before building or running a new agent, the host creates an
    integer-identified Pact session containing the canonical workspace. Every run
-   belongs to that Pact session. Immediately before `docker run`, the host
+   belongs to that Pact session. A repository-backed session may contain
+   multiple checkout instances, including multiple checkouts of the same saved
+   repository. Immediately before `docker run`, the host
    records the model, reasoning effort, Dockerfile variant, and start time. Once
    Codex starts a thread, the host links the run and thread to the Pact session
    and records the Codex session id, app-server user agent, and backing state
@@ -126,9 +154,13 @@ Treat these independently when reviewing a change:
    binary and tracked by filename in `schema_migrations`. The `--migrate` flag on
    `pact run`, `pact list`, or `pact web` applies pending migrations; without it,
    opening the database does not apply schema changes. The idempotent initial
-   migration adopts databases which already have the current development schema.
+   migration adopts databases which already have the original development
+   schema. The second migration adds repositories and checkout-instance rows.
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
-   entrypoint. It parses CLI input and wires together the internal packages;
+   entrypoint. It parses CLI input, resolves the Pact state root and Codex auth
+   source path from the host home directory, and passes those concrete paths to
+   the store and harness. The
+   harness does not infer the host's home-directory layout.
    `internal/harness` owns workspace policy, Docker execution, and the Codex
    protocol lifecycle, `internal/imagebuilder` owns tool-profile build inputs
    and image preparation, and `internal/web` owns HTTP routing and templates.
@@ -138,7 +170,15 @@ Treat these independently when reviewing a change:
    `pact web` serves an unauthenticated HTML interface on the fixed loopback
    address `127.0.0.1:8080`. Starting a session first persists its integer Pact
    session ID, then redirects to that session's stable URL while the first turn
-   runs in the background. Follow-up message forms use Datastar when JavaScript
+   runs in the background. Session creation is a harness policy operation: an
+   explicitly supplied workspace is canonicalized and persisted, while an
+   omitted workspace creates a managed workspace under
+   `~/.local/state/pact/sessions` and optionally clones each selected
+   repository's configured default branch synchronously into a named child
+   directory. Clone failures remove the partial workspace and do not create a
+   session. Repository cloning passes values as argv without a
+   shell, disables interactive Git prompting and checkout hooks, and does not
+   recurse into submodules. Follow-up message forms use Datastar when JavaScript
    is available; the POST starts the turn and redirects the Datastar request to
    the chat event stream, while ordinary form submission redirects to the full
    session page. Pending prompts are held in server memory; refreshing a

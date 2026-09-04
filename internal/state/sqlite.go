@@ -62,6 +62,7 @@ const sessionSelect = `
 var (
 	ErrSessionNotFound      = errors.New("session not found")
 	ErrResumeTargetNotFound = errors.New("resume target not found")
+	ErrRepositoryNotFound   = errors.New("repository not found")
 )
 
 type Store struct {
@@ -85,6 +86,22 @@ type RunRecord struct {
 	Status            string
 }
 
+type Repository struct {
+	ID            int64
+	URL           string
+	CloneURL      string
+	PushURL       string
+	Name          string
+	DefaultBranch string
+	CreatedAt     string
+}
+
+type SessionRepository struct {
+	ID          int64
+	CheckoutDir string
+	Repository  Repository
+}
+
 type CodexThread struct {
 	ThreadID    string
 	SessionID   string
@@ -104,6 +121,7 @@ type SessionRecord struct {
 	UpdatedAt         string
 	ThreadID          string
 	CodexSessionID    string
+	Repositories      []SessionRepository
 	LastAgentMessage  string
 	TranscriptJSON    json.RawMessage
 }
@@ -242,6 +260,129 @@ func (s *Store) CreateSession(ctx context.Context, workspace string) (int64, err
 	return id, nil
 }
 
+func (s *Store) CreateRepository(ctx context.Context, repository Repository) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO repositories (url, clone_url, push_url, name, default_branch)
+		VALUES (?, ?, ?, ?, ?)`,
+		repository.URL,
+		repository.CloneURL,
+		repository.PushURL,
+		repository.Name,
+		repository.DefaultBranch,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("create repository: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("read repository id: %w", err)
+	}
+	return id, nil
+}
+
+func (s *Store) GetRepository(ctx context.Context, repositoryID int64) (Repository, error) {
+	var repository Repository
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, url, clone_url, push_url, name, default_branch, created_at
+		FROM repositories
+		WHERE id = ?`, repositoryID).Scan(
+		&repository.ID,
+		&repository.URL,
+		&repository.CloneURL,
+		&repository.PushURL,
+		&repository.Name,
+		&repository.DefaultBranch,
+		&repository.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Repository{}, fmt.Errorf("get repository %d: %w", repositoryID, ErrRepositoryNotFound)
+	}
+	if err != nil {
+		return Repository{}, fmt.Errorf("get repository %d: %w", repositoryID, err)
+	}
+	return repository, nil
+}
+
+func (s *Store) ListRepositories(ctx context.Context) ([]Repository, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, url, clone_url, push_url, name, default_branch, created_at
+		FROM repositories
+		ORDER BY name COLLATE NOCASE, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories: %w", err)
+	}
+	defer rows.Close()
+
+	var repositories []Repository
+	for rows.Next() {
+		var repository Repository
+		if err := rows.Scan(
+			&repository.ID,
+			&repository.URL,
+			&repository.CloneURL,
+			&repository.PushURL,
+			&repository.Name,
+			&repository.DefaultBranch,
+			&repository.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("list repositories: scan row: %w", err)
+		}
+		repositories = append(repositories, repository)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list repositories: read rows: %w", err)
+	}
+	return repositories, nil
+}
+
+func (s *Store) CreateSessionForRepositories(
+	ctx context.Context,
+	workspace string,
+	repositories []SessionRepository,
+) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("create repository session: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO pact_sessions (workspace_dir)
+		VALUES (?)`, workspace)
+	if err != nil {
+		return 0, fmt.Errorf("create repository session: insert session: %w", err)
+	}
+	sessionID, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("create repository session: read session id: %w", err)
+	}
+	for _, repository := range repositories {
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO pact_session_repositories (pact_session_id, repository_id, checkout_dir)
+			SELECT ?, ?, ?
+			WHERE EXISTS (SELECT 1 FROM repositories WHERE id = ?)`,
+			sessionID,
+			repository.Repository.ID,
+			repository.CheckoutDir,
+			repository.Repository.ID,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("create repository session: link repository %d: %w", repository.Repository.ID, err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("create repository session: read repository %d rows: %w", repository.Repository.ID, err)
+		}
+		if rows != 1 {
+			return 0, fmt.Errorf("create repository session: repository %d: %w", repository.Repository.ID, ErrRepositoryNotFound)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("create repository session: commit: %w", err)
+	}
+	return sessionID, nil
+}
+
 func (s *Store) StartRun(ctx context.Context, run Run) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO runs (
@@ -329,6 +470,16 @@ func (s *Store) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list sessions: read rows: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("list sessions: close rows: %w", err)
+	}
+	repositories, err := s.listSessionRepositories(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	for i := range sessions {
+		sessions[i].Repositories = repositories[sessions[i].ID]
+	}
 	return sessions, nil
 }
 
@@ -340,7 +491,69 @@ func (s *Store) GetSession(ctx context.Context, sessionID int64) (SessionRecord,
 	if err != nil {
 		return SessionRecord{}, fmt.Errorf("get session %d: %w", sessionID, err)
 	}
+	repositories, err := s.listSessionRepositories(ctx, sessionID)
+	if err != nil {
+		return SessionRecord{}, err
+	}
+	session.Repositories = repositories[sessionID]
 	return session, nil
+}
+
+func (s *Store) ListSessionRepositories(ctx context.Context, sessionID int64) ([]SessionRepository, error) {
+	repositories, err := s.listSessionRepositories(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return repositories[sessionID], nil
+}
+
+func (s *Store) listSessionRepositories(ctx context.Context, sessionID int64) (map[int64][]SessionRepository, error) {
+	query := `
+		SELECT session_repository.id, session_repository.pact_session_id,
+			session_repository.checkout_dir,
+			repository.id, repository.url, repository.clone_url,
+			repository.push_url, repository.name,
+			repository.default_branch, repository.created_at
+		FROM pact_session_repositories AS session_repository
+		JOIN repositories AS repository
+			ON repository.id = session_repository.repository_id`
+	var args []any
+	if sessionID != 0 {
+		query += " WHERE session_repository.pact_session_id = ?"
+		args = append(args, sessionID)
+	}
+	query += " ORDER BY session_repository.pact_session_id, session_repository.id"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list session repositories: %w", err)
+	}
+	defer rows.Close()
+
+	repositories := make(map[int64][]SessionRepository)
+	for rows.Next() {
+		var linkedSessionID int64
+		var repository SessionRepository
+		if err := rows.Scan(
+			&repository.ID,
+			&linkedSessionID,
+			&repository.CheckoutDir,
+			&repository.Repository.ID,
+			&repository.Repository.URL,
+			&repository.Repository.CloneURL,
+			&repository.Repository.PushURL,
+			&repository.Repository.Name,
+			&repository.Repository.DefaultBranch,
+			&repository.Repository.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("list session repositories: scan row: %w", err)
+		}
+		repositories[linkedSessionID] = append(repositories[linkedSessionID], repository)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list session repositories: read rows: %w", err)
+	}
+	return repositories, nil
 }
 
 type scanner interface {

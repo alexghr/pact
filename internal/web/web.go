@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,7 +26,8 @@ const (
 )
 
 type Runner interface {
-	CreateSession(context.Context, string) (int64, string, error)
+	CreateSession(context.Context, harness.SessionOptions) (int64, string, error)
+	CreateRepository(context.Context, state.Repository) (int64, error)
 	Run(context.Context, int64, harness.Options, *state.ResumeTarget) (int64, error)
 }
 
@@ -44,15 +44,17 @@ type Server struct {
 
 // the same struct is used by all the templates
 type pageData struct {
-	Title        string
-	Sessions     []sessionListItem
-	Session      state.SessionRecord
-	Messages     []conversationMessage
-	Events       []eventView
-	SessionCount int
-	SessionURL   string
-	Pending      string
-	Failure      string
+	Title           string
+	Sessions        []sessionListItem
+	Repositories    []state.Repository
+	Session         state.SessionRecord
+	Messages        []conversationMessage
+	Events          []eventView
+	SessionCount    int
+	RepositoryCount int
+	SessionURL      string
+	Pending         string
+	Failure         string
 }
 
 type pendingTurn struct {
@@ -118,6 +120,9 @@ func (s *Server) Handler() http.Handler {
 		http.Redirect(w, r, "/sessions", http.StatusSeeOther)
 	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", cacheStaticFiles(s.static)))
+	mux.HandleFunc("GET /repositories", s.listRepositories)
+	mux.HandleFunc("GET /repositories/new", s.newRepository)
+	mux.HandleFunc("POST /repositories", s.createRepository)
 	mux.HandleFunc("GET /sessions", s.listSessions)
 	mux.HandleFunc("GET /sessions/new", s.newSession)
 	mux.HandleFunc("POST /sessions", s.startSession)
@@ -125,6 +130,39 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{sessionID}/messages", s.sendMessage)
 	mux.HandleFunc("GET /sessions/{sessionID}/chat", s.streamSessionChat)
 	return mux
+}
+
+func (s *Server) listRepositories(w http.ResponseWriter, r *http.Request) {
+	repositories, err := s.store.ListRepositories(r.Context())
+	if err != nil {
+		s.serverError(w, r, "list repositories", err)
+		return
+	}
+	s.render(w, r, "repositories", pageData{
+		Title:           "Repositories",
+		Repositories:    repositories,
+		RepositoryCount: len(repositories),
+	})
+}
+
+func (s *Server) newRepository(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, "new-repository", pageData{Title: "Add repository"})
+}
+
+func (s *Server) createRepository(w http.ResponseWriter, r *http.Request) {
+	repository, ok := repositoryFromForm(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.runner.CreateRepository(r.Context(), repository); err != nil {
+		if errors.Is(err, harness.ErrInvalidRepository) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		s.serverError(w, r, "create repository", err)
+		return
+	}
+	http.Redirect(w, r, "/repositories", http.StatusSeeOther)
 }
 
 func cacheStaticFiles(next http.Handler) http.Handler {
@@ -158,7 +196,15 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) newSession(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, "new-session", pageData{Title: "New session"})
+	repositories, err := s.store.ListRepositories(r.Context())
+	if err != nil {
+		s.serverError(w, r, "list repositories", err)
+		return
+	}
+	s.render(w, r, "new-session", pageData{
+		Title:        "New session",
+		Repositories: repositories,
+	})
 }
 
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
@@ -166,16 +212,18 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	workspaceDir, err := os.MkdirTemp("", "pact-session-")
-	if err != nil {
-		s.serverError(w, r, "create session workspace", err)
+	repositoryIDs, ok := repositoryIDsFromForm(w, r)
+	if !ok {
 		return
 	}
-	sessionID, workspace, err := s.runner.CreateSession(r.Context(), workspaceDir)
+	sessionID, workspace, err := s.runner.CreateSession(r.Context(), harness.SessionOptions{
+		RepositoryIDs: repositoryIDs,
+	})
+	if errors.Is(err, state.ErrRepositoryNotFound) {
+		http.Error(w, "repository not found", http.StatusBadRequest)
+		return
+	}
 	if err != nil {
-		if removeErr := os.Remove(workspaceDir); removeErr != nil {
-			s.logger.ErrorContext(r.Context(), "remove failed session workspace", requestLogAttrs(r, "error", removeErr)...)
-		}
 		s.serverError(w, r, "create session", err)
 		return
 	}
@@ -426,6 +474,35 @@ func promptFromForm(w http.ResponseWriter, r *http.Request) (string, bool) {
 		return "", false
 	}
 	return prompt, true
+}
+
+func repositoryFromForm(w http.ResponseWriter, r *http.Request) (state.Repository, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return state.Repository{}, false
+	}
+	return state.Repository{
+		URL:           r.FormValue("url"),
+		CloneURL:      r.FormValue("clone_url"),
+		PushURL:       r.FormValue("push_url"),
+		Name:          r.FormValue("name"),
+		DefaultBranch: r.FormValue("default_branch"),
+	}, true
+}
+
+func repositoryIDsFromForm(w http.ResponseWriter, r *http.Request) ([]int64, bool) {
+	values := r.Form["repository_id"]
+	repositoryIDs := make([]int64, 0, len(values))
+	for _, value := range values {
+		repositoryID, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || repositoryID < 1 {
+			http.Error(w, "invalid repository", http.StatusBadRequest)
+			return nil, false
+		}
+		repositoryIDs = append(repositoryIDs, repositoryID)
+	}
+	return repositoryIDs, true
 }
 
 func sessionIDFromRequest(w http.ResponseWriter, r *http.Request) (int64, bool) {

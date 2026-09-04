@@ -7,11 +7,23 @@
     <dt>Codex thread</dt><dd>{{if .Session.ThreadID}}{{.Session.ThreadID}}{{else}}Not started{{end}}</dd>
     <dt>Created</dt><dd><time datetime="{{.Session.CreatedAt}}">{{.Session.CreatedAt}}</time></dd>
     <dt>Updated</dt><dd><time datetime="{{.Session.UpdatedAt}}">{{.Session.UpdatedAt}}</time></dd>
-    <dt>Workspace</dt><dd>{{.Session.WorkspaceDir}}</dd>
+    {{if .Session.Repositories}}
+    <dt>Repositories</dt>
+    <dd>
+      <ul>
+        {{range .Session.Repositories}}<li><a href="{{.Repository.URL}}">{{.Repository.Name}}</a> — {{.CheckoutDir}}</li>{{end}}
+      </ul>
+    </dd>
+    {{end}}
     <dt>Model</dt><dd>{{.Session.Model}}</dd>
     <dt>Effort</dt><dd>{{.Session.Effort}}</dd>
   </dl>
 </header>
+
+<section aria-labelledby="host-workspace">
+  <h2 id="host-workspace">Host workspace</h2>
+  <pre><code>{{.Session.WorkspaceDir}}</code></pre>
+</section>
 
 <div{{if .Pending}} data-init="@get('{{.SessionURL}}/chat')"{{end}}>
   {{template "session-chat" .}}
