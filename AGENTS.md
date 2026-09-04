@@ -122,8 +122,11 @@ Treat these independently when reviewing a change:
    selects that session's most recently used Codex thread. An unavailable exit
    code remains null. A host crash or forced termination may leave a row in the
    `running` state and only a partial event record. The database contents persist
-   until the user removes them. There is no migration from the earlier
-   development schema; its database must be removed manually.
+   until the user removes them. Forward-only SQL migrations are embedded in the
+   binary and tracked by filename in `schema_migrations`. The `--migrate` flag on
+   `pact run`, `pact list`, or `pact web` applies pending migrations; without it,
+   opening the database does not apply schema changes. The idempotent initial
+   migration adopts databases which already have the current development schema.
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
    entrypoint. It parses CLI input and wires together the internal packages;
    `internal/harness` owns workspace policy, Docker execution, and the Codex

@@ -17,6 +17,7 @@ func TestParseRunOptionsFlags(t *testing.T) {
 		"--effort", "high",
 		"--image", "go",
 		"--resume", "42",
+		"--migrate",
 		"write tests",
 	}, &bytes.Buffer{})
 	if err != nil {
@@ -25,8 +26,21 @@ func TestParseRunOptionsFlags(t *testing.T) {
 
 	if options.Workspace != "/tmp/project" || options.Prompt != "write tests" ||
 		options.Model != "codex-model" || options.Effort != "high" || options.Image != "go" ||
-		options.resumeSession != 42 {
+		options.resumeSession != 42 || !options.migrate {
 		t.Fatalf("parseRunOptions() = %#v", options)
+	}
+}
+
+func TestParseDatabaseOptions(t *testing.T) {
+	migrate, err := parseDatabaseOptions("web", []string{"--migrate"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migrate {
+		t.Fatal("parseDatabaseOptions() did not enable migrations")
+	}
+	if _, err := parseDatabaseOptions("web", []string{"unexpected"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("parseDatabaseOptions() accepted a positional argument")
 	}
 }
 

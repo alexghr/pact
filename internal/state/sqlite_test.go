@@ -249,10 +249,91 @@ func TestOpenCreatesPrivateDatabase(t *testing.T) {
 	}
 }
 
+func TestMigrateAppliesEachMigrationOnce(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	var table string
+	err = store.db.QueryRowContext(ctx, `
+		SELECT name FROM sqlite_master
+		WHERE type = 'table' AND name = 'pact_sessions'`).Scan(&table)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("pact_sessions before Migrate() error = %v, want sql.ErrNoRows", err)
+	}
+
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := createTestSession(t, store, "/tmp/project")
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var migrationCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
+		t.Fatal(err)
+	}
+	if migrationCount != 1 {
+		t.Fatalf("recorded migrations = %d, want 1", migrationCount)
+	}
+	if session, err := store.GetSession(ctx, sessionID); err != nil || session.WorkspaceDir != "/tmp/project" {
+		t.Fatalf("session after second Migrate() = %#v, %v", session, err)
+	}
+}
+
+func TestMigrateAdoptsExistingSchema(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "pact.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	initial, err := migrations.ReadFile("migrations/001_initial.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, string(initial)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.db.ExecContext(ctx, `
+		INSERT INTO pact_sessions (workspace_dir) VALUES ('/tmp/existing')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if session, err := store.GetSession(ctx, sessionID); err != nil || session.WorkspaceDir != "/tmp/existing" {
+		t.Fatalf("existing session after Migrate() = %#v, %v", session, err)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(context.Background(), filepath.Join(t.TempDir(), "pact.db"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(context.Background()); err != nil {
+		store.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

@@ -3,58 +3,24 @@ package state
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const schema = `
-CREATE TABLE IF NOT EXISTS pact_sessions (
-	id INTEGER PRIMARY KEY,
-	workspace_dir TEXT NOT NULL,
-	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
+const (
+	migrationsDir         = "migrations"
+	migrationTrackingFile = "_tracking.sql"
+)
 
-CREATE TABLE IF NOT EXISTS codex_threads (
-	thread_id TEXT PRIMARY KEY,
-	pact_session_id INTEGER NOT NULL,
-	session_id TEXT NOT NULL,
-	state_volume TEXT NOT NULL UNIQUE,
-	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-	FOREIGN KEY (pact_session_id) REFERENCES pact_sessions(id)
-);
-
-CREATE TABLE IF NOT EXISTS runs (
-	id INTEGER PRIMARY KEY,
-	pact_session_id INTEGER NOT NULL,
-	thread_id TEXT,
-	user_agent TEXT,
-	model TEXT NOT NULL,
-	effort TEXT NOT NULL,
-	dockerfile_variant TEXT NOT NULL,
-	status TEXT NOT NULL CHECK (status IN ('running', 'finished', 'error')),
-	exit_code INTEGER,
-	transcript_json TEXT,
-	transcript_captured_at TEXT,
-	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-	completed_at TEXT,
-	FOREIGN KEY (pact_session_id) REFERENCES pact_sessions(id),
-	FOREIGN KEY (thread_id) REFERENCES codex_threads(thread_id)
-);
-
-CREATE TABLE IF NOT EXISTS codex_events (
-	run_id INTEGER NOT NULL,
-	sequence INTEGER NOT NULL,
-	method TEXT NOT NULL,
-	params_json TEXT NOT NULL,
-	received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-	PRIMARY KEY (run_id, sequence),
-	FOREIGN KEY (run_id) REFERENCES runs(id)
-);`
+//go:embed migrations/*.sql
+var migrations embed.FS
 
 const sessionSelect = `
 	WITH session_view AS (
@@ -177,11 +143,10 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		"PRAGMA busy_timeout = 5000",
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA foreign_keys = ON",
-		schema,
 	} {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			db.Close()
-			return nil, fmt.Errorf("initialize database: %w", err)
+			return nil, fmt.Errorf("configure database: %w", err)
 		}
 	}
 
@@ -191,6 +156,72 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 
 	return &Store{db: db}, nil
+}
+
+func (s *Store) Migrate(ctx context.Context) error {
+	trackingSQL, err := migrations.ReadFile(path.Join(migrationsDir, migrationTrackingFile))
+	if err != nil {
+		return fmt.Errorf("read migration tracking schema: %w", err)
+	}
+	entries, err := migrations.ReadDir(migrationsDir)
+	if err != nil {
+		return fmt.Errorf("read database migrations: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin database migrations: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, string(trackingSQL)); err != nil {
+		return fmt.Errorf("initialize migration tracking: %w", err)
+	}
+
+	rows, err := tx.QueryContext(ctx, `SELECT filename FROM schema_migrations`)
+	if err != nil {
+		return fmt.Errorf("list applied database migrations: %w", err)
+	}
+	applied := make(map[string]bool)
+	for rows.Next() {
+		var filename string
+		if err := rows.Scan(&filename); err != nil {
+			rows.Close()
+			return fmt.Errorf("list applied database migrations: scan filename: %w", err)
+		}
+		applied[filename] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("list applied database migrations: read rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("list applied database migrations: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Name() == migrationTrackingFile || applied[entry.Name()] {
+			continue
+		}
+		migration, err := migrations.ReadFile(path.Join(migrationsDir, entry.Name()))
+		if err != nil {
+			return fmt.Errorf("read database migration %q: %w", entry.Name(), err)
+		}
+		if _, err := tx.ExecContext(ctx, string(migration)); err != nil {
+			return fmt.Errorf("apply database migration %q: %w", entry.Name(), err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO schema_migrations (filename) VALUES (?)`,
+			entry.Name(),
+		); err != nil {
+			return fmt.Errorf("record database migration %q: %w", entry.Name(), err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit database migrations: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Close() error {

@@ -35,21 +35,23 @@ func run() error {
 	ctx := context.Background()
 	switch args[0] {
 	case "list":
-		if len(args) != 1 {
-			return fmt.Errorf("usage: pact list")
+		migrate, err := parseDatabaseOptions("list", args[1:], os.Stderr)
+		if err != nil {
+			return err
 		}
-		return listRuns(ctx, os.Stdout)
+		return listRuns(ctx, os.Stdout, migrate)
 	case "run":
 		options, resumeTarget, err := prepareRunOptions(ctx, args[1:], os.Stderr)
 		if err != nil {
 			return err
 		}
-		return startRun(ctx, options.Options, resumeTarget)
+		return startRun(ctx, options.Options, resumeTarget, options.migrate)
 	case "web":
-		if len(args) != 1 {
-			return fmt.Errorf("usage: pact web")
+		migrate, err := parseDatabaseOptions("web", args[1:], os.Stderr)
+		if err != nil {
+			return err
 		}
-		return startWeb(ctx)
+		return startWeb(ctx, migrate)
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stdout, usage())
 		return nil
@@ -61,6 +63,7 @@ func run() error {
 type runOptions struct {
 	harness.Options
 	resumeSession int64
+	migrate       bool
 }
 
 func defaultRunOptions() runOptions {
@@ -75,6 +78,7 @@ func newRunFlagSet(options *runOptions, output io.Writer) *flag.FlagSet {
 	flags.StringVar(&options.Effort, "effort", options.Effort, "model reasoning effort")
 	flags.StringVar(&options.Image, "image", options.Image, "container image profile (generic or go)")
 	flags.Int64Var(&options.resumeSession, "resume", options.resumeSession, "Pact session ID to resume")
+	flags.BoolVar(&options.migrate, "migrate", options.migrate, "apply pending database migrations")
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact run [options] PROMPT")
 		flags.PrintDefaults()
@@ -82,13 +86,13 @@ func newRunFlagSet(options *runOptions, output io.Writer) *flag.FlagSet {
 	return flags
 }
 
-func resumeSessionID(args []string, output io.Writer) (int64, error) {
+func resumeOptions(args []string, output io.Writer) (int64, bool, error) {
 	options := defaultRunOptions()
 	flags := newRunFlagSet(&options, output)
 	if err := flags.Parse(args); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return options.resumeSession, nil
+	return options.resumeSession, options.migrate, nil
 }
 
 func parseRunOptions(args []string, output io.Writer) (runOptions, error) {
@@ -114,7 +118,7 @@ func parseRunOptionsFrom(args []string, output io.Writer, options runOptions) (r
 }
 
 func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (runOptions, *state.ResumeTarget, error) {
-	sessionID, err := resumeSessionID(args, output)
+	sessionID, migrate, err := resumeOptions(args, output)
 	if err != nil {
 		return runOptions{}, nil, err
 	}
@@ -123,7 +127,7 @@ func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (ru
 		return options, nil, err
 	}
 
-	store, _, err := openStore(ctx)
+	store, _, err := openStore(ctx, migrate)
 	if err != nil {
 		return runOptions{}, nil, err
 	}
@@ -144,8 +148,8 @@ func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (ru
 	return options, &target, nil
 }
 
-func startRun(ctx context.Context, options harness.Options, resumeTarget *state.ResumeTarget) error {
-	store, home, err := openStore(ctx)
+func startRun(ctx context.Context, options harness.Options, resumeTarget *state.ResumeTarget, migrate bool) error {
+	store, home, err := openStore(ctx, migrate)
 	if err != nil {
 		return err
 	}
@@ -164,8 +168,8 @@ func startRun(ctx context.Context, options harness.Options, resumeTarget *state.
 	return errors.Join(runErr, store.Close())
 }
 
-func startWeb(ctx context.Context) error {
-	store, home, err := openStore(ctx)
+func startWeb(ctx context.Context, migrate bool) error {
+	store, home, err := openStore(ctx, migrate)
 	if err != nil {
 		return err
 	}
@@ -177,8 +181,8 @@ func startWeb(ctx context.Context) error {
 	return errors.Join(server.ListenAndServe(os.Stderr), store.Close())
 }
 
-func listRuns(ctx context.Context, output io.Writer) error {
-	store, _, err := openStore(ctx)
+func listRuns(ctx context.Context, output io.Writer, migrate bool) error {
+	store, _, err := openStore(ctx, migrate)
 	if err != nil {
 		return err
 	}
@@ -210,7 +214,7 @@ func writeRunList(output io.Writer, runs []state.RunRecord) error {
 	return nil
 }
 
-func openStore(ctx context.Context) (*state.Store, string, error) {
+func openStore(ctx context.Context, migrate bool) (*state.Store, string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, "", fmt.Errorf("find home directory: %w", err)
@@ -219,7 +223,30 @@ func openStore(ctx context.Context) (*state.Store, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	if migrate {
+		if err := store.Migrate(ctx); err != nil {
+			return nil, "", errors.Join(err, store.Close())
+		}
+	}
 	return store, home, nil
+}
+
+func parseDatabaseOptions(command string, args []string, output io.Writer) (bool, error) {
+	flags := flag.NewFlagSet(command, flag.ContinueOnError)
+	flags.SetOutput(output)
+	var migrate bool
+	flags.BoolVar(&migrate, "migrate", false, "apply pending database migrations")
+	flags.Usage = func() {
+		fmt.Fprintf(output, "Usage: pact %s [--migrate]\n", command)
+		flags.PrintDefaults()
+	}
+	if err := flags.Parse(args); err != nil {
+		return false, err
+	}
+	if flags.NArg() != 0 {
+		return false, fmt.Errorf("usage: pact %s [--migrate]", command)
+	}
+	return migrate, nil
 }
 
 func usageError() error {
@@ -227,5 +254,5 @@ func usageError() error {
 }
 
 func usage() string {
-	return "Usage:\n  pact list\n  pact run [options] PROMPT\n  pact web\n"
+	return "Usage:\n  pact list [--migrate]\n  pact run [options] PROMPT\n  pact web [--migrate]\n"
 }
