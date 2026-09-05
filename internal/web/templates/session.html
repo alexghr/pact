@@ -29,6 +29,18 @@
   {{template "session-chat" .}}
 </div>
 
+<section>
+  <h2>Artifacts created by this session</h2>
+  <p><a href="{{.ArtifactCatalogURL}}">Browse all artifacts from this session</a></p>
+  {{if .Artifacts}}
+  <ul>
+    {{range .Artifacts}}<li><a href="{{.URL}}">{{.Name}}</a> — {{.FileCount}} files, revision {{.Revision}}</li>{{end}}
+  </ul>
+  {{else}}
+  <p>No artifacts yet.</p>
+  {{end}}
+</section>
+
 <form id="submit-message" method="post" action="{{.SessionURL}}/messages"
       data-on:submit="@post('{{.SessionURL}}/messages', {contentType: 'form'})">
   <label>

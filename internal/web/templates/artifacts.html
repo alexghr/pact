@@ -1,0 +1,37 @@
+{{define "content" -}}
+<header>
+  <h1>Artifacts</h1>
+  <p>{{.ArtifactCount}} shown{{if .ArtifactCreatorSessionID}} from session {{.ArtifactCreatorSessionID}}{{end}}</p>
+</header>
+<form method="get" action="/artifacts">
+  {{if .ArtifactCreatorSessionID}}<input type="hidden" name="creator_pact_session_id" value="{{.ArtifactCreatorSessionID}}">{{end}}
+  <label>
+    Search names, descriptions, and file paths
+    <input name="q" value="{{.ArtifactQuery}}" type="search">
+  </label>
+  <div><button type="submit">Search</button></div>
+</form>
+{{if .Artifacts}}
+<ol class="stack">
+  {{range .Artifacts}}
+  <li>
+    <a href="{{.URL}}">{{.Name}}</a>
+    {{if .Description}}<p>{{.Description}}</p>{{end}}
+    <dl>
+      <dt>Creating session</dt><dd><a href="/sessions/{{.CreatorPactSessionID}}">{{.CreatorPactSessionID}}</a></dd>
+      <dt>Files</dt><dd>{{.FileCount}}</dd>
+      <dt>Size</dt><dd>{{.SizeBytes}} bytes</dd>
+      <dt>Revision</dt><dd>{{.Revision}}</dd>
+      <dt>Updated</dt><dd><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></dd>
+    </dl>
+  </li>
+  {{end}}
+</ol>
+{{else}}
+<p>No matching artifacts.</p>
+{{end}}
+<nav aria-label="Artifact pages">
+  {{if .ArtifactPreviousURL}}<a href="{{.ArtifactPreviousURL}}">Previous</a>{{end}}
+  {{if .ArtifactNextURL}}<a href="{{.ArtifactNextURL}}">Next</a>{{end}}
+</nav>
+{{- end}}
