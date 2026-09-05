@@ -1,9 +1,12 @@
 package artifacts
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -15,6 +18,11 @@ import (
 )
 
 const ContainerSocketPath = "/opt/pact/artifacts.sock"
+
+// Allow a maximum-size file encoded as base64 plus protocol overhead.
+const maxBrokerMessageBytes = 32 << 20
+// One proxy connection plus room for a replacement during a restart.
+const maxBrokerConnections = 2
 
 type Broker struct {
 	directory string
@@ -88,6 +96,13 @@ func (b *Broker) Close() error {
 }
 
 func (b *Broker) serve(ctx context.Context, store *state.Store, pactSessionID int64) error {
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(ctx, func() { _ = b.listener.Close() })
+	defer stop()
+	var clients sync.WaitGroup
+	defer clients.Wait()
+	defer cancel()
+	slots := make(chan struct{}, maxBrokerConnections)
 	for {
 		connection, err := b.listener.Accept()
 		if err != nil {
@@ -96,18 +111,65 @@ func (b *Broker) serve(ctx context.Context, store *state.Store, pactSessionID in
 			}
 			return fmt.Errorf("accept artifact MCP connection: %w", err)
 		}
-		conn := &onceCloseConnection{Conn: connection}
-		err = NewServer(store, pactSessionID).Run(ctx, &mcp.IOTransport{
-			Reader: conn,
-			Writer: conn,
-		})
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err != nil {
+		select {
+		case slots <- struct{}{}:
+		default:
+			_ = connection.Close()
 			continue
 		}
+		clients.Go(func() {
+			defer func() { <-slots }()
+			conn := &onceCloseConnection{Conn: connection}
+			defer conn.Close()
+			stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+			defer stop()
+			_ = NewServer(store, pactSessionID).Run(ctx, &mcp.IOTransport{
+				Reader: newMessageReader(conn, maxBrokerMessageBytes),
+				Writer: conn,
+			})
+		})
 	}
+}
+
+// Frame and bound NDJSON before the SDK's JSON decoder can buffer it. Validate
+// each line so incomplete JSON cannot accumulate across otherwise bounded lines.
+type messageReader struct {
+	io.Closer
+	scanner *bufio.Scanner
+	pending []byte
+}
+
+func newMessageReader(conn io.ReadCloser, limit int) *messageReader {
+	// default read line by line
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, min(4096, limit)), limit)
+	return &messageReader{Closer: conn, scanner: scanner}
+}
+
+func (r *messageReader) Read(p []byte) (int, error) {
+	// the target buffer is empty, noop
+	if len(p) == 0 {
+		return 0, nil
+	}
+	// try to read a 'token'
+	if len(r.pending) == 0 {
+		if !r.scanner.Scan() {
+			if err := r.scanner.Err(); err != nil {
+				return 0, fmt.Errorf("read artifact MCP message: %w", err)
+			}
+			return 0, io.EOF
+		}
+		// read a whole line
+		line := r.scanner.Bytes()
+		if !json.Valid(line) {
+			return 0, errors.New("artifact MCP message must be valid JSON on one line")
+		}
+		// keep it in pending in case len(p) < len(line) so multiple calls to Read don't advance the scanner every time
+		r.pending = append(line, '\n')
+	}
+	n := copy(p, r.pending)
+	r.pending = r.pending[n:]
+	return n, nil
 }
 
 type onceCloseConnection struct {

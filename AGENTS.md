@@ -56,8 +56,7 @@ so either can configure them without constructing Docker arguments directly:
   every Pact session. Artifacts are the shared project knowledge base for the
   user and agents, including discoveries, living project guides, plans, and
   human-readable explorations. A project may have many artifacts and an
-  artifact may span repositories. Artifact contents are not a secret store. See
-  [docs/artifacts.md](docs/artifacts.md) for the workflow, data, and MCP contract.
+  artifact may span repositories. Artifact contents are not a secret store.
 - **Grant:** an explicit capability attached to a project or run, such as
   network access or one narrowly scoped credential. Absence means denied.
 
@@ -77,11 +76,11 @@ using artifacts for shared context; there is no required documentation layout.
 The canonical agent-facing workflow is
 [internal/artifacts/instructions.md](internal/artifacts/instructions.md).
 Pact embeds it into MCP initialization so it reaches agents in every selected
-repository. Keep that guidance and [docs/artifacts.md](docs/artifacts.md)
-consistent with implementation. These are instructions for how agents should
-work, not a claim that the harness enforces consultation or captures knowledge
-automatically. Direct human editing is planned; current human contributions
-are incorporated through an agent and attributed to its Pact session.
+repository. Keep that guidance consistent with implementation. These are
+instructions for how agents should work, not a claim that the harness enforces
+consultation or captures knowledge automatically. Direct human editing is
+planned; current human contributions are incorporated through an agent and
+attributed to its Pact session.
 
 ## Assets and trust boundaries
 
@@ -172,6 +171,13 @@ Treat these independently when reviewing a change:
    is removed afterward. It exposes the session-bound artifact MCP broker, not
    a host directory or the SQLite database. Any process in the container can
    use the socket with the current run's artifact authority.
+   The broker serves up to two concurrent connections per run (the normal proxy
+   plus room for a replacement) and closes excess connections. Incoming MCP
+   messages must be single-line JSON frames at most 32 MiB, including encoding
+   overhead; oversized or malformed
+   frames close that connection before reaching the SDK decoder. This bounds
+   individual request buffering on the host. All connections close when the
+   run ends. The 16 MiB decoded artifact file limit still applies.
 8. **Run metadata.** Before building or running a new agent, the host creates an
    integer-identified Pact session containing the canonical workspace. Every run
    belongs to that Pact session. A repository-backed session may contain

@@ -194,6 +194,7 @@ func (s *Service) WriteFile(
 	return WriteFileOutput{File: file, ArtifactRevision: revision}, err
 }
 
+// simple patch. This could be replaced with unified diffs (git-like patches)
 func (s *Service) EditFile(
 	ctx context.Context,
 	input EditFileInput,
