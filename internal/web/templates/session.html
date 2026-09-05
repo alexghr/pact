@@ -59,20 +59,4 @@
   <div><button type="submit">Send</button></div>
 </form>
 
-<section>
-  <h2>Events</h2>
-  {{if .Events}}
-  <div class="stack">
-    {{range .Events}}
-    <details>
-      <summary><time datetime="{{.ReceivedAt}}">{{.ReceivedAt}}</time> — {{.Method}}</summary>
-      <pre>{{.ParamsJSON}}</pre>
-    </details>
-    {{end}}
-  </div>
-  {{else}}
-  <p>No stored events.</p>
-  {{end}}
-</section>
-
 {{- end}}

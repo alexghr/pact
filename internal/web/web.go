@@ -59,7 +59,6 @@ type pageData struct {
 	DefaultEffort            string
 	Session                  state.SessionRecord
 	Messages                 []conversationMessage
-	Events                   []eventView
 	SessionCount             int
 	RepositoryCount          int
 	ArtifactCount            int
@@ -99,12 +98,6 @@ type artifactFileItem struct {
 type conversationMessage struct {
 	Role string
 	Text string
-}
-
-type eventView struct {
-	Method     string
-	ParamsJSON string
-	ReceivedAt string
 }
 
 func New(ctx context.Context, store *state.Store, runner Runner) (*Server, error) {
@@ -305,11 +298,6 @@ func (s *Server) showSession(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "get session", err, "session_id", sessionID)
 		return
 	}
-	events, err := s.store.ListSessionEvents(r.Context(), sessionID)
-	if err != nil {
-		s.serverError(w, r, "list session events", err, "session_id", sessionID)
-		return
-	}
 	artifacts, err := s.store.SearchArtifacts(r.Context(), state.ArtifactSearch{
 		CreatorPactSessionID: sessionID,
 		Limit:                100,
@@ -330,20 +318,11 @@ func (s *Server) showSession(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "decode session transcript", err, "session_id", sessionID)
 		return
 	}
-	eventViews := make([]eventView, 0, len(events))
-	for _, event := range events {
-		eventViews = append(eventViews, eventView{
-			Method:     event.Method,
-			ParamsJSON: prettyJSON(event.ParamsJSON),
-			ReceivedAt: event.ReceivedAt,
-		})
-	}
 	pending := s.pendingTurn(sessionID)
 	s.render(w, r, "session", pageData{
 		Title:              fmt.Sprintf("Session %d", session.ID),
 		Session:            session,
 		Messages:           messages,
-		Events:             eventViews,
 		Artifacts:          artifactItems,
 		ArtifactCatalogURL: "/artifacts?creator_pact_session_id=" + strconv.FormatInt(sessionID, 10),
 		SessionURL:         sessionURL(sessionID),
@@ -687,20 +666,8 @@ func conversationMessages(transcript json.RawMessage) ([]conversationMessage, er
 	return messages, nil
 }
 
-func prettyJSON(raw json.RawMessage) string {
-	var output bytes.Buffer
-	if err := json.Indent(&output, raw, "", "  "); err != nil {
-		return string(raw)
-	}
-	return output.String()
-}
-
 func (s *Server) sessionPageData(ctx context.Context, sessionID int64) (pageData, error) {
 	session, err := s.store.GetSession(ctx, sessionID)
-	if err != nil {
-		return pageData{}, err
-	}
-	events, err := s.store.ListSessionEvents(ctx, sessionID)
 	if err != nil {
 		return pageData{}, err
 	}
@@ -708,20 +675,11 @@ func (s *Server) sessionPageData(ctx context.Context, sessionID int64) (pageData
 	if err != nil {
 		return pageData{}, fmt.Errorf("decode session transcript: %w", err)
 	}
-	eventViews := make([]eventView, 0, len(events))
-	for _, event := range events {
-		eventViews = append(eventViews, eventView{
-			Method:     event.Method,
-			ParamsJSON: prettyJSON(event.ParamsJSON),
-			ReceivedAt: event.ReceivedAt,
-		})
-	}
 	pending := s.pendingTurn(sessionID)
 	return pageData{
 		Title:      fmt.Sprintf("Session %d", session.ID),
 		Session:    session,
 		Messages:   messages,
-		Events:     eventViews,
 		SessionURL: sessionURL(sessionID),
 		Pending:    pending.Prompt,
 		Failure:    pending.Failure,

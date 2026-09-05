@@ -192,8 +192,9 @@ Treat these independently when reviewing a change:
    requests and stores the full `thread/read` result when the connection remains
    usable. When Docker exits, it records the terminal status, available exit
    code, and completion time. `pact list` displays each run's Pact session ID and
-   run metadata. The web interface lists Pact sessions directly and displays all
-   of a session's stored events plus the latest thread's full transcript. A
+   run metadata. The web interface lists Pact sessions directly and displays
+   conversation messages from the latest thread's transcript. Stored lifecycle
+   events are not displayed on the session page. A
    resumed invocation is recorded as a new
    run with its own events and transcript snapshot; the supplied Pact session ID
    selects that session's most recently used Codex thread. An unavailable exit
