@@ -1,7 +1,7 @@
 { pkgs, lib, config, inputs, ... }:
 let
   pkgs-unstable = import inputs.nixpkgs-unstable { system = pkgs.stdenv.system; };
-  agents = inputs.agents.packages.${pkgs.stdenv.system};
+  agents = import inputs.agents { inherit pkgs; };
 in
   {
     packages = with pkgs;
@@ -9,7 +9,6 @@ in
         git
         sqlite
         pkgs-unstable.gh
-
         agents.codex
       ];
 
