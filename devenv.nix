@@ -1,14 +1,16 @@
 { pkgs, lib, config, inputs, ... }:
 let
   pkgs-unstable = import inputs.nixpkgs-unstable { system = pkgs.stdenv.system; };
+  agents = inputs.agents.packages.${pkgs.stdenv.system};
 in
   {
     packages = with pkgs;
       [
         git
         sqlite
-        pkgs-unstable.codex
         pkgs-unstable.gh
+
+        agents.codex
       ];
 
     languages.go = {
