@@ -50,11 +50,38 @@ so either can configure them without constructing Docker arguments directly:
 - **Agent/thread:** one Codex execution identity with its own persistent or
   ephemeral state. A Pact session may own multiple threads. Parallel agents must
   not share writable state unless explicitly joined.
+- **Artifact:** a durable, integer-identified collection of named files created
+  by one Pact session. Its creating session never changes, but its metadata and
+  files are intentionally visible and writable through the artifact broker from
+  every Pact session. Artifacts are the shared project knowledge base for the
+  user and agents, including discoveries, living project guides, plans, and
+  human-readable explorations. A project may have many artifacts and an
+  artifact may span repositories. Artifact contents are not a secret store. See
+  [docs/artifacts.md](docs/artifacts.md) for the workflow, data, and MCP contract.
 - **Grant:** an explicit capability attached to a project or run, such as
   network access or one narrowly scoped credential. Absence means denied.
 
 The host-side Go code is the policy enforcement boundary. CLI and web inputs are
 requests to that policy layer, not raw Docker configuration.
+
+## Shared project knowledge
+
+When artifact tools are available, consult relevant knowledge across sessions
+before investigating a project. Record discoveries as work progresses, update
+existing notes when facts change, and refresh relevant artifacts before a
+handoff. Include project identity, source references, revision context, and
+verification evidence. Preserve and reconcile human contributions as well as
+other agents' work. Follow each repository's documentation practices while
+using artifacts for shared context; there is no required documentation layout.
+
+The canonical agent-facing workflow is
+[internal/artifacts/instructions.md](internal/artifacts/instructions.md).
+Pact embeds it into MCP initialization so it reaches agents in every selected
+repository. Keep that guidance and [docs/artifacts.md](docs/artifacts.md)
+consistent with implementation. These are instructions for how agents should
+work, not a claim that the harness enforces consultation or captures knowledge
+automatically. Direct human editing is planned; current human contributions
+are incorporated through an agent and attributed to its Pact session.
 
 ## Assets and trust boundaries
 
@@ -78,11 +105,13 @@ Treat these independently when reviewing a change:
    `~/.local/state/pact/pact.db`. It is never mounted into the container and
    persists repository definitions and checkout-instance session links,
    including each checkout's relative directory, Pact sessions, run metadata,
-   Codex thread links, selected lifecycle events, and full transcript snapshots
-   until the user removes it. A repository's push URL is stored for a future Git
-   integration and is not configured in the clone. Transcripts may contain prompts,
-   reasoning, workspace paths and contents, commands and output, file diffs,
-   and tool arguments and results.
+   Codex thread links, selected lifecycle events, full transcript snapshots,
+   and artifact metadata and file contents until the user removes it. A
+   repository's push URL is stored for a future Git integration and is not
+   configured in the clone. Transcripts may contain prompts, reasoning,
+   workspace paths and contents, commands and output, file diffs, and tool
+   arguments and results. Artifact files may be up to 16 MiB each. Pact does not
+   detect secrets in artifacts; users and agents must not put secrets there.
 2. **Credentials.** The host auth file is mounted read-only, but its contents
    are copied to the persistent state volume and are readable by the agent.
    Read-only mounting prevents modification, not disclosure or exfiltration.
@@ -111,7 +140,16 @@ Treat these independently when reviewing a change:
    that Pact session. The launcher requires the newly selected canonical
    workspace to exactly match the workspace recorded for the Pact session.
    Model, reasoning effort, and image profile are inherited unless the caller
-   explicitly overrides them.
+   explicitly overrides them. Artifacts are the deliberate exception to
+   per-session writable-state isolation: all sessions can read and change every
+   artifact, and the database records the creating and most recent editing
+   session. Metadata updates require the observed artifact revision; file
+   replacement and text editing require the observed file version. Version zero
+   permits file creation only. Text edits check the resulting size before
+   allocating it on the host. There is no artifact deletion or revision history;
+   revision numbers cannot retrieve previously reviewed contents. Artifact metadata and
+   files are untrusted cross-session inputs and must not be treated as agent
+   instructions merely because Pact stored them.
 6. **Supply chain.** Go and Node archives are versioned and checksum-verified.
    The Ubuntu base tag and default `@openai/codex@latest` installation are not
    immutable. The host launcher uses the pinned `go-sqlite3` module and requires
@@ -128,7 +166,12 @@ Treat these independently when reviewing a change:
    Pact.
 7. **Host Docker invocation.** Values are passed as argv, not evaluated by a
    shell. Still validate variants, paths, mounts, and option placement because
-   Docker itself interprets their syntax.
+   Docker itself interprets their syntax. Each run additionally receives one
+   launcher-created, private Unix socket mounted read-only at
+   `/opt/pact/artifacts.sock`. The socket directory exists only for that run and
+   is removed afterward. It exposes the session-bound artifact MCP broker, not
+   a host directory or the SQLite database. Any process in the container can
+   use the socket with the current run's artifact authority.
 8. **Run metadata.** Before building or running a new agent, the host creates an
    integer-identified Pact session containing the canonical workspace. Every run
    belongs to that Pact session. A repository-backed session may contain
@@ -155,7 +198,8 @@ Treat these independently when reviewing a change:
    `pact run`, `pact list`, or `pact web` applies pending migrations; without it,
    opening the database does not apply schema changes. The idempotent initial
    migration adopts databases which already have the original development
-   schema. The second migration adds repositories and checkout-instance rows.
+   schema. The second migration adds repositories and checkout-instance rows;
+   the third adds artifacts and artifact files.
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
    entrypoint. It parses CLI input, resolves the Pact state root and Codex auth
    source path from the host home directory, and passes those concrete paths to
@@ -163,10 +207,15 @@ Treat these independently when reviewing a change:
    harness does not infer the host's home-directory layout.
    `internal/harness` owns workspace policy, Docker execution, and the Codex
    protocol lifecycle, `internal/imagebuilder` owns tool-profile build inputs
-   and image preparation, and `internal/web` owns HTTP routing and templates.
+   and image preparation, `internal/artifacts` owns the session-bound artifact
+   service, its thin MCP adapter, and per-run broker, and `internal/web` owns HTTP routing and templates.
    There is no parallel shell implementation. The host communicates with the
    unprivileged Codex app server over Docker's stdin and stdout; setup diagnostics
-   are kept on stderr so they cannot corrupt the protocol stream.
+   are kept on stderr so they cannot corrupt the protocol stream. Codex starts
+   the built-in `artifacts` stdio MCP process; a fixed Node proxy in the image
+   forwards its newline-delimited JSON to the mounted Unix socket. The host
+   chooses the Pact session identity, so MCP callers cannot claim another
+   creating or editing session ID.
    `pact web` serves an unauthenticated HTML interface on the fixed loopback
    address `127.0.0.1:8080`. Starting a session first persists its integer Pact
    session ID, then redirects to that session's stable URL while the first turn
@@ -189,7 +238,11 @@ Treat these independently when reviewing a change:
    completed session reads its response from stored state. When a page loads
    during a pending turn, it opens a server-sent event stream that sends the
    pending chat, waits for the background turn to finish without polling, then
-   sends the completed or failed chat and closes.
+   sends the completed or failed chat and closes. The web interface also lists
+   and searches artifacts with pagination and a creating-session filter, links
+   each session to its full artifact catalog, and offers individual artifact
+   files as forced downloads so agent-authored HTML is not executed in
+   Pact's origin.
    The web server writes a structured startup notice plus HTTP server,
    request-operation, and background-run errors to stderr; request logs include
    paths and session identifiers where available, but not prompt bodies.
@@ -198,7 +251,9 @@ Treat these independently when reviewing a change:
 
 - The caller explicitly selects every host path exposed to the container. Do not
   infer or automatically mount parent directories, sibling projects, or common
-  credential/configuration locations.
+  credential/configuration locations. The launcher-generated artifact broker
+  socket is the sole built-in exception; it exposes the typed artifact API, not
+  its containing directory or another host path.
 - Canonicalize and validate the selected workspace: it must exist, be a
   directory, and have mount-safe syntax. Make the resolved path visible to the
   user before launch in any UI. Reject unsupported tool profiles from an
@@ -214,7 +269,10 @@ Treat these independently when reviewing a change:
 - Isolate session state per workspace or explicit session identity. Resume must
   be deterministic and must not cross workspace boundaries by accident. Two
   parallel agents for the same project should still receive separate writable
-  state unless the user explicitly joins them.
+  state unless the user explicitly joins them. The artifact broker is a narrow,
+  explicit exception: it exposes only non-secret artifact records and files,
+  identifies every mutation with the calling Pact session, and never exposes
+  the backing database or an ambient host directory.
 - Make network policy explicit per tool profile or grant and enforce it below
   the agent process. A UI or Codex feature flag is not a network control. Where
   network access is necessary, lack of unrelated secrets remains the primary
@@ -255,6 +313,11 @@ Treat these independently when reviewing a change:
 - Only add validation code where it is needed, where an input could be wrong
 - Do not pollute the code with overflow/underflow checks unless this scenario could happen in day to day running
 - Do not add premature complexity
+- Prefer the standard library and avoid new dependencies by default. Justify
+  exceptions by the maintenance work they replace, their quality, and their
+  transitive dependencies. The pinned official MCP Go SDK is an accepted
+  exception for protocol compatibility as Pact adds tools and servers; keep
+  SDK types in the protocol adapter rather than the core services.
 - Do not pursue 100% test coverage. Add tests only when they provide stable,
   high-value confidence without creating disproportionate maintenance work.
 - In `internal/web`, test application behavior only. Do not add tests that assert

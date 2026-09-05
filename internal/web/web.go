@@ -45,23 +45,33 @@ type Server struct {
 
 // the same struct is used by all the templates
 type pageData struct {
-	Title           string
-	Sessions        []sessionListItem
-	Repositories    []state.Repository
-	ImageProfiles   []string
-	DefaultImage    string
-	Models          []string
-	DefaultModel    string
-	EffortLevels    []string
-	DefaultEffort   string
-	Session         state.SessionRecord
-	Messages        []conversationMessage
-	Events          []eventView
-	SessionCount    int
-	RepositoryCount int
-	SessionURL      string
-	Pending         string
-	Failure         string
+	Title                    string
+	Sessions                 []sessionListItem
+	Repositories             []state.Repository
+	Artifacts                []artifactListItem
+	Artifact                 state.Artifact
+	ArtifactFiles            []artifactFileItem
+	ImageProfiles            []string
+	DefaultImage             string
+	Models                   []string
+	DefaultModel             string
+	EffortLevels             []string
+	DefaultEffort            string
+	Session                  state.SessionRecord
+	Messages                 []conversationMessage
+	Events                   []eventView
+	SessionCount             int
+	RepositoryCount          int
+	ArtifactCount            int
+	ArtifactQuery            string
+	ArtifactCreatorSessionID int64
+	ArtifactNextURL          string
+	ArtifactPreviousURL      string
+	ArtifactCatalogURL       string
+	CreatorURL               string
+	SessionURL               string
+	Pending                  string
+	Failure                  string
 }
 
 type pendingTurn struct {
@@ -74,6 +84,16 @@ type sessionListItem struct {
 	state.SessionRecord
 	URL     string
 	Preview string
+}
+
+type artifactListItem struct {
+	state.ArtifactSummary
+	URL string
+}
+
+type artifactFileItem struct {
+	state.ArtifactFile
+	URL string
 }
 
 type conversationMessage struct {
@@ -130,6 +150,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /repositories", s.listRepositories)
 	mux.HandleFunc("GET /repositories/new", s.newRepository)
 	mux.HandleFunc("POST /repositories", s.createRepository)
+	mux.HandleFunc("GET /artifacts", s.listArtifacts)
+	mux.HandleFunc("GET /artifacts/{artifactID}", s.showArtifact)
+	mux.HandleFunc("GET /artifacts/{artifactID}/files/{path...}", s.downloadArtifactFile)
 	mux.HandleFunc("GET /sessions", s.listSessions)
 	mux.HandleFunc("GET /sessions/new", s.newSession)
 	mux.HandleFunc("POST /sessions", s.startSession)
@@ -287,6 +310,21 @@ func (s *Server) showSession(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "list session events", err, "session_id", sessionID)
 		return
 	}
+	artifacts, err := s.store.SearchArtifacts(r.Context(), state.ArtifactSearch{
+		CreatorPactSessionID: sessionID,
+		Limit:                100,
+	})
+	if err != nil {
+		s.serverError(w, r, "list session artifacts", err, "session_id", sessionID)
+		return
+	}
+	artifactItems := make([]artifactListItem, 0, len(artifacts.Artifacts))
+	for _, artifact := range artifacts.Artifacts {
+		artifactItems = append(artifactItems, artifactListItem{
+			ArtifactSummary: artifact,
+			URL:             artifactURL(artifact.ID),
+		})
+	}
 	messages, err := conversationMessages(session.TranscriptJSON)
 	if err != nil {
 		s.serverError(w, r, "decode session transcript", err, "session_id", sessionID)
@@ -302,13 +340,15 @@ func (s *Server) showSession(w http.ResponseWriter, r *http.Request) {
 	}
 	pending := s.pendingTurn(sessionID)
 	s.render(w, r, "session", pageData{
-		Title:      fmt.Sprintf("Session %d", session.ID),
-		Session:    session,
-		Messages:   messages,
-		Events:     eventViews,
-		SessionURL: sessionURL(sessionID),
-		Pending:    pending.Prompt,
-		Failure:    pending.Failure,
+		Title:              fmt.Sprintf("Session %d", session.ID),
+		Session:            session,
+		Messages:           messages,
+		Events:             eventViews,
+		Artifacts:          artifactItems,
+		ArtifactCatalogURL: "/artifacts?creator_pact_session_id=" + strconv.FormatInt(sessionID, 10),
+		SessionURL:         sessionURL(sessionID),
+		Pending:            pending.Prompt,
+		Failure:            pending.Failure,
 	})
 }
 

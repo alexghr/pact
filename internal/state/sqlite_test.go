@@ -400,6 +400,10 @@ func TestMigrateAppliesEachMigrationOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessionID := createTestSession(t, store, "/tmp/project")
+	var firstMigrationCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&firstMigrationCount); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -408,8 +412,8 @@ func TestMigrateAppliesEachMigrationOnce(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 2 {
-		t.Fatalf("recorded migrations = %d, want 2", migrationCount)
+	if migrationCount != firstMigrationCount {
+		t.Fatalf("second migration changed the recorded count from %d to %d", firstMigrationCount, migrationCount)
 	}
 	if session, err := store.GetSession(ctx, sessionID); err != nil || session.WorkspaceDir != "/tmp/project" {
 		t.Fatalf("session after second Migrate() = %#v, %v", session, err)
