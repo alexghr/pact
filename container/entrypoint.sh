@@ -42,4 +42,5 @@ fi
 exec codex app-server \
   --listen stdio:// \
   --config 'sandbox_mode="danger-full-access"' \
-  --config 'web_search="disabled"'
+  --config 'web_search="disabled"' \
+  --config 'mcp_servers.artifacts={ command = "node", args = ["/opt/pact/artifacts-proxy.mjs", "/opt/pact/artifacts.sock"], enabled = true, required = true, default_tools_approval_mode = "approve" }'

@@ -34,6 +34,7 @@ RUN groupadd pact && useradd --gid pact --shell /bin/bash --create-home pact && 
   mkdir /opt/pact
 
 COPY ./entrypoint.sh /opt/pact/entrypoint.sh
+COPY ./artifacts-proxy.mjs /opt/pact/artifacts-proxy.mjs
 RUN chmod 0755 /opt/pact/entrypoint.sh
 
 ENV CODEX_HOME=/home/pact/.codex
