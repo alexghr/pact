@@ -1,0 +1,35 @@
+{{define "content" -}}
+<header>
+  <h1>{{.Artifact.Name}}</h1>
+  {{if .Artifact.Description}}<p>{{.Artifact.Description}}</p>{{end}}
+  <dl>
+    <dt>ID</dt><dd>{{.Artifact.ID}}</dd>
+    <dt>Creating session</dt><dd><a href="{{.CreatorURL}}">{{.Artifact.CreatorPactSessionID}}</a></dd>
+    <dt>Last edited by session</dt><dd><a href="/sessions/{{.Artifact.UpdatedByPactSessionID}}">{{.Artifact.UpdatedByPactSessionID}}</a></dd>
+    <dt>Revision</dt><dd>{{.Artifact.Revision}}</dd>
+    <dt>Created</dt><dd><time datetime="{{.Artifact.CreatedAt}}">{{.Artifact.CreatedAt}}</time></dd>
+    <dt>Updated</dt><dd><time datetime="{{.Artifact.UpdatedAt}}">{{.Artifact.UpdatedAt}}</time></dd>
+  </dl>
+</header>
+<section>
+  <h2>Files</h2>
+  {{if .ArtifactFiles}}
+  <ul class="stack">
+    {{range .ArtifactFiles}}
+    <li>
+      <a href="{{.URL}}" download>{{.Path}}</a>
+      <dl>
+        <dt>Media type</dt><dd>{{.MediaType}}</dd>
+        <dt>Size</dt><dd>{{.SizeBytes}} bytes</dd>
+        <dt>Version</dt><dd>{{.Version}}</dd>
+        <dt>SHA-256</dt><dd><code>{{.SHA256}}</code></dd>
+        <dt>Last edited by session</dt><dd><a href="/sessions/{{.UpdatedByPactSessionID}}">{{.UpdatedByPactSessionID}}</a></dd>
+      </dl>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p>This artifact has no files yet.</p>
+  {{end}}
+</section>
+{{- end}}

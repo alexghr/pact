@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alexghr/pact/internal/artifacts"
 	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/imagebuilder"
@@ -135,6 +136,10 @@ func (r *Runner) Run(
 	if err != nil {
 		return 0, err
 	}
+	artifactBroker, err := artifacts.StartBroker(ctx, r.store, pactSessionID)
+	if err != nil {
+		return 0, err
+	}
 
 	runID, err := r.store.StartRun(ctx, state.Run{
 		PactSessionID:     pactSessionID,
@@ -143,7 +148,7 @@ func (r *Runner) Run(
 		DockerfileVariant: options.Image,
 	})
 	if err != nil {
-		return 0, err
+		return 0, errors.Join(err, artifactBroker.Close())
 	}
 	var stateVolume string
 	if resumeTarget != nil {
@@ -162,10 +167,12 @@ func (r *Runner) Run(
 			workspace + ":" + containerWorkspace,
 			stateVolume + ":/home/pact/.codex",
 			r.authFile + ":/opt/pact/host-auth.json:ro",
+			artifactBroker.Mount(),
 		},
 	}, func(ctx context.Context, reader io.Reader, writer io.Writer) error {
 		return r.runCodexTurn(ctx, reader, writer, options, runID, stateVolume, resumeTarget)
 	})
+	runErr = errors.Join(runErr, artifactBroker.Close())
 
 	status := "finished"
 	exitCode := 0
