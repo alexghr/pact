@@ -206,7 +206,7 @@ Treat these independently when reviewing a change:
    opening the database does not apply schema changes. The idempotent initial
    migration adopts databases which already have the original development
    schema. The second migration adds repositories and checkout-instance rows;
-   the third adds artifacts and artifact files.
+   the third adds artifacts and artifact files; the fourth adds models and system preferences.
 9. **Launcher.** The `pact` binary built from `cmd/pact` is the sole supported
    entrypoint. It parses CLI input, resolves the Pact state root and Codex auth
    source path from the host home directory, and passes those concrete paths to
@@ -226,9 +226,9 @@ Treat these independently when reviewing a change:
    `pact web` serves an unauthenticated HTML interface on the fixed loopback
    address `127.0.0.1:8080`. Starting a session first persists its integer Pact
    session ID, then redirects to that session's stable URL while the first turn
-   runs in the background. The new-session form offers fixed model and reasoning
-   effort choices plus the built-in `generic` and `go` image profiles. It uses
-   the harness defaults when values are omitted. Model and effort values are
+   runs in the background. The new-session form offers the editable model catalog and explicit effort
+   choices, preselecting and marking the model's default effort, plus the built-in `generic` and `go`
+   image profiles. It uses persisted system preferences when values are omitted. Model and effort values are
    passed to Codex, whose rejection makes the background run fail; unsupported
    image profiles are rejected before creating the session. Session creation is
    a harness policy operation: an explicitly supplied workspace is canonicalized
@@ -343,3 +343,32 @@ The minimum local check is:
 go test ./...
 go vet ./...
 ```
+
+## System preferences and model catalog
+
+Migration `004_preferences.sql` adds a host-owned model catalog and a singleton,
+column-typed system preferences record in the existing private SQLite database.
+The catalog stores model identifiers, display names, and configurable default
+reasoning efforts. Preferences select one catalog model and one allowlisted image
+profile as defaults. The migration seeds the catalog once, including GPT-6 Astra,
+and preserves the previous global defaults (GPT-5.6 Sol with low effort and the
+`generic` profile). Reopening or migrating never restores removed seed entries.
+
+The Settings page lets the user add, edit, and remove models and change system
+preferences. The global default model cannot be removed until another is selected.
+Model identifiers and effort names are extensible; Codex remains responsible for
+rejecting unsupported models or effort combinations. Explicit CLI models need not
+be in the catalog; an unlisted model without an explicit effort uses Codex's own
+default. The web model picker reads the catalog. The effort selector includes the
+standard choices and catalog defaults, preselects the model's default, and marks
+that option with `(default)`. Changing models with JavaScript enabled selects the
+new model's default effort; submission sends the selected effort explicitly.
+
+The shared harness resolves omitted run options from system preferences. Resuming
+retains the recorded thread model, effort, and image profile, including for a model
+removed from the catalog. An explicit different model uses that model's catalog
+default effort unless effort is also overridden. Catalog changes never rewrite
+run history. Image preferences store built-in profile names, not Docker arguments
+or arbitrary image references. These settings have the same host database lifetime
+as other metadata, are never mounted in containers, and add no container grants,
+mounts, credentials, or network paths. Model discovery is not implemented.

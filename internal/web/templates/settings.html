@@ -1,0 +1,49 @@
+{{define "content" -}}
+<header><h1>Settings</h1><p>Defaults apply to new sessions. Resumed threads keep their recorded settings.</p></header>
+<section>
+  <h2>System preferences</h2>
+  <form method="post" action="/settings/preferences">
+    <label>Default model
+      <select name="default_model_id" required>
+        {{range .Models}}<option value="{{.ID}}"{{if eq .ID $.Preferences.DefaultModelID}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <label>Default image profile
+      <select name="default_image_profile" required>
+        {{range .ImageProfiles}}<option value="{{.}}"{{if eq . $.Preferences.DefaultImageProfile}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <div><button type="submit">Save preferences</button></div>
+  </form>
+</section>
+<section>
+  <h2>Models</h2>
+  <p>Model identifiers and effort levels must be supported by Codex. Removing a model keeps existing sessions and run history.</p>
+  <datalist id="effort-levels">{{range .EffortLevels}}<option value="{{.}}">{{end}}</datalist>
+  {{range .Models}}
+  <fieldset class="stack">
+    <legend>{{.Name}}{{if eq .ID $.Preferences.DefaultModelID}} · Default{{end}}</legend>
+    <form method="post" action="/settings/model">
+      <input type="hidden" name="id" value="{{.ID}}">
+      <label>Model identifier <input name="model" value="{{.Model}}" required></label>
+      <label>Display name <input name="name" value="{{.Name}}" required></label>
+      <label>Default effort <input name="default_effort" value="{{.DefaultEffort}}" list="effort-levels" required></label>
+      <div><button type="submit">Save model</button></div>
+    </form>
+    {{if ne .ID $.Preferences.DefaultModelID}}
+    <form method="post" action="/settings/delete-model">
+      <input type="hidden" name="id" value="{{.ID}}">
+      <div><button type="submit">Remove model</button></div>
+    </form>
+    {{end}}
+  </fieldset>
+  {{end}}
+  <h3>Add model</h3>
+  <form method="post" action="/settings/model">
+    <label>Model identifier <input name="model" required></label>
+    <label>Display name <input name="name" required></label>
+    <label>Default effort <input name="default_effort" list="effort-levels" required></label>
+    <div><button type="submit">Add model</button></div>
+  </form>
+</section>
+{{- end}}

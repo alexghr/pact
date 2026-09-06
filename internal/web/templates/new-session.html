@@ -3,7 +3,7 @@
   <h1>New session</h1>
   <p>The workspace will be stored in Pact's state directory, optionally populated from saved repositories.</p>
 </header>
-<form method="post" action="/sessions">
+<form id="new-session-form" method="post" action="/sessions">
   {{if .Repositories}}
   <fieldset class="stack">
     <legend>Repositories</legend>
@@ -23,13 +23,13 @@
   <label>
     Model
     <select name="model" required>
-      {{range .Models}}<option value="{{.}}"{{if eq . $.DefaultModel}} selected{{end}}>{{.}}</option>{{end}}
+      {{range .Models}}<option value="{{.Model}}" data-default-effort="{{.DefaultEffort}}"{{if eq .Model $.DefaultModel}} selected{{end}}>{{.Name}}</option>{{end}}
     </select>
   </label>
   <label>
     Reasoning effort
-    <select name="effort" required>
-      {{range .EffortLevels}}<option value="{{.}}"{{if eq . $.DefaultEffort}} selected{{end}}>{{.}}</option>{{end}}
+    <select name="effort">
+      {{range .EffortLevels}}<option value="{{.}}"{{if eq . $.DefaultEffort}} selected{{end}}>{{.}}{{if eq . $.DefaultEffort}} (default){{end}}</option>{{end}}
     </select>
   </label>
   <label>
@@ -48,4 +48,5 @@
   </label>
   <div><button type="submit">Start session</button></div>
 </form>
+<script type="module" src="/static/new-session-form.js"></script>
 {{- end}}

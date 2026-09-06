@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,10 +54,11 @@ type pageData struct {
 	ArtifactFiles            []artifactFileItem
 	ImageProfiles            []string
 	DefaultImage             string
-	Models                   []string
+	Models                   []state.Model
+	Preferences              state.Preferences
 	DefaultModel             string
-	EffortLevels             []string
 	DefaultEffort            string
+	EffortLevels             []string
 	Session                  state.SessionRecord
 	Messages                 []conversationMessage
 	SessionCount             int
@@ -136,6 +138,8 @@ func (s *Server) ListenAndServe(logOutput io.Writer) error {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /settings", s.settings)
+	mux.HandleFunc("POST /settings/{action}", s.changeSettings)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/sessions", http.StatusSeeOther)
 	})
@@ -224,16 +228,31 @@ func (s *Server) newSession(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "list repositories", err)
 		return
 	}
-	defaults := harness.DefaultOptions()
+	defaults, err := harness.ResolveOptions(r.Context(), s.store, harness.Options{}, nil)
+	if err != nil {
+		s.serverError(w, r, "read preferences", err)
+		return
+	}
+	models, err := s.store.ListModels(r.Context())
+	if err != nil {
+		s.serverError(w, r, "list models", err)
+		return
+	}
+	efforts := supportedEffortLevels()
+	for _, model := range models {
+		if !slices.Contains(efforts, model.DefaultEffort) {
+			efforts = append(efforts, model.DefaultEffort)
+		}
+	}
 	s.render(w, r, "new-session", pageData{
 		Title:         "New session",
 		Repositories:  repositories,
 		ImageProfiles: builtinImageProfileNames(),
 		DefaultImage:  defaults.Image,
-		Models:        supportedModels(),
+		Models:        models,
 		DefaultModel:  defaults.Model,
-		EffortLevels:  supportedEffortLevels(),
 		DefaultEffort: defaults.Effort,
+		EffortLevels:  efforts,
 	})
 }
 
@@ -250,6 +269,11 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	options, err := harness.ResolveOptions(r.Context(), s.store, harness.Options{Prompt: prompt, Image: image, Model: strings.TrimSpace(r.FormValue("model")), Effort: strings.TrimSpace(r.FormValue("effort"))}, nil)
+	if err != nil {
+		s.serverError(w, r, "resolve session options", err)
+		return
+	}
 	sessionID, workspace, err := s.runner.CreateSession(r.Context(), harness.SessionOptions{
 		RepositoryIDs: repositoryIDs,
 	})
@@ -261,16 +285,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, "create session", err)
 		return
 	}
-	options := harness.DefaultOptions()
 	options.Workspace = workspace
-	options.Prompt = prompt
-	options.Image = image
-	if model := strings.TrimSpace(r.FormValue("model")); model != "" {
-		options.Model = model
-	}
-	if effort := strings.TrimSpace(r.FormValue("effort")); effort != "" {
-		options.Effort = effort
-	}
 	s.beginTurn(sessionID, prompt)
 	go s.runTurn(sessionID, options, nil)
 	http.Redirect(w, r, sessionURL(sessionID), http.StatusSeeOther)
@@ -366,6 +381,12 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 	} else if !errors.Is(err, state.ErrResumeTargetNotFound) {
 		s.finishTurn(sessionID, nil)
 		s.serverError(w, r, "get resume target", err, "session_id", sessionID)
+		return
+	}
+	options, err = harness.ResolveOptions(r.Context(), s.store, options, target)
+	if err != nil {
+		s.finishTurn(sessionID, err)
+		s.serverError(w, r, "resolve session options", err)
 		return
 	}
 	go s.runTurn(sessionID, options, target)
@@ -552,7 +573,7 @@ func repositoryIDsFromForm(w http.ResponseWriter, r *http.Request) ([]int64, boo
 func imageFromForm(w http.ResponseWriter, r *http.Request) (string, bool) {
 	image := strings.TrimSpace(r.FormValue("image"))
 	if image == "" {
-		image = harness.DefaultOptions().Image
+		return "", true
 	}
 	for _, profile := range imagebuilder.BuiltinProfiles() {
 		if image == profile.Name {
@@ -570,10 +591,6 @@ func builtinImageProfileNames() []string {
 		names = append(names, profile.Name)
 	}
 	return names
-}
-
-func supportedModels() []string {
-	return []string{"gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"}
 }
 
 func supportedEffortLevels() []string {

@@ -111,7 +111,7 @@ func parseRunOptionsFrom(args []string, output io.Writer, options runOptions) (r
 	if options.Prompt == "" {
 		return runOptions{}, fmt.Errorf("prompt must not be empty")
 	}
-	if options.Image != "generic" && options.Image != "go" {
+	if options.Image != "" && options.Image != "generic" && options.Image != "go" {
 		return runOptions{}, fmt.Errorf("unsupported image %q (must be generic or go)", options.Image)
 	}
 	return options, nil
@@ -136,12 +136,7 @@ func prepareRunOptions(ctx context.Context, args []string, output io.Writer) (ru
 		return runOptions{}, nil, err
 	}
 
-	defaults := defaultRunOptions()
-	defaults.Model = target.Model
-	defaults.Effort = target.Effort
-	defaults.Image = target.DockerfileVariant
-	defaults.resumeSession = target.PactSessionID
-	options, err := parseRunOptionsFrom(args, output, defaults)
+	options, err := parseRunOptions(args, output)
 	if err != nil {
 		return runOptions{}, nil, err
 	}

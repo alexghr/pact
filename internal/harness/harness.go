@@ -37,9 +37,6 @@ type SessionOptions struct {
 func DefaultOptions() Options {
 	return Options{
 		Workspace: ".",
-		Model:     "gpt-5.6-sol",
-		Effort:    "low",
-		Image:     "generic",
 	}
 }
 
@@ -109,7 +106,14 @@ func (r *Runner) Run(
 	if options.Prompt == "" {
 		return 0, errors.New("prompt must not be empty")
 	}
-	if r.images == nil || !r.images.HasProfile(options.Image) {
+	if r.images == nil || (options.Image != "" && !r.images.HasProfile(options.Image)) {
+		return 0, fmt.Errorf("unsupported image %q", options.Image)
+	}
+	options, err := ResolveOptions(ctx, r.store, options, resumeTarget)
+	if err != nil {
+		return 0, err
+	}
+	if !r.images.HasProfile(options.Image) {
 		return 0, fmt.Errorf("unsupported image %q", options.Image)
 	}
 	workspace, err := canonicalWorkspace(options.Workspace)
