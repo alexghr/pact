@@ -1,5 +1,5 @@
 # Build from the repository root:
-#   docker build --tag pact-codex --file nix/Dockerfile nix
+#   docker build --tag pact-codex --file internal/nix/Dockerfile internal/nix
 FROM nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8 AS tools
 
 COPY flake.nix flake.lock /tmp/pact-tools/

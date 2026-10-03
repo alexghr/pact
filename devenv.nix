@@ -52,9 +52,18 @@
       exec = ''
         set -euo pipefail
 
+        source_files() {
+          git ls-files -z --cached --others --exclude-standard --deduplicate "$1" |
+            while IFS= read -r -d "" file; do
+              if [[ -f "$file" ]]; then
+                printf '%s\0' "$file"
+              fi
+            done
+        }
+
         if [[ $# -eq 0 ]]; then
-          git ls-files -z '*.nix' | xargs -0 -r nixfmt
-          git ls-files -z '*.go' | xargs -0 -r gofmt -w
+          source_files '*.nix' | xargs -0 -r nixfmt
+          source_files '*.go' | xargs -0 -r gofmt -w
           exit 0
         fi
         if [[ $# -ne 1 || "$1" != --check ]]; then
@@ -62,8 +71,8 @@
           exit 2
         fi
 
-        git ls-files -z '*.nix' | xargs -0 -r nixfmt --check
-        unformatted=$(git ls-files -z '*.go' | xargs -0 -r gofmt -l)
+        source_files '*.nix' | xargs -0 -r nixfmt --check
+        unformatted=$(source_files '*.go' | xargs -0 -r gofmt -l)
         if [[ -n "$unformatted" ]]; then
           printf 'Go files need formatting:\n%s\n' "$unformatted" >&2
           exit 1

@@ -69,11 +69,13 @@ fi
 
 codex_args+=(
   --model "$2" \
-  --config "model_reasoning_effort=\"$3\"" \
   --sandbox danger-full-access \
   --config 'web_search="disabled"' \
   --cd /home/pact/workspace
 )
+if [[ -n "$3" ]]; then
+  codex_args+=(--config "model_reasoning_effort=\"$3\"")
+fi
 if [[ -n "$1" ]]; then
   codex_args+=("$1")
 fi
