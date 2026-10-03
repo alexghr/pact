@@ -14,7 +14,7 @@ import (
 )
 
 // agentConfig holds the options passed to the container's agent entrypoint.
-// MCP servers and system prompts can be added here when they are supported.
+// Pact's environment instructions are supplied by the container entrypoint.
 type agentConfig struct {
 	workspace string
 	prompt    string

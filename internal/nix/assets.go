@@ -5,5 +5,5 @@ import "embed"
 
 // BuildContext is the Dockerfile and its COPY inputs.
 //
-//go:embed Dockerfile flake.nix flake.lock nix.conf entrypoint.sh
+//go:embed Dockerfile flake.nix flake.lock nix.conf entrypoint.sh agent-instructions.md
 var BuildContext embed.FS

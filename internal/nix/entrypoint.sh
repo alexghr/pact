@@ -70,7 +70,7 @@ fi
 codex_args+=(
   --model "$2" \
   --sandbox danger-full-access \
-  --config 'web_search="disabled"' \
+  --config "developer_instructions='''$(< /opt/pact/agent-instructions.md)'''" \
   --cd /home/pact/workspace
 )
 if [[ -n "$3" ]]; then
