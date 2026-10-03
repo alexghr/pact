@@ -3,10 +3,10 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: run.sh --workspace PATH --prompt TEXT [--model MODEL] [--effort EFFORT]
+Usage: run.sh --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT]
 
   -w, --workspace PATH  Workspace directory to mount (required)
-  -p, --prompt TEXT     Prompt to run (required)
+  -p, --prompt TEXT     Prompt to run (omit to start an interactive session)
   -m, --model MODEL     Model to use (default: gpt-6.1-sol)
   -e, --effort EFFORT   Reasoning effort (default: low)
   -h, --help            Show this help
@@ -39,15 +39,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$workspace" ]] || fail "--workspace is required."
-[[ -n "$prompt" ]] || fail "--prompt is required."
 workspace="$(realpath "$workspace")"
+
+docker_run_args=(--rm)
+if [[ -z "$prompt" ]]; then
+  docker_run_args+=(-it)
+fi
 
 docker build \
   --tag pact-codex \
   --file ./nix/Dockerfile \
   ./nix
 
-docker run --rm \
+docker run "${docker_run_args[@]}" \
   --volume "$workspace:/home/pact/workspace" \
   --volume pact-codex-state:/home/pact/.codex \
   --volume pact-codex-state-nix:/nix \

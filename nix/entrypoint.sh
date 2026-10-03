@@ -51,7 +51,7 @@ if ! cmp -s /opt/pact/store-registration /nix/.pact-store-registration; then
 fi
 export PATH="/opt/pact/tools/bin:$PATH"
 
-if [[ $# -ne 3 || -z "$1" ]]; then
+if [[ $# -ne 3 ]]; then
   echo "Error: expected prompt, model, and effort arguments." >&2
   exit 1
 fi
@@ -62,13 +62,20 @@ if ! codex login status >/dev/null 2>&1; then
   exit 1
 fi
 
-exec codex --ask-for-approval never \
-  exec \
-  --skip-git-repo-check \
-  --ignore-user-config \
+codex_args=(--ask-for-approval never)
+if [[ -n "$1" ]]; then
+  codex_args+=(exec --skip-git-repo-check --ignore-user-config)
+fi
+
+codex_args+=(
   --model "$2" \
   --config "model_reasoning_effort=\"$3\"" \
   --sandbox danger-full-access \
   --config 'web_search="disabled"' \
-  --cd /home/pact/workspace \
-  "$1"
+  --cd /home/pact/workspace
+)
+if [[ -n "$1" ]]; then
+  codex_args+=("$1")
+fi
+
+exec codex "${codex_args[@]}"
