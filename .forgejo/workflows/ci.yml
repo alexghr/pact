@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-test-build:
+    runs-on: nix
+    env:
+      DEVENV_PROFILE: ci
+    steps:
+      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          github-server-url: https://forge.alexghr.me
+          persist-credentials: false
+
+      - name: Lint, test, and build
+        run: ./shell p-ci
