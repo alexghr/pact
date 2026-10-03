@@ -1,0 +1,10 @@
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  nixpkgs-unstable:
+    url: github:NixOS/nixpkgs/nixpkgs-unstable
+  agents:
+    url: github:alexghr/agents.nix
+    flake: false
+  git-hooks:
+    url: github:cachix/git-hooks.nix

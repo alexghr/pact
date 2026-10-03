@@ -9,7 +9,8 @@
     };
   };
 
-  outputs = { nixpkgs, agents, ... }:
+  outputs =
+    { nixpkgs, agents, ... }:
     let
       pkgs = import nixpkgs { system = "x86_64-linux"; };
       agentPackages = agents.packages.x86_64-linux;
@@ -37,7 +38,8 @@
           xz
         ];
       };
-    in {
+    in
+    {
       packages.x86_64-linux = {
         pact-tools = tools;
         default = tools;

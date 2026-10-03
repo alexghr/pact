@@ -1,1 +1,4 @@
-/sessions/
+/pact
+/.devenv
+# git hooks managed by nix
+/.pre-commit-config.yaml
