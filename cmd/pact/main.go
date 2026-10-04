@@ -223,7 +223,7 @@ func run(args []string) (runErr error) {
 	}
 	var runtimeOptions []string
 	if cfg.dind {
-		name, cleanup, err := dind.Start(cfg.workspace)
+		name, cleanup, err := dind.Start(ctx, cfg.workspace)
 		if err != nil {
 			return err
 		}
