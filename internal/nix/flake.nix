@@ -32,6 +32,7 @@
           gnutar
           gzip
           less
+          openssh
           procps
           ripgrep
           which

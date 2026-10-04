@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 
+	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/nix"
 )
 
@@ -20,6 +23,8 @@ type agentConfig struct {
 	prompt    string
 	model     string
 	effort    string
+	config    string
+	git       *config.Git
 }
 
 func parseArgs(args []string, output io.Writer) (agentConfig, error) {
@@ -34,8 +39,9 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	flags.StringVar(&cfg.model, "m", cfg.model, "Alias for --model")
 	flags.StringVar(&cfg.effort, "effort", cfg.effort, "Reasoning effort (omit to use the model default)")
 	flags.StringVar(&cfg.effort, "e", cfg.effort, "Alias for --effort")
+	flags.StringVar(&cfg.config, "config", "", "Config file (default: $XDG_CONFIG_HOME/pact/config.json or ~/.config/pact/config.json)")
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT]")
+		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -82,15 +88,32 @@ func dockerArgs(cfg agentConfig, home string, uid, gid int) []string {
 	if cfg.prompt == "" {
 		args = append(args, "-it")
 	}
-	return append(args,
+	args = append(args,
 		"--volume", cfg.workspace+":/home/pact/workspace",
 		"--volume", "pact-codex-state:/home/pact/.codex",
 		"--volume", "pact-codex-state-nix:/nix",
 		"--volume", filepath.Join(home, ".codex", "auth.json")+":/opt/pact/host-auth.json:ro",
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
-		"pact-codex", cfg.prompt, cfg.model, cfg.effort,
 	)
+	if cfg.git != nil {
+		args = append(args,
+			"--env", "PACT_GIT_NAME="+cfg.git.Name,
+			"--env", "PACT_GIT_EMAIL="+cfg.git.Email,
+		)
+		if cfg.git.SSHKey != "" {
+			// Docker's --mount uses CSV, so quote paths that contain commas.
+			var mount strings.Builder
+			writer := csv.NewWriter(&mount)
+			_ = writer.Write([]string{"type=bind", "source=" + cfg.git.SSHKey, "target=/opt/pact/host-git-key", "readonly"})
+			writer.Flush()
+			args = append(args,
+				"--mount", strings.TrimSuffix(mount.String(), "\n"),
+				"--env", "PACT_GIT_SSH_KEY=/opt/pact/host-git-key",
+			)
+		}
+	}
+	return append(args, "pact-codex", cfg.prompt, cfg.model, cfg.effort)
 }
 
 func runDocker(args ...string) error {
@@ -104,6 +127,11 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	settings, err := config.Load(cfg.config)
+	if err != nil {
+		return err
+	}
+	cfg.git = settings.Git
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err

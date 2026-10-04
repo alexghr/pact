@@ -84,9 +84,17 @@
       go build ./cmd/pact
     '';
 
-    p-test.exec = ''
-      go test ./...
-    '';
+    p-test = {
+      packages = [
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.git
+        pkgs.openssh
+      ];
+      exec = ''
+        go test ./...
+      '';
+    };
 
     p-lint.exec = ''
       go vet ./...

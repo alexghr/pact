@@ -51,6 +51,10 @@ if ! cmp -s /opt/pact/store-registration /nix/.pact-store-registration; then
 fi
 export PATH="/opt/pact/tools/bin:$PATH"
 
+if [[ -n "${PACT_GIT_NAME:-}${PACT_GIT_EMAIL:-}${PACT_GIT_SSH_KEY:-}" ]]; then
+  source /opt/pact/git-identity.sh
+fi
+
 if [[ $# -ne 3 ]]; then
   echo "Error: expected prompt, model, and effort arguments." >&2
   exit 1
