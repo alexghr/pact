@@ -36,6 +36,7 @@
           openssh
           procps
           ripgrep
+          socat
           which
           xz
         ];

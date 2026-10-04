@@ -89,8 +89,10 @@
       packages = [
         pkgs.bash
         pkgs.coreutils
+        pkgs.curl
         pkgs.git
         pkgs.openssh
+        pkgs.socat
       ];
       exec = ''
         go test ./...

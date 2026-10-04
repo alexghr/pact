@@ -55,10 +55,14 @@ if [[ -n "${PACT_GIT_NAME:-}${PACT_GIT_EMAIL:-}${PACT_GIT_SSH_KEY:-}" ]]; then
   source /opt/pact/git-identity.sh
 fi
 
-if [[ $# -ne 3 ]]; then
-  echo "Error: expected prompt, model, and effort arguments." >&2
+if [[ $# -lt 3 ]]; then
+  echo "Error: expected prompt, model, effort, and optional Codex arguments." >&2
   exit 1
 fi
+prompt="$1"
+model="$2"
+effort="$3"
+shift 3
 
 if ! codex login status >/dev/null 2>&1; then
   echo "Error: This Pact session has no usable Codex login." >&2
@@ -66,22 +70,28 @@ if ! codex login status >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ -n "${PACT_MCP_SOCKET:-}" ]]; then
+  source /opt/pact/mcp-relay.sh
+  start_mcp_relay "$PACT_MCP_SOCKET" 8765
+fi
+
 codex_args=(--ask-for-approval never)
-if [[ -n "$1" ]]; then
+if [[ -n "$prompt" ]]; then
   codex_args+=(exec --skip-git-repo-check --ignore-user-config)
 fi
 
 codex_args+=(
-  --model "$2" \
+  --model "$model" \
   --sandbox danger-full-access \
   --config "developer_instructions='''$(< /opt/pact/agent-instructions.md)'''" \
   --cd /home/pact/workspace
 )
-if [[ -n "$3" ]]; then
-  codex_args+=(--config "model_reasoning_effort=\"$3\"")
+if [[ -n "$effort" ]]; then
+  codex_args+=(--config "model_reasoning_effort=\"$effort\"")
 fi
-if [[ -n "$1" ]]; then
-  codex_args+=("$1")
+codex_args+=("$@")
+if [[ -n "$prompt" ]]; then
+  codex_args+=("$prompt")
 fi
 
 exec codex "${codex_args[@]}"

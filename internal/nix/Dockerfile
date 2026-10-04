@@ -24,6 +24,7 @@ COPY --from=tools /opt/pact/ /opt/pact/
 COPY nix.conf /etc/nix/nix.conf
 COPY entrypoint.sh /opt/pact/entrypoint.sh
 COPY git-identity.sh /opt/pact/git-identity.sh
+COPY mcp-relay.sh /opt/pact/mcp-relay.sh
 COPY agent-instructions.md /opt/pact/agent-instructions.md
 RUN chmod 0755 /opt/pact/entrypoint.sh
 

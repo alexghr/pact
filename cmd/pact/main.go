@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"crypto/rand"
 	"encoding/csv"
 	"errors"
 	"flag"
@@ -8,12 +10,16 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/dind"
+	"github.com/alexghr/pact/internal/mcphost"
 	"github.com/alexghr/pact/internal/nix"
 )
 
@@ -27,6 +33,8 @@ type agentConfig struct {
 	effort    string
 	config    string
 	git       *config.Git
+	mcpSocket string
+	mcpNames  []string
 }
 
 func parseArgs(args []string, output io.Writer) (agentConfig, error) {
@@ -74,16 +82,25 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	return cfg, nil
 }
 
-func buildImage() error {
-	context, err := os.MkdirTemp("", "pact-build-")
+func buildImage(ctx context.Context) error {
+	buildContext, err := os.MkdirTemp("", "pact-build-")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(context)
-	if err := os.CopyFS(context, container.BuildContext); err != nil {
+	defer os.RemoveAll(buildContext)
+	if err := os.CopyFS(buildContext, container.BuildContext); err != nil {
 		return fmt.Errorf("extract Docker build context: %w", err)
 	}
-	return runDocker("build", "--tag", "pact-codex", "--file", filepath.Join(context, "Dockerfile"), context)
+	return runDocker(ctx, "build", "--tag", "pact-codex", "--file", filepath.Join(buildContext, "Dockerfile"), buildContext)
+}
+
+func readOnlyMount(source, target string) string {
+	// Docker's --mount uses CSV, so quote paths that contain commas.
+	var mount strings.Builder
+	writer := csv.NewWriter(&mount)
+	_ = writer.Write([]string{"type=bind", "source=" + source, "target=" + target, "readonly"})
+	writer.Flush()
+	return strings.TrimSuffix(mount.String(), "\n")
 }
 
 func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...string) []string {
@@ -99,34 +116,62 @@ func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...st
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
 	)
+	if cfg.mcpSocket != "" {
+		args = append(args,
+			"--mount", readOnlyMount(cfg.mcpSocket, "/opt/pact/mcp.sock"),
+			"--env", "PACT_MCP_SOCKET=/opt/pact/mcp.sock",
+		)
+	}
 	if cfg.git != nil {
 		args = append(args,
 			"--env", "PACT_GIT_NAME="+cfg.git.Name,
 			"--env", "PACT_GIT_EMAIL="+cfg.git.Email,
 		)
 		if cfg.git.SSHKey != "" {
-			// Docker's --mount uses CSV, so quote paths that contain commas.
-			var mount strings.Builder
-			writer := csv.NewWriter(&mount)
-			_ = writer.Write([]string{"type=bind", "source=" + cfg.git.SSHKey, "target=/opt/pact/host-git-key", "readonly"})
-			writer.Flush()
 			args = append(args,
-				"--mount", strings.TrimSuffix(mount.String(), "\n"),
+				"--mount", readOnlyMount(cfg.git.SSHKey, "/opt/pact/host-git-key"),
 				"--env", "PACT_GIT_SSH_KEY=/opt/pact/host-git-key",
 			)
 		}
 	}
 	args = append(args, runtimeOptions...)
-	return append(args, "pact-codex", cfg.prompt, cfg.model, cfg.effort)
+	args = append(args, "pact-codex", cfg.prompt, cfg.model, cfg.effort)
+	for _, name := range cfg.mcpNames {
+		args = append(args, "--config", fmt.Sprintf(
+			`mcp_servers.%s={url="http://127.0.0.1:8765/mcp/%s"}`, name, name,
+		))
+	}
+	return args
 }
 
-func runDocker(args ...string) error {
-	cmd := exec.Command("docker", args...)
+func runDocker(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
-func run(args []string) error {
+func runContainer(ctx context.Context, args []string) error {
+	// A unique name lets us remove our container if the attached Docker client
+	// is interrupted or fails before --rm has had a chance to clean it up.
+	name := "pact-" + strings.ToLower(rand.Text())
+	args = append([]string{"run", "--name", name}, args[1:]...)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = 5 * time.Second
+	err := cmd.Run()
+	if cmd.Process != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		// Removal also runs after the client has exited, covering cancellation
+		// during creation or an interactive detach. An already removed/nonexistent
+		// container is normal.
+		_ = exec.CommandContext(cleanupCtx, "docker", "rm", "--force", name).Run()
+	}
+	return err
+}
+
+func run(args []string) (runErr error) {
 	cfg, err := parseArgs(args, os.Stderr)
 	if err != nil {
 		return err
@@ -140,8 +185,41 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := buildImage(); err != nil {
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancelCause(signalCtx)
+	defer cancel(nil)
+	servers, err := mcpServers()
+	if err != nil {
 		return err
+	}
+	if len(servers) != 0 {
+		session, err := mcphost.Start(servers)
+		if err != nil {
+			return err
+		}
+		defer func() { runErr = errors.Join(runErr, session.Close()) }()
+		relativeSocket, err := filepath.Rel(cfg.workspace, session.SocketPath)
+		if err != nil {
+			return err
+		}
+		if filepath.IsLocal(relativeSocket) {
+			return errors.New("MCP socket directory must be outside the mounted workspace; choose a narrower workspace")
+		}
+		cfg.mcpSocket = session.SocketPath
+		for _, server := range servers {
+			cfg.mcpNames = append(cfg.mcpNames, server.Name)
+		}
+		go func() {
+			select {
+			case err := <-session.Done():
+				cancel(errors.Join(errors.New("MCP proxy stopped"), err))
+			case <-ctx.Done():
+			}
+		}()
+	}
+	if err := buildImage(ctx); err != nil {
+		return errors.Join(err, context.Cause(ctx))
 	}
 	var runtimeOptions []string
 	if cfg.dind {
@@ -152,7 +230,10 @@ func run(args []string) error {
 		defer cleanup()
 		runtimeOptions = []string{"--volume", name + ":" + dind.SocketDir, "--env", "DOCKER_HOST=" + dind.Socket}
 	}
-	return runDocker(dockerArgs(cfg, home, os.Getuid(), os.Getgid(), runtimeOptions...)...)
+	if err := runContainer(ctx, dockerArgs(cfg, home, os.Getuid(), os.Getgid(), runtimeOptions...)); err != nil {
+		return errors.Join(err, context.Cause(ctx))
+	}
+	return context.Cause(ctx)
 }
 
 func main() {
