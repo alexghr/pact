@@ -17,6 +17,7 @@
         languages.go.enable = true;
 
         packages = [
+          pkgs.docker-client
           pkgs.git
           agents.codex
         ];

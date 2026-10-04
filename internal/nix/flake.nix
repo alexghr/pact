@@ -24,6 +24,7 @@
           coreutils
           curl
           diffutils
+          docker-client
           findutils
           gawk
           git

@@ -13,12 +13,14 @@ import (
 	"strings"
 
 	"github.com/alexghr/pact/internal/config"
+	"github.com/alexghr/pact/internal/dind"
 	"github.com/alexghr/pact/internal/nix"
 )
 
 // agentConfig holds the options passed to the container's agent entrypoint.
 // Pact's environment instructions are supplied by the container entrypoint.
 type agentConfig struct {
+	dind      bool
 	workspace string
 	prompt    string
 	model     string
@@ -31,6 +33,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	cfg := agentConfig{model: "gpt-6.1-sol"}
 	flags := flag.NewFlagSet("pact", flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.BoolVar(&cfg.dind, "dind", false, "Give the agent a dedicated Docker-in-Docker daemon")
 	flags.StringVar(&cfg.workspace, "workspace", "", "Workspace directory to mount (required)")
 	flags.StringVar(&cfg.workspace, "w", "", "Alias for --workspace")
 	flags.StringVar(&cfg.prompt, "prompt", "", "Prompt to run (omit for an interactive session)")
@@ -83,7 +86,7 @@ func buildImage() error {
 	return runDocker("build", "--tag", "pact-codex", "--file", filepath.Join(context, "Dockerfile"), context)
 }
 
-func dockerArgs(cfg agentConfig, home string, uid, gid int) []string {
+func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...string) []string {
 	args := []string{"run", "--rm"}
 	if cfg.prompt == "" {
 		args = append(args, "-it")
@@ -113,6 +116,7 @@ func dockerArgs(cfg agentConfig, home string, uid, gid int) []string {
 			)
 		}
 	}
+	args = append(args, runtimeOptions...)
 	return append(args, "pact-codex", cfg.prompt, cfg.model, cfg.effort)
 }
 
@@ -139,7 +143,16 @@ func run(args []string) error {
 	if err := buildImage(); err != nil {
 		return err
 	}
-	return runDocker(dockerArgs(cfg, home, os.Getuid(), os.Getgid())...)
+	var runtimeOptions []string
+	if cfg.dind {
+		name, cleanup, err := dind.Start(cfg.workspace)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		runtimeOptions = []string{"--volume", name + ":" + dind.SocketDir, "--env", "DOCKER_HOST=" + dind.Socket}
+	}
+	return runDocker(dockerArgs(cfg, home, os.Getuid(), os.Getgid(), runtimeOptions...)...)
 }
 
 func main() {
