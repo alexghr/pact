@@ -103,7 +103,9 @@ func (s *Session) Done() <-chan error { return s.done }
 func (s *Session) Close() error {
 	s.once.Do(func() {
 		s.cancel()
-		s.closeErr = errors.Join(s.server.Close(), os.RemoveAll(s.dir))
+		serverErr := s.server.Close()
+		directoryErr := os.RemoveAll(s.dir)
+		s.closeErr = errors.Join(serverErr, directoryErr)
 	})
 	return s.closeErr
 }

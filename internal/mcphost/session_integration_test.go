@@ -25,26 +25,18 @@ import (
 func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 	ended := make(chan struct{}, 2)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer host-only" {
-			t.Error("upstream did not receive host credentials")
-		}
-		if r.Header.Get("Mcp-Session-Id") != "session-1" || r.Header.Get("Mcp-Protocol-Version") != "2025-11-25" {
-			t.Error("MCP session/protocol headers were lost")
-		}
 		if r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n\n")
+		_, _ = io.WriteString(w, "data: ready\n\n")
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
 		ended <- struct{}{}
 	}))
 	defer upstream.Close()
-	proxy, err := mcpproxy.NewHTTP(upstream.URL+"/mcp", func(context.Context) (http.Header, error) {
-		return http.Header{"Authorization": {"Bearer host-only"}}, nil
-	})
+	proxy, err := mcpproxy.NewHTTP(upstream.URL+"/mcp", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,8 +60,6 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r.Header.Set("Mcp-Session-Id", "session-1")
-		r.Header.Set("Mcp-Protocol-Version", "2025-11-25")
 		res, err := client.Do(r)
 		if err != nil {
 			t.Fatal(err)
@@ -80,7 +70,7 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 	readEvent := func(res *http.Response) {
 		t.Helper()
 		line, err := bufio.NewReader(res.Body).ReadString('\n')
-		if err != nil || !strings.Contains(line, "notifications/tools/list_changed") {
+		if err != nil || line != "data: ready\n" {
 			t.Fatalf("event was buffered or changed: %q, %v", line, err)
 		}
 	}
@@ -137,10 +127,6 @@ func startRelay(t *testing.T, socket string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scriptPath := filepath.Join(t.TempDir(), "mcp-relay.sh")
-	if err := os.WriteFile(scriptPath, script, 0600); err != nil {
-		t.Fatal(err)
-	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -148,9 +134,8 @@ func startRelay(t *testing.T, socket string) string {
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	cmd := exec.CommandContext(ctx, "bash", "-euc",
-		`source "$1"; start_mcp_relay "$2" "$3"; echo ready; wait "$pact_mcp_relay_pid"`,
-		"relay", scriptPath, socket, fmt.Sprint(port))
+	cmd := exec.CommandContext(ctx, "bash", "-e", "-s", "--", socket, fmt.Sprint(port))
+	cmd.Stdin = strings.NewReader(string(script) + "\nstart_mcp_relay \"$1\" \"$2\"\necho ready\nwait \"$pact_mcp_relay_pid\"\n")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = time.Second

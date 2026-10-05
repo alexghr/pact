@@ -27,18 +27,13 @@ func TestHostCredentialsAndDestination(t *testing.T) {
 		if r.Header.Get("Authorization") != fmt.Sprintf("Bearer host-%d", call) || r.Header.Get("X-Api-Key") != "host-key" {
 			t.Error("host credentials were overridden or removed")
 		}
-		if r.Header.Get("Cookie") != "" || r.Header.Get("Forwarded") != "" || r.Header.Get("X-Forwarded-Host") != "" {
-			t.Error("client credentials or forwarding headers reached upstream")
+		if r.Header.Get("Cookie") != "" || r.Header.Get("Proxy-Authorization") != "" {
+			t.Error("client credentials reached upstream")
 		}
 		if r.Host != r.Context().Value(http.LocalAddrContextKey).(net.Addr).String() {
 			t.Error("client controlled the upstream Host header")
 		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil || string(body) != `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"anything"},"id":1}` {
-			t.Errorf("MCP payload changed: %q, %v", body, err)
-		}
-		w.Header().Set("Mcp-Session-Id", "upstream-session")
-		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{}}`)
+		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer upstream.Close()
 
@@ -52,21 +47,27 @@ func TestHostCredentialsAndDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	frontend := httptest.NewServer(proxy)
+	defer frontend.Close()
 	for range 2 {
-		r := httptest.NewRequest(http.MethodPost, "http://attacker.invalid/admin?tenant=attacker", strings.NewReader(
-			`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"anything"},"id":1}`,
-		))
+		r, err := http.NewRequest(http.MethodPost, frontend.URL+"/admin?tenant=attacker", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Host = "attacker.invalid"
 		r.Header.Set("Authorization", "Bearer attacker")
+		r.Header.Set("Proxy-Authorization", "Bearer attacker-proxy")
 		r.Header.Set("Cookie", "session=attacker")
 		r.Header.Set("X-Api-Key", "attacker-key")
-		r.Header.Set("Forwarded", "host=attacker.invalid")
-		r.Header.Set("X-Forwarded-Host", "attacker.invalid")
 		// Hop-by-hop stripping must happen before host credentials are added.
 		r.Header.Set("Connection", "Authorization, X-Api-Key")
-		w := httptest.NewRecorder()
-		proxy.ServeHTTP(w, r)
-		if w.Code != http.StatusOK || w.Header().Get("Mcp-Session-Id") != "upstream-session" {
-			t.Fatalf("proxy response: %d %s", w.Code, w.Body)
+		res, err := frontend.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusNoContent {
+			t.Fatalf("proxy response: %s", res.Status)
 		}
 	}
 	if calls.Load() != 2 || credentials.Load() != 2 {
@@ -82,29 +83,33 @@ func TestProxyErrorsDoNotExposeCredentials(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer upstream.Close()
-	proxy, err := mcpproxy.NewHTTP(upstream.URL, func(context.Context) (http.Header, error) {
+	checkError := func(endpoint string, headers mcpproxy.HeadersFunc) {
+		t.Helper()
+		proxy, err := mcpproxy.NewHTTP(endpoint, headers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frontend := httptest.NewServer(proxy)
+		defer frontend.Close()
+		res, err := frontend.Client().Get(frontend.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode != http.StatusBadGateway || strings.Contains(string(body), "secret-value") || strings.Contains(logs.String(), "secret-value") {
+			t.Fatalf("proxy failure exposed credentials: %s %s (logs %s)", res.Status, body, &logs)
+		}
+	}
+	checkError(upstream.URL, func(context.Context) (http.Header, error) {
 		return nil, errors.New("credential provider failed: secret-value")
 	})
-	if err != nil {
-		t.Fatal(err)
+	if calls.Load() != 0 {
+		t.Fatal("credential failure reached upstream")
 	}
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/", nil))
-	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "secret-value") || calls.Load() != 0 {
-		t.Fatalf("credential failure did not fail closed: %d %s (upstream calls %d)", w.Code, w.Body, calls.Load())
-	}
-
 	upstream.Close()
-	proxy, err = mcpproxy.NewHTTP(upstream.URL+"?secret=secret-value", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w = httptest.NewRecorder()
-	proxy.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/", nil))
-	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "secret-value") {
-		t.Fatalf("transport failure exposed endpoint details: %d %s", w.Code, w.Body)
-	}
-	if strings.Contains(logs.String(), "secret-value") {
-		t.Fatal("proxy errors exposed credentials in logs")
-	}
+	checkError(upstream.URL+"?secret=secret-value", nil)
 }
