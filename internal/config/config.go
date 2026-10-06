@@ -27,16 +27,21 @@ type Git struct {
 	SSHKey string `json:"ssh_key"`
 }
 
-// Load reads path, or the XDG user config directory's pact/config.json when
+// Load reads path, or $XDG_CONFIG_HOME/pact/config.json (defaulting to
+// ~/.config/pact/config.json) when
 // path is empty. A missing default config is allowed; an explicit path must exist.
 // Relative credential paths are resolved against the config's directory; ~/ uses the
 // host user's home directory.
 func Load(path string) (Config, error) {
 	explicit := path != ""
 	if !explicit {
-		dir, err := os.UserConfigDir()
-		if err != nil {
-			return Config{}, err
+		dir := os.Getenv("XDG_CONFIG_HOME")
+		if dir == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return Config{}, err
+			}
+			dir = filepath.Join(home, ".config")
 		}
 		path = filepath.Join(dir, "pact", "config.json")
 	}
