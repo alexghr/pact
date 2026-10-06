@@ -189,7 +189,7 @@ func run(args []string) (runErr error) {
 	defer stop()
 	ctx, cancel := context.WithCancelCause(signalCtx)
 	defer cancel(nil)
-	servers, err := mcpServers()
+	servers, err := mcpServers(settings.MCP)
 	if err != nil {
 		return err
 	}

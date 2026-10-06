@@ -11,7 +11,14 @@ import (
 )
 
 type Config struct {
-	Git *Git `json:"git,omitempty"`
+	Git *Git                 `json:"git,omitempty"`
+	MCP map[string]MCPServer `json:"mcp,omitempty"`
+}
+
+type MCPServer struct {
+	URL       string `json:"url"`
+	Token     string `json:"token,omitempty"`
+	TokenFile string `json:"tokenFile,omitempty"`
 }
 
 type Git struct {
@@ -22,7 +29,7 @@ type Git struct {
 
 // Load reads path, or the XDG user config directory's pact/config.json when
 // path is empty. A missing default config is allowed; an explicit path must exist.
-// Relative key paths are resolved against the config's directory; ~/ uses the
+// Relative credential paths are resolved against the config's directory; ~/ uses the
 // host user's home directory.
 func Load(path string) (Config, error) {
 	explicit := path != ""
@@ -44,23 +51,34 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("decode Pact config %s: %w", path, err)
 	}
-	if cfg.Git == nil || cfg.Git.SSHKey == "" {
-		return cfg, nil
+	if cfg.Git != nil && cfg.Git.SSHKey != "" {
+		cfg.Git.SSHKey, err = resolvePath(path, cfg.Git.SSHKey)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve git.ssh_key: %w", err)
+		}
 	}
-	key := cfg.Git.SSHKey
+	for name, server := range cfg.MCP {
+		if server.TokenFile == "" {
+			continue
+		}
+		server.TokenFile, err = resolvePath(path, server.TokenFile)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve mcp.%s.tokenFile: %w", name, err)
+		}
+		cfg.MCP[name] = server
+	}
+	return cfg, nil
+}
+
+func resolvePath(path, key string) (string, error) {
 	if strings.HasPrefix(key, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return Config{}, err
+			return "", err
 		}
 		key = filepath.Join(home, key[2:])
 	} else if !filepath.IsAbs(key) {
 		key = filepath.Join(filepath.Dir(path), key)
 	}
-	key, err = filepath.Abs(key)
-	if err != nil {
-		return Config{}, fmt.Errorf("resolve git.ssh_key: %w", err)
-	}
-	cfg.Git.SSHKey = key
-	return cfg, nil
+	return filepath.Abs(key)
 }

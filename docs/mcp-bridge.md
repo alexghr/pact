@@ -4,48 +4,33 @@ Pact can expose host-accessible Streamable HTTP MCP servers to the agent while
 keeping their credentials in the host process. This document describes the Go
 API for adding an integration and how the bridge works.
 
-## Registering a proxy
+## MCP configuration
 
-Register proxies in [cmd/pact/mcp.go](../cmd/pact/mcp.go), then rebuild the launcher
-with `./shell p-build`. There are no default registrations and no MCP settings in
-`config.json`.
+Add named Streamable HTTP MCP endpoints to your Pact `config.json`:
 
-For example, replace the registration file with:
-
-```go
-package main
-
-import (
-	"context"
-	"errors"
-	"net/http"
-	"os"
-
-	"github.com/alexghr/pact/mcpproxy"
-)
-
-func mcpServers() ([]mcpproxy.Server, error) {
-	proxy, err := mcpproxy.NewHTTP("http://127.0.0.1:3000/mcp", func(ctx context.Context) (http.Header, error) {
-		token := os.Getenv("MY_MCP_TOKEN")
-		if token == "" {
-			return nil, errors.New("MY_MCP_TOKEN is required on the host")
-		}
-		return http.Header{"Authorization": {"Bearer " + token}}, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return []mcpproxy.Server{{Name: "example", Handler: proxy}}, nil
+```json
+{
+  "mcp": {
+    "forgejo": {
+      "url": "http://127.0.0.1:3000/mcp",
+      "tokenFile": "forgejo-token"
+    }
+  }
 }
 ```
 
-Set the credential in the host launcher environment, then run Pact normally.
-The environment variable is not passed to Docker. The callback runs for every
-upstream request and may run concurrently; it can instead read a host credential
-file, call a keyring, or refresh a token using the request context. Return `nil`
-as the callback for an unauthenticated upstream. Names must be unique and contain
-only letters, digits, underscores, or hyphens. `Server.Handler` is a standard
-`http.Handler`, so host code can also compose its own handler.
+`url` is the complete MCP endpoint, rather than a web or REST API URL.
+Specify exactly one of `token` (the literal bearer token) or `tokenFile`.
+Relative file paths resolve against the config directory; `~/` resolves against
+the host user's home directory. Whitespace around tokens is trimmed. The file
+is checked at startup and read again on every request to support token rotation.
+Credentials remain in the host proxy and are not passed to the container.
+Keep the config and token file outside the mounted workspace.
+
+`mcp` is a map of server names to configurations. Add any number of servers using
+the same fields; names may contain letters, digits, underscores, or hyphens.
+Pact registers each server under its map key and forwards all tools without
+filtering. Omit an entry to disable it.
 
 ## Transport and lifetime
 
