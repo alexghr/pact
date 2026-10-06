@@ -22,9 +22,11 @@ type MCPServer struct {
 }
 
 type Git struct {
-	Name   string `json:"name"`
-	Email  string `json:"email"`
-	SSHKey string `json:"ssh_key"`
+	Name           string   `json:"name"`
+	Email          string   `json:"email"`
+	SSHKey         string   `json:"sshKey"`
+	KnownHosts     string   `json:"knownHosts,omitempty"`
+	AllowedRemotes []string `json:"allowedRemotes,omitempty"`
 }
 
 // Load reads path, or $XDG_CONFIG_HOME/pact/config.json (defaulting to
@@ -59,7 +61,13 @@ func Load(path string) (Config, error) {
 	if cfg.Git != nil && cfg.Git.SSHKey != "" {
 		cfg.Git.SSHKey, err = resolvePath(path, cfg.Git.SSHKey)
 		if err != nil {
-			return Config{}, fmt.Errorf("resolve git.ssh_key: %w", err)
+			return Config{}, fmt.Errorf("resolve git.sshKey: %w", err)
+		}
+	}
+	if cfg.Git != nil && cfg.Git.KnownHosts != "" {
+		cfg.Git.KnownHosts, err = resolvePath(path, cfg.Git.KnownHosts)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve git.knownHosts: %w", err)
 		}
 	}
 	for name, server := range cfg.MCP {

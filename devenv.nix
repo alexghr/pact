@@ -81,7 +81,19 @@
       '';
     };
 
+    p-git-client.exec = ''
+      set -euo pipefail
+
+      for arch in amd64 arm64; do
+        CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+          -o "internal/nix/context/bin/pact-git-client-linux-$arch" ./cmd/git-client
+      done
+    '';
+
     p-build.exec = ''
+      set -euo pipefail
+
+      p-git-client
       go build ./cmd/pact
     '';
 

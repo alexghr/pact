@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -123,7 +124,7 @@ func startRelay(t *testing.T, socket string) string {
 	t.Helper()
 	// Exercise the same relay script embedded in the container image. p-test
 	// supplies socat and curl; missing dependencies must fail this check.
-	script, err := container.BuildContext.ReadFile("mcp-relay.sh")
+	script, err := fs.ReadFile(container.BuildContext, "mcp-relay.sh")
 	if err != nil {
 		t.Fatal(err)
 	}

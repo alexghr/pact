@@ -19,8 +19,10 @@ import (
 
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/dind"
+	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/mcphost"
 	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/mcpproxy"
 )
 
 // agentConfig holds the options passed to the container's agent entrypoint.
@@ -132,8 +134,7 @@ func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...st
 		)
 		if cfg.git.SSHKey != "" {
 			args = append(args,
-				"--mount", readOnlyMount(cfg.git.SSHKey, "/opt/pact/host-git-key"),
-				"--env", "PACT_GIT_SSH_KEY=/opt/pact/host-git-key",
+				"--env", "PACT_GIT_URL="+cfg.mcpBridge.AgentURL()+"/mcp/"+gitbroker.ServerName,
 			)
 		}
 	}
@@ -197,6 +198,17 @@ func run(args []string) (runErr error) {
 	if err != nil {
 		return err
 	}
+	for _, server := range servers {
+		cfg.mcpNames = append(cfg.mcpNames, server.Name)
+	}
+	if cfg.git != nil && cfg.git.SSHKey != "" {
+		broker, err := gitbroker.New(ctx, *cfg.git, cfg.workspace)
+		if err != nil {
+			return fmt.Errorf("start Git broker: %w", err)
+		}
+		defer func() { runErr = errors.Join(runErr, broker.Close()) }()
+		servers = append(servers, mcpproxy.Server{Name: gitbroker.ServerName, Handler: broker})
+	}
 	if len(servers) != 0 {
 		bridge, err := mcphost.Start(servers, cfg.workspace)
 		if err != nil {
@@ -204,9 +216,6 @@ func run(args []string) (runErr error) {
 		}
 		defer func() { runErr = errors.Join(runErr, bridge.Close()) }()
 		cfg.mcpBridge = bridge
-		for _, server := range servers {
-			cfg.mcpNames = append(cfg.mcpNames, server.Name)
-		}
 		go func() {
 			select {
 			case err := <-bridge.Done():

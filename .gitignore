@@ -1,4 +1,5 @@
 /pact
+/internal/nix/context/bin/
 /.devenv
 # git hooks managed by nix
 /.pre-commit-config.yaml

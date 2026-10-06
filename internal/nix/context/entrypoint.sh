@@ -51,10 +51,6 @@ if ! cmp -s /opt/pact/store-registration /nix/.pact-store-registration; then
 fi
 export PATH="/opt/pact/tools/bin:$PATH"
 
-if [[ -n "${PACT_GIT_NAME:-}${PACT_GIT_EMAIL:-}${PACT_GIT_SSH_KEY:-}" ]]; then
-  source /opt/pact/git-identity.sh
-fi
-
 if [[ $# -lt 3 ]]; then
   echo "Error: expected prompt, model, effort, and optional Codex arguments." >&2
   exit 1
@@ -73,6 +69,10 @@ fi
 if [[ -n "${PACT_MCP_SOCKET:-}" ]]; then
   source /opt/pact/mcp-relay.sh
   start_mcp_relay "$PACT_MCP_SOCKET" 8765
+fi
+
+if [[ -n "${PACT_GIT_NAME:-}${PACT_GIT_EMAIL:-}${PACT_GIT_URL:-}" ]]; then
+  source /opt/pact/git-identity.sh
 fi
 
 codex_args=(--ask-for-approval never)
