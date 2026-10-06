@@ -11,41 +11,44 @@
 
   outputs =
     { nixpkgs, agents, ... }:
-    let
-      pkgs = import nixpkgs { system = "x86_64-linux"; };
-      agentPackages = agents.packages.x86_64-linux;
-      tools = pkgs.buildEnv {
-        name = "pact-tools";
-        paths = with pkgs; [
-          nix
-          devenv
-          agentPackages.codex
-          bashInteractive
-          coreutils
-          curl
-          diffutils
-          docker-client
-          findutils
-          gawk
-          git
-          gnugrep
-          gnused
-          gnutar
-          gzip
-          less
-          openssh
-          procps
-          ripgrep
-          socat
-          which
-          xz
-        ];
-      };
-    in
     {
-      packages.x86_64-linux = {
-        pact-tools = tools;
-        default = tools;
-      };
+      packages = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          agentPackages = agents.packages.${system};
+          tools = pkgs.buildEnv {
+            name = "pact-tools";
+            paths = with pkgs; [
+              nix
+              devenv
+              agentPackages.codex
+              bashInteractive
+              coreutils
+              curl
+              diffutils
+              docker-client
+              findutils
+              gawk
+              git
+              gnugrep
+              gnused
+              gnutar
+              gzip
+              less
+              openssh
+              procps
+              ripgrep
+              socat
+              which
+              xz
+            ];
+          };
+        in
+        {
+          pact-tools = tools;
+          default = tools;
+        }
+      );
     };
 }
