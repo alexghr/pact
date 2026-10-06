@@ -34,25 +34,31 @@ filtering. Omit an entry to disable it.
 
 ## Transport and lifetime
 
-Each run creates a private Unix socket outside the workspace and mounts only
+On Linux, each run creates a private Unix socket outside the workspace and mounts only
 that socket into the container, read-only. A `socat` relay runs as the agent user
 on container loopback port 8765. Pact supplies invocation-only Codex MCP URLs;
 it does not write these registrations into the persistent Codex configuration.
 The host listener and active requests close when the run ends, and the container
-owns the relay's lifetime. With no registrations, no socket or relay is created.
+owns the relay's lifetime.
+
+On macOS with Docker Desktop, Pact instead listens on host loopback and connects
+through `host.docker.internal` on a random host port. A random per-session token
+in the URL path protects the bridge; only this bridge URL enters the container,
+never upstream credentials. The bridge strips the token before forwarding.
+With no registrations, no listener or relay is created.
 
 The proxy sends requests to the exact registered endpoint, including its path
 and query. It discards client authorization and cookies, applies host headers,
 and forwards MCP traffic without parsing messages or filtering tools. Streaming,
-session headers, and request cancellation are preserved. Credentials are never
+session headers, and request cancellation are preserved. Upstream credentials are never
 included in generated container configuration or proxy error messages. Upstream
 responses are passed through, so upstream servers must not echo credentials.
 
 ## Supported environment
 
-This currently requires a local Linux Docker daemon with the existing UID
-mapping. Docker Desktop, remote daemons, stdio upstreams, and legacy HTTP+SSE
-transport translation are not supported. OAuth login and credential storage
+Local Linux Docker daemons use the Unix socket bridge; macOS Docker Desktop uses
+the TCP bridge. Remote daemons, Docker Desktop on Linux, stdio upstreams, and
+legacy HTTP+SSE transport translation are not supported. OAuth login and credential storage
 belong to the host integration. Registration code is trusted host code; do not
 put credentials or their files in the mounted workspace.
 
@@ -64,3 +70,6 @@ rebuild, and verify its tools appear with `/mcp` in an interactive Pact session.
 Then run `./pact -w /path/to/workspace -p 'Use example to perform a read-only operation'`
 with an appropriate tool request. After each run, check that its container has
 exited and its `/tmp/pact-mcp-*` socket directory has been removed.
+
+To check TCP connectivity through Docker Desktop using the built Pact image, run
+`PACT_TEST_DOCKER=1 ./shell go test ./internal/mcphost -run TestTCPAuthenticationAndLifetime`.

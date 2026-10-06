@@ -1,4 +1,4 @@
-package mcphost_test
+package mcphost
 
 import (
 	"bufio"
@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexghr/pact/internal/mcphost"
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/mcpproxy"
 )
@@ -40,18 +39,19 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := mcphost.Start([]mcpproxy.Server{{Name: "example", Handler: proxy}})
+	bridge, err := startUnix([]mcpproxy.Server{{Name: "example", Handler: proxy}}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
-	for path, mode := range map[string]os.FileMode{session.SocketPath: 0600, filepath.Dir(session.SocketPath): 0700} {
+	defer bridge.Close()
+	socketPath := bridge.socketPath
+	for path, mode := range map[string]os.FileMode{socketPath: 0600, filepath.Dir(socketPath): 0700} {
 		info, err := os.Stat(path)
 		if err != nil || info.Mode().Perm() != mode {
 			t.Fatalf("private socket permissions for %s: %v, %v", path, info, err)
 		}
 	}
-	endpoint := startRelay(t, session.SocketPath) + "/mcp/example"
+	endpoint := startRelay(t, socketPath) + "/mcp/example"
 	client := &http.Client{Timeout: 10 * time.Second}
 	defer client.CloseIdleConnections()
 	request := func(ctx context.Context, method string) *http.Response {
@@ -99,18 +99,18 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 
 	res = request(context.Background(), http.MethodGet)
 	readEvent(res)
-	if err := session.Close(); err != nil {
+	if err := bridge.Close(); err != nil {
 		t.Fatal(err)
 	}
 	waitForCancellation()
-	if _, err := os.Stat(filepath.Dir(session.SocketPath)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Dir(socketPath)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("socket directory survived shutdown: %v", err)
 	}
 	if _, err := client.Get(endpoint); err == nil {
 		t.Fatal("proxy still accepted requests after shutdown")
 	}
 	select {
-	case err := <-session.Done():
+	case err := <-bridge.Done():
 		if err != nil {
 			t.Fatal(err)
 		}

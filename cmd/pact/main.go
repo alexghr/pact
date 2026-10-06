@@ -33,7 +33,7 @@ type agentConfig struct {
 	effort    string
 	config    string
 	git       *config.Git
-	mcpSocket string
+	mcpBridge mcphost.Bridge
 	mcpNames  []string
 }
 
@@ -116,11 +116,14 @@ func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...st
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
 	)
-	if cfg.mcpSocket != "" {
-		args = append(args,
-			"--mount", readOnlyMount(cfg.mcpSocket, "/opt/pact/mcp.sock"),
-			"--env", "PACT_MCP_SOCKET=/opt/pact/mcp.sock",
-		)
+	if cfg.mcpBridge != nil {
+		bridgeConfig := cfg.mcpBridge.ContainerConfig()
+		for _, mount := range bridgeConfig.ReadOnlyMounts {
+			args = append(args, "--mount", readOnlyMount(mount.Source, mount.Target))
+		}
+		for _, env := range bridgeConfig.Env {
+			args = append(args, "--env", env)
+		}
 	}
 	if cfg.git != nil {
 		args = append(args,
@@ -138,9 +141,10 @@ func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...st
 	args = append(args, "pact-codex", cfg.prompt, cfg.model, cfg.effort)
 	for _, name := range cfg.mcpNames {
 		args = append(args, "--config", fmt.Sprintf(
-			`mcp_servers.%s={url="http://127.0.0.1:8765/mcp/%s"}`, name, name,
+			`mcp_servers.%s={url="%s/mcp/%s"}`, name, cfg.mcpBridge.AgentURL(), name,
 		))
 	}
+
 	return args
 }
 
@@ -194,25 +198,18 @@ func run(args []string) (runErr error) {
 		return err
 	}
 	if len(servers) != 0 {
-		session, err := mcphost.Start(servers)
+		bridge, err := mcphost.Start(servers, cfg.workspace)
 		if err != nil {
 			return err
 		}
-		defer func() { runErr = errors.Join(runErr, session.Close()) }()
-		relativeSocket, err := filepath.Rel(cfg.workspace, session.SocketPath)
-		if err != nil {
-			return err
-		}
-		if filepath.IsLocal(relativeSocket) {
-			return errors.New("MCP socket directory must be outside the mounted workspace; choose a narrower workspace")
-		}
-		cfg.mcpSocket = session.SocketPath
+		defer func() { runErr = errors.Join(runErr, bridge.Close()) }()
+		cfg.mcpBridge = bridge
 		for _, server := range servers {
 			cfg.mcpNames = append(cfg.mcpNames, server.Name)
 		}
 		go func() {
 			select {
-			case err := <-session.Done():
+			case err := <-bridge.Done():
 				cancel(errors.Join(errors.New("MCP proxy stopped"), err))
 			case <-ctx.Done():
 			}
