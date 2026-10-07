@@ -20,6 +20,22 @@
         "type": "github"
       }
     },
+    "graphene": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791377235,
+        "narHash": "sha256-qdiv4bs5C94QLPZrYainsqcus91+phY8rp92IpN0DTc=",
+        "owner": "alexghr",
+        "repo": "graphene",
+        "rev": "58792910d4671482aa87702a4ce29ecbf682b73a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "alexghr",
+        "repo": "graphene",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1790769526,
@@ -39,6 +55,7 @@
     "root": {
       "inputs": {
         "agents": "agents",
+        "graphene": "graphene",
         "nixpkgs": "nixpkgs"
       }
     }

@@ -2,6 +2,21 @@
 
 Pact is an agent isolation solution.
 
+## System skills
+
+The container includes [Graphene](https://github.com/alexghr/graphene) and its
+`graphene-stacked-prs` skill. Nix pins the CLI and skill to the same source revision
+in `internal/nix/context/flake.lock`.
+
+Bundled skills are listed in `internal/nix/context/flake.nix` and exposed through
+`/etc/codex/skills`. To add or remove one, edit the `skills` list (and add any
+required tools to `pact-tools`), then rebuild the launcher with `./shell p-build`.
+The next Pact launch rebuilds the container image. Skills come from the image,
+so removed skills do not linger in the persistent Codex home.
+
+Project skills in `.agents/skills` inside the Git clone remain available through
+Codex's normal skill discovery.
+
 ## Git
 
 Configure a Git identity in `~/.config/pact/config.json`. Pact keeps the private

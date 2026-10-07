@@ -24,6 +24,10 @@ RUN apt-get update && \
     chown pact:pact /home/pact/workspace
 
 COPY --from=tools /opt/pact/ /opt/pact/
+# The target becomes available when the entrypoint restores the Nix store.
+# Keep image skills outside the persistent Codex home so rebuilds replace them.
+RUN mkdir -p /etc/codex && \
+    ln -s /opt/pact/tools/share/pact/skills /etc/codex/skills
 # Both commands use cmd/git-client; argv[0] selects transport or signing.
 COPY --chmod=0755 bin/pact-git-client-linux-${TARGETARCH} /usr/local/bin/pact-git-sign
 RUN ln -s pact-git-sign /usr/local/bin/pact-git-ssh
