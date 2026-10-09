@@ -69,9 +69,14 @@ environment variables are not used by the broker.
 `allowedRemotes` is a deny-by-default list, read once at startup. An empty list
 permits signing but no authenticated transport. Each entry grants fetch and push
 to that repository, subject to the Git server's permissions. Use the exact URL
-spelling used by Git, including the user, optional port, repository suffix, and
+spelling used by Git, including the user, optional port, and
 leading slash: `user@host:team/repo` and `ssh://user@host/team/repo` have different
-SSH paths. No host aliases, wildcard repositories, IPv6 literals, URL passwords,
+SSH paths. A single trailing `.git` is optional for matching; both spellings
+connect to the configured path, so aliases cannot grant access to a second
+repository on hosts that distinguish the two. The first matching entry is used if
+both spellings are configured. Rejections distinguish unsupported commands from
+remote mismatches and identify the requested destination.
+No host aliases, wildcard repositories, IPv6 literals, URL passwords,
 HTTPS credential forwarding, `.`/`..` components, or paths with shell
 metacharacters/spaces are supported. Public HTTPS Git operations still work
 directly from the container. SSH transport uses Git protocol v0.

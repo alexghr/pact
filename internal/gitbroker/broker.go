@@ -292,21 +292,31 @@ func (b *Broker) transport(w http.ResponseWriter, r *http.Request) {
 	if port == "" {
 		port = "22"
 	}
+	service, quoted, ok := strings.Cut(q.Get("command"), " ")
+	if !ok || (service != "git-upload-pack" && service != "git-receive-pack") ||
+		len(quoted) < 3 || quoted[0] != '\'' || quoted[len(quoted)-1] != '\'' ||
+		!safePath.MatchString(quoted[1:len(quoted)-1]) {
+		http.Error(w, "SSH Git command is not allowed; use git-upload-pack or git-receive-pack with a single quoted repository path", http.StatusForbidden)
+		return
+	}
+	path := quoted[1 : len(quoted)-1]
 	var target *remote
-	var command string
 	for i := range b.remotes {
 		candidate := &b.remotes[i]
-		for _, service := range []string{"git-upload-pack", "git-receive-pack"} {
-			expected := service + " '" + candidate.path + "'"
-			if q.Get("host") == candidate.host && port == candidate.port && q.Get("command") == expected {
-				target, command = candidate, expected
-			}
+		if q.Get("host") != candidate.host || port != candidate.port {
+			continue
+		}
+		if path == candidate.path || strings.TrimSuffix(path, ".git") == strings.TrimSuffix(candidate.path, ".git") {
+			target = candidate
+			break
 		}
 	}
 	if target == nil {
-		http.Error(w, "SSH Git remote or command is not allowed by git.allowedRemotes", http.StatusForbidden)
+		http.Error(w, fmt.Sprintf("SSH Git remote %q port %q path %q does not match git.allowedRemotes; check the SSH user, host, port, and repository path (including its leading slash)", q.Get("host"), port, path), http.StatusForbidden)
 		return
 	}
+	// Use the configured path even on hosts where aliases are distinct repositories.
+	command := service + " '" + target.path + "'"
 	if err := http.NewResponseController(w).EnableFullDuplex(); err != nil {
 		http.Error(w, "Git transport requires full duplex HTTP", http.StatusInternalServerError)
 		return

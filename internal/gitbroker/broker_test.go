@@ -65,7 +65,18 @@ func testBroker(t *testing.T, remotes ...string) (*Broker, config.Git, string) {
 }
 
 func TestGitWorkflow(t *testing.T) {
-	b, cfg, workspace := testBroker(t, "ssh://git@forge.test:2222/team/repo")
+	for _, suffix := range []string{"", ".git"} {
+		t.Run("configured-suffix="+suffix, func(t *testing.T) { testGitWorkflow(t, suffix) })
+	}
+}
+
+func testGitWorkflow(t *testing.T, suffix string) {
+	otherSuffix := ".git"
+	if suffix == ".git" {
+		otherSuffix = ""
+	}
+	b, cfg, workspace := testBroker(t, "ssh://git@forge.test:2222/team/repo"+suffix,
+		"ssh://git@forge.test:2222/team/repo"+otherSuffix)
 	host := filepath.Dir(cfg.SSHKey)
 	bin := t.TempDir()
 	runCommand(t, "../..", nil, "go", "build", "-o", filepath.Join(bin, "pact-git-sign"), "./cmd/git-client")
@@ -88,8 +99,8 @@ func TestGitWorkflow(t *testing.T) {
 	runCommand(t, host, hostEnv, git, "init", "--bare", "--initial-branch=main", remoteDir)
 	fixture := filepath.Join(host, "ssh-fixture")
 	writeFile(t, fixture, "#!"+bash+"\nset -eu\ncase \"${SSH_ORIGINAL_COMMAND:-${!#}}\" in\n"+
-		"  \"git-upload-pack '/team/repo'\") exec '"+git+"' upload-pack '"+remoteDir+"';;\n"+
-		"  \"git-receive-pack '/team/repo'\") exec '"+git+"' receive-pack '"+remoteDir+"';;\n"+
+		"  \"git-upload-pack '/team/repo"+suffix+"'\") exec '"+git+"' upload-pack '"+remoteDir+"';;\n"+
+		"  \"git-receive-pack '/team/repo"+suffix+"'\") exec '"+git+"' receive-pack '"+remoteDir+"';;\n"+
 		"  *) exit 99;;\nesac\n", 0700)
 	remoteURL := "ssh://git@forge.test:2222/team/repo"
 	if os.Getenv("PACT_TEST_SSHD") == "1" {
@@ -98,7 +109,10 @@ func TestGitWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		target.path += suffix
 		b.remotes = []remote{target}
+		target.path = strings.TrimSuffix(target.path, ".git") + otherSuffix
+		b.remotes = append(b.remotes, target)
 	} else {
 		b.ssh = fixture
 	}
@@ -144,8 +158,16 @@ func TestGitWorkflow(t *testing.T) {
 	}
 	gitRun(checkout, "tag", "-s", "v1", "-m", "signed tag")
 	gitRun(checkout, "verify-tag", "v1")
+	// Both wire services must accept the opposite suffix spelling and still
+	// invoke the first configured path, even though a later entry matches exactly:
+	// the fixture rejects the alias path.
+	aliasURL := remoteURL
+	if suffix == "" {
+		aliasURL += ".git"
+	}
+	gitRun(checkout, "remote", "set-url", "origin", aliasURL)
 	gitRun(checkout, "push", "origin", "main", "--tags")
-	gitRun(workspace, "clone", remoteURL, "second")
+	gitRun(workspace, "clone", aliasURL, "second")
 	second := filepath.Join(workspace, "second")
 	if got := gitRun(second, "rev-parse", "HEAD"); got != gitRun(checkout, "rev-parse", "HEAD") {
 		t.Fatal("clone lost the pushed commit")
@@ -326,8 +348,11 @@ func TestBrokerRejectsCredentialAbuse(t *testing.T) {
 	defer server.Close()
 	for _, q := range []url.Values{
 		{"op": {"ssh"}, "host": {"git@evil.test"}, "command": {"git-upload-pack 'team/repo'"}},
+		{"op": {"ssh"}, "host": {"other@forge.test"}, "command": {"git-upload-pack 'team/repo.git'"}},
 		{"op": {"ssh"}, "host": {"git@forge.test"}, "port": {"2222"}, "command": {"git-upload-pack 'team/repo'"}},
 		{"op": {"ssh"}, "host": {"git@forge.test"}, "command": {"git-upload-pack 'team/other'"}},
+		{"op": {"ssh"}, "host": {"git@forge.test"}, "command": {"git-upload-pack 'team/repo.git.git'"}},
+		{"op": {"ssh"}, "host": {"git@forge.test"}, "command": {"git-upload-pack '/team/repo.git'"}},
 		{"op": {"ssh"}, "host": {"git@forge.test"}, "command": {"git-upload-pack 'team/repo'; cat " + cfg.SSHKey}},
 		{"op": {"ssh"}, "host": {"git@forge.test"}, "command": {"cat " + cfg.SSHKey}},
 		{"op": {"sign"}},
@@ -336,9 +361,20 @@ func TestBrokerRejectsCredentialAbuse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		body, err := io.ReadAll(res.Body)
 		res.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if res.StatusCode != http.StatusForbidden {
 			t.Fatalf("forbidden request got %s", res.Status)
+		}
+		if q.Get("command") == "git-upload-pack 'team/other'" &&
+			(!strings.Contains(string(body), "team/other") || !strings.Contains(string(body), "does not match git.allowedRemotes")) {
+			t.Fatalf("remote rejection lacks actionable diagnostic: %s", body)
+		}
+		if strings.HasPrefix(q.Get("command"), "cat ") && !strings.Contains(string(body), "command is not allowed") {
+			t.Fatalf("command rejection lacks distinct diagnostic: %s", body)
 		}
 	}
 	spoof := "tree " + strings.Repeat("a", 40) + "\nauthor Someone <someone@example.test> 1 +0000\ncommitter Someone <someone@example.test> 1 +0000\n\nmessage\n"
