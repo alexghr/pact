@@ -26,10 +26,11 @@ import (
 const ServerName = "pact_git"
 
 type remote struct {
+	url              string
 	host, port, path string
 }
 
-// Broker exposes only the public key, Git-object signing, and two Git wire services.
+// Broker exposes the public key, allowed remotes, Git-object signing, and two Git wire services.
 type Broker struct {
 	key, knownHosts, ssh, keygen, dir, identity string
 	publicKey                                   string
@@ -129,7 +130,7 @@ var (
 )
 
 func parseRemote(raw string) (remote, error) {
-	r := remote{port: "22"}
+	r := remote{url: raw, port: "22"}
 	if strings.HasPrefix(raw, "ssh://") {
 		u, err := url.Parse(raw)
 		if err != nil || u.User == nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
@@ -181,6 +182,14 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	controller := http.NewResponseController(w)
 	_ = controller.SetReadDeadline(time.Now().Add(30 * time.Minute))
 	_ = controller.SetWriteDeadline(time.Now().Add(time.Minute))
+	if r.Method == http.MethodGet && r.URL.Query().Get("op") == "allowed-remotes" {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Cache-Control", "no-store")
+		for _, remote := range b.remotes {
+			_, _ = fmt.Fprintln(w, remote.url)
+		}
+		return
+	}
 	if r.Method == http.MethodGet && r.URL.Query().Get("op") == "public-key" {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = io.WriteString(w, b.publicKey+"\n")

@@ -44,6 +44,15 @@ func request(method, operation string, params url.Values, body io.Reader) (*http
 }
 
 func ssh(args []string) error {
+	if len(args) == 1 && args[0] == "--allowed-remotes" {
+		res, err := request(http.MethodGet, "allowed-remotes", url.Values{}, nil)
+		if err != nil {
+			return err
+		}
+		defer res.Body.Close()
+		_, err = io.Copy(os.Stdout, res.Body)
+		return err
+	}
 	params := url.Values{}
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
 		if len(args) < 2 {

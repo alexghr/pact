@@ -3,9 +3,9 @@
 Pact keeps the configured private SSH key on the host. Normal Git commands run
 inside the container. A small SSH transport helper streams Git's wire protocol
 through a host broker, and a signing helper sends Git object bytes to the host.
-Only the public signing key and a session-scoped broker endpoint enter the
-container. No private-key mount, copied key, credential helper, or SSH agent
-socket is provided.
+Only the public signing key, allowed remote URLs, and a session-scoped broker
+endpoint enter the container. No private-key mount, copied key, credential
+helper, or SSH agent socket is provided.
 
 ## Why a transport and signing broker
 
@@ -25,6 +25,7 @@ Forwarding an SSH agent would also avoid copying key bytes, but would expose a
 general SSH signing capability. The broker instead exposes only:
 
 - The public key.
+- The allowed remote URLs.
 - Signing of commit/tag payloads up to 1 MiB, with the configured committer/tagger.
   The author may differ for cherry-picks. OpenSSH's fixed
   [`git` signature namespace](https://man.openbsd.org/ssh-keygen#Y~4) separates
@@ -80,6 +81,22 @@ No host aliases, wildcard repositories, IPv6 literals, URL passwords,
 HTTPS credential forwarding, `.`/`..` components, or paths with shell
 metacharacters/spaces are supported. Public HTTPS Git operations still work
 directly from the container. SSH transport uses Git protocol v0.
+
+When Git brokering is enabled (`PACT_GIT_URL` is set), the agent can inspect the
+session's configured remote URLs, one per line:
+
+```sh
+pact-git-ssh --allowed-remotes
+```
+
+The command queries the host broker on each invocation, preserving each
+configured URL's spelling and order. Successful empty output means no
+authenticated SSH remotes are allowed; an unavailable broker returns an error.
+The list comes from the same configuration the broker uses to authorize SSH
+operations. Config is currently read at startup: update `git.allowedRemotes` on
+the host and start a new Pact session to change access. Future config reloads can
+update the broker's list without changing the agent's environment or this
+command. Server permissions and host-key checks still apply to listed remotes.
 
 Key files, known-hosts files, and host executables must resolve outside the
 mounted workspace. Pact checks this at startup, including symlinks. Keep all
@@ -137,7 +154,9 @@ by Git; use `p-build` to regenerate them whenever building the launcher.
 Run `./shell p-ci` and `./shell p-build`. Tests verify signed commits/tags, real
 Git clone/fetch/push through the bridge and relay (with a local Git service fixture
 in place of the SSH network hop), rejected signing/transport requests, and bridge
-revocation. They do not require a privileged SSH daemon.
+revocation. The allowed-remotes command is checked against a real broker,
+including empty lists and connection failures. Tests do not require a privileged
+SSH daemon.
 
 On a host where an unprivileged OpenSSH daemon can run,
 `PACT_TEST_SSHD=1 ./shell go test ./internal/gitbroker -run TestGitWorkflow -count=1`

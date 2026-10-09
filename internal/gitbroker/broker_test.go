@@ -70,6 +70,35 @@ func TestGitWorkflow(t *testing.T) {
 	}
 }
 
+func TestAllowedRemotes(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "pact-git-ssh")
+	runCommand(t, "../..", nil, "go", "build", "-o", bin, "./cmd/git-client")
+	for _, remotes := range [][]string{nil, {"git@forge.test:team/repo.git", "ssh://git@forge.test:2222/team/other"}} {
+		t.Run(fmt.Sprintf("remotes=%d", len(remotes)), func(t *testing.T) {
+			b, _, _ := testBroker(t, remotes...)
+			server := httptest.NewServer(b)
+			defer server.Close()
+			env := []string{"PACT_GIT_URL=" + server.URL}
+			cmd := exec.CommandContext(t.Context(), bin, "--allowed-remotes")
+			cmd.Env = env
+			output, err := cmd.CombinedOutput()
+			want := ""
+			for _, remote := range remotes {
+				want += remote + "\n"
+			}
+			if err != nil || string(output) != want {
+				t.Fatalf("allowed remotes: %v, got %q, want %q", err, output, want)
+			}
+			server.Close()
+			cmd = exec.CommandContext(t.Context(), bin, "--allowed-remotes")
+			cmd.Env = env
+			if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "cannot reach") {
+				t.Fatalf("unavailable broker must fail, not report an empty list: %v, %s", err, output)
+			}
+		})
+	}
+}
+
 func testGitWorkflow(t *testing.T, suffix string) {
 	otherSuffix := ".git"
 	if suffix == ".git" {
