@@ -35,8 +35,10 @@ SSH key on the host and brokers Git transport and signing; the agent uses normal
 ```
 
 Add the server's verified host key to the host's `~/.ssh/known_hosts` before use.
-Only the listed repositories can use the host key. See [Git credential
-isolation](docs/git-broker.md) for the design, supported URLs, and migration.
+The Git broker always starts but only works when properly configured. Only the
+listed repositories can use the host key. Edit `git.allowedRemotes` on the host
+during a session to change access for the next Git operation. The config is
+refreshed from disk on every request.
 
 ## MCP
 

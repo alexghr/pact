@@ -11,7 +11,7 @@ import (
 )
 
 type Config struct {
-	Git *Git                 `json:"git,omitempty"`
+	Git Git                  `json:"git,omitzero"`
 	MCP map[string]MCPServer `json:"mcp,omitempty"`
 }
 
@@ -29,23 +29,31 @@ type Git struct {
 	AllowedRemotes []string `json:"allowedRemotes,omitempty"`
 }
 
-// Load reads path, or $XDG_CONFIG_HOME/pact/config.json (defaulting to
-// ~/.config/pact/config.json) when
-// path is empty. A missing default config is allowed; an explicit path must exist.
-// Relative credential paths are resolved against the config's directory; ~/ uses the
-// host user's home directory.
-func Load(path string) (Config, error) {
-	explicit := path != ""
-	if !explicit {
+// Path returns an absolute config path, using the host's default when empty.
+func Path(path string) (string, error) {
+	if path == "" {
 		dir := os.Getenv("XDG_CONFIG_HOME")
 		if dir == "" {
 			home, err := os.UserHomeDir()
 			if err != nil {
-				return Config{}, err
+				return "", err
 			}
 			dir = filepath.Join(home, ".config")
 		}
 		path = filepath.Join(dir, "pact", "config.json")
+	}
+	return filepath.Abs(path)
+}
+
+// Load reads path, or $XDG_CONFIG_HOME/pact/config.json (defaulting to
+// ~/.config/pact/config.json) when path is empty. A missing default config is
+// allowed; an explicit path must exist. Relative credential paths are resolved
+// against the config's directory; ~/ uses the host user's home directory.
+func Load(path string) (Config, error) {
+	explicit := path != ""
+	path, err := Path(path)
+	if err != nil {
+		return Config{}, err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -58,13 +66,13 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("decode Pact config %s: %w", path, err)
 	}
-	if cfg.Git != nil && cfg.Git.SSHKey != "" {
+	if cfg.Git.SSHKey != "" {
 		cfg.Git.SSHKey, err = resolvePath(path, cfg.Git.SSHKey)
 		if err != nil {
 			return Config{}, fmt.Errorf("resolve git.sshKey: %w", err)
 		}
 	}
-	if cfg.Git != nil && cfg.Git.KnownHosts != "" {
+	if cfg.Git.KnownHosts != "" {
 		cfg.Git.KnownHosts, err = resolvePath(path, cfg.Git.KnownHosts)
 		if err != nil {
 			return Config{}, fmt.Errorf("resolve git.knownHosts: %w", err)

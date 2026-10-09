@@ -32,47 +32,24 @@ type remote struct {
 
 // Broker exposes the public key, allowed remotes, Git-object signing, and two Git wire services.
 type Broker struct {
-	key, knownHosts, ssh, keygen, dir, identity string
-	publicKey                                   string
-	remotes                                     []remote
-	slots                                       chan struct{}
+	ssh, keygen, dir      string
+	configPath, workspace string
+	slots                 chan struct{}
 }
 
-// New snapshots trusted configuration before the container starts. Every host
-// executable and credential path must be outside the agent-writable workspace.
-func New(ctx context.Context, cfg config.Git, workspace string) (*Broker, error) {
-	if cfg.Name == "" || cfg.Email == "" || strings.ContainsAny(cfg.Name+cfg.Email, "\x00\r\n<>") {
-		return nil, errors.New("Git broker requires a name and email without line breaks or angle brackets")
-	}
-	workspace, err := filepath.EvalSymlinks(workspace)
+// New prepares the host executables without requiring Git credentials yet. Each
+// request loads the Git settings. Config, executables and credentials must stay outside
+// the agent-writable workspace.
+func New(path, workspace string) (*Broker, error) {
+	path, err := config.Path(path)
 	if err != nil {
 		return nil, err
 	}
-	b := &Broker{identity: cfg.Name + " <" + cfg.Email + ">", slots: make(chan struct{}, 8)}
-	b.key, err = outsideWorkspace(cfg.SSHKey, workspace)
+	workspace, err = filepath.EvalSymlinks(workspace)
 	if err != nil {
-		return nil, fmt.Errorf("git.sshKey: %w", err)
+		return nil, err
 	}
-	for _, target := range cfg.AllowedRemotes {
-		r, err := parseRemote(target)
-		if err != nil {
-			return nil, fmt.Errorf("git.allowedRemotes: %w", err)
-		}
-		b.remotes = append(b.remotes, r)
-	}
-	if len(b.remotes) > 0 {
-		if cfg.KnownHosts == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return nil, err
-			}
-			cfg.KnownHosts = filepath.Join(home, ".ssh", "known_hosts")
-		}
-		b.knownHosts, err = outsideWorkspace(cfg.KnownHosts, workspace)
-		if err != nil {
-			return nil, fmt.Errorf("git.knownHosts: %w", err)
-		}
-	}
+	b := &Broker{configPath: path, workspace: workspace, slots: make(chan struct{}, 8)}
 	for name, dest := range map[string]*string{"ssh": &b.ssh, "ssh-keygen": &b.keygen} {
 		path, err := exec.LookPath(name)
 		if err != nil {
@@ -92,15 +69,71 @@ func New(ctx context.Context, cfg config.Git, workspace string) (*Broker, error)
 		b.Close()
 		return nil, err
 	}
+	return b, nil
+}
+
+type gitConfig struct {
+	config.Git
+	remotes []remote
+}
+
+func (b *Broker) loadConfig() (gitConfig, error) {
+	// Read through a host-owned directory, so the agent cannot replace the
+	// config symlink between checking its target and reading it.
+	dir, err := outsideWorkspace(filepath.Dir(b.configPath), b.workspace)
+	if err != nil {
+		return gitConfig{}, fmt.Errorf("Pact config directory: %w", err)
+	}
+	path := filepath.Join(dir, filepath.Base(b.configPath))
+	if _, err := outsideWorkspace(path, b.workspace); err != nil {
+		return gitConfig{}, fmt.Errorf("Pact config: %w", err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return gitConfig{}, err
+	}
+	git := gitConfig{Git: cfg.Git}
+	if git.SSHKey == "" {
+		return gitConfig{}, errors.New("git.sshKey is not configured")
+	}
+	if git.Name == "" || git.Email == "" || strings.ContainsAny(git.Name+git.Email, "\x00\r\n<>") {
+		return gitConfig{}, errors.New("Git broker requires a name and email without line breaks or angle brackets")
+	}
+	git.SSHKey, err = outsideWorkspace(git.SSHKey, b.workspace)
+	if err != nil {
+		return gitConfig{}, fmt.Errorf("git.sshKey: %w", err)
+	}
+	for _, target := range git.AllowedRemotes {
+		r, err := parseRemote(target)
+		if err != nil {
+			return gitConfig{}, fmt.Errorf("git.allowedRemotes: %w", err)
+		}
+		git.remotes = append(git.remotes, r)
+	}
+	if len(git.remotes) > 0 {
+		if git.KnownHosts == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return gitConfig{}, err
+			}
+			git.KnownHosts = filepath.Join(home, ".ssh", "known_hosts")
+		}
+		git.KnownHosts, err = outsideWorkspace(git.KnownHosts, b.workspace)
+		if err != nil {
+			return gitConfig{}, fmt.Errorf("git.knownHosts: %w", err)
+		}
+	}
+	return git, nil
+}
+
+func (b *Broker) publicKey(ctx context.Context, key string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	publicKey, err := b.command(ctx, b.keygen, "-y", "-P", "", "-f", b.key).Output()
+	publicKey, err := b.command(ctx, b.keygen, "-y", "-P", "", "-f", key).Output()
 	if err != nil {
-		b.Close()
-		return nil, errors.New("cannot load git.sshKey (an unencrypted OpenSSH private key is required)")
+		return "", errors.New("cannot load git.sshKey (an unencrypted OpenSSH private key is required)")
 	}
-	b.publicKey = strings.TrimSpace(string(publicKey))
-	return b, nil
+	return strings.TrimSpace(string(publicKey)), nil
 }
 
 func outsideWorkspace(path, workspace string) (string, error) {
@@ -182,20 +215,8 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	controller := http.NewResponseController(w)
 	_ = controller.SetReadDeadline(time.Now().Add(30 * time.Minute))
 	_ = controller.SetWriteDeadline(time.Now().Add(time.Minute))
-	if r.Method == http.MethodGet && r.URL.Query().Get("op") == "allowed-remotes" {
-		w.Header().Set("Content-Type", "text/plain")
-		w.Header().Set("Cache-Control", "no-store")
-		for _, remote := range b.remotes {
-			_, _ = fmt.Fprintln(w, remote.url)
-		}
-		return
-	}
-	if r.Method == http.MethodGet && r.URL.Query().Get("op") == "public-key" {
-		w.Header().Set("Content-Type", "text/plain")
-		_, _ = io.WriteString(w, b.publicKey+"\n")
-		return
-	}
-	if r.Method != http.MethodPost {
+	op := r.URL.Query().Get("op")
+	if r.Method != http.MethodPost && !(r.Method == http.MethodGet && (op == "allowed-remotes" || op == "public-key")) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -206,30 +227,49 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Git broker is busy", http.StatusServiceUnavailable)
 		return
 	}
-	switch r.URL.Query().Get("op") {
-	case "sign":
-		b.sign(w, r)
-	case "ssh":
-		b.transport(w, r)
+	cfg, err := b.loadConfig()
+	if err != nil {
+		http.Error(w, "cannot load Git config: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	switch {
+	case r.Method == http.MethodGet && op == "allowed-remotes":
+		w.Header().Set("Content-Type", "text/plain")
+		for _, remote := range cfg.remotes {
+			_, _ = fmt.Fprintln(w, remote.url)
+		}
+	case r.Method == http.MethodGet && op == "public-key":
+		key, err := b.publicKey(r.Context(), cfg.SSHKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, key+"\n")
+	case r.Method == http.MethodPost && op == "sign":
+		b.sign(w, r, cfg)
+	case r.Method == http.MethodPost && op == "ssh":
+		b.transport(w, r, cfg)
 	default:
 		http.Error(w, "unknown Git operation", http.StatusBadRequest)
 	}
 }
 
-func (b *Broker) sign(w http.ResponseWriter, r *http.Request) {
+func (b *Broker) sign(w http.ResponseWriter, r *http.Request, cfg gitConfig) {
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(15 * time.Second))
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
 		http.Error(w, "Git signing payload exceeds 1 MiB or is unreadable", http.StatusBadRequest)
 		return
 	}
-	if !b.validObject(data) {
+	if !validObject(data, cfg.Name+" <"+cfg.Email+">") {
 		http.Error(w, "expected a Git commit or tag with the configured committer or tagger", http.StatusForbidden)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	cmd := b.command(ctx, b.keygen, "-Y", "sign", "-n", "git", "-f", b.key)
+	cmd := b.command(ctx, b.keygen, "-Y", "sign", "-n", "git", "-f", cfg.SSHKey)
 	cmd.Stdin = bytes.NewReader(data)
 	signature, err := cmd.Output()
 	if err != nil {
@@ -262,8 +302,8 @@ func (b *Broker) sign(w http.ResponseWriter, r *http.Request) {
 //
 //	Tag message
 //
-// The committer/tagger must match b.identity; object IDs may be SHA-1 or SHA-256.
-func (b *Broker) validObject(data []byte) bool {
+// The committer/tagger must match the current identity; object IDs may be SHA-1 or SHA-256.
+func validObject(data []byte, identity string) bool {
 	header, _, ok := strings.Cut(string(data), "\n\n")
 	if !ok || strings.ContainsRune(header, '\x00') {
 		return false
@@ -285,7 +325,7 @@ func (b *Broker) validObject(data []byte) bool {
 			if found {
 				return false
 			}
-			timestamp, ok := strings.CutPrefix(line, field+b.identity+" ")
+			timestamp, ok := strings.CutPrefix(line, field+identity+" ")
 			if !ok || !gitTime.MatchString(timestamp) {
 				return false
 			}
@@ -295,7 +335,7 @@ func (b *Broker) validObject(data []byte) bool {
 	return found
 }
 
-func (b *Broker) transport(w http.ResponseWriter, r *http.Request) {
+func (b *Broker) transport(w http.ResponseWriter, r *http.Request, cfg gitConfig) {
 	q := r.URL.Query()
 	port := q.Get("port")
 	if port == "" {
@@ -310,8 +350,8 @@ func (b *Broker) transport(w http.ResponseWriter, r *http.Request) {
 	}
 	path := quoted[1 : len(quoted)-1]
 	var target *remote
-	for i := range b.remotes {
-		candidate := &b.remotes[i]
+	for i := range cfg.remotes {
+		candidate := &cfg.remotes[i]
 		if q.Get("host") != candidate.host || port != candidate.port {
 			continue
 		}
@@ -334,10 +374,10 @@ func (b *Broker) transport(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	cmd := b.command(ctx, b.ssh, "-F", "/dev/null", "-T",
 		"-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
-		"-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile="+strconv.Quote(strings.ReplaceAll(b.knownHosts, "%", "%%")),
+		"-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile="+strconv.Quote(strings.ReplaceAll(cfg.KnownHosts, "%", "%%")),
 		"-o", "GlobalKnownHostsFile=/dev/null", "-o", "ConnectTimeout=15",
 		"-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3",
-		"-i", b.key, "-p", target.port, target.host, command)
+		"-i", cfg.SSHKey, "-p", target.port, target.host, command)
 	// Git protocol v0 is intentional: no agent-provided environment is sent to SSH.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

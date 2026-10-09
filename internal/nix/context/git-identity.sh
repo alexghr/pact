@@ -13,9 +13,12 @@ fi
 if [[ -n "${PACT_GIT_URL:-}" ]]; then
   # Only public material enters the container. The host keeps the private key.
   install -d -m 0700 "$HOME/.config/pact"
-  pact-git-sign --public-key > "$HOME/.config/pact/git-signing.pub"
-  printf '%s %s\n' "$PACT_GIT_EMAIL" "$(cat "$HOME/.config/pact/git-signing.pub")" \
-    > "$HOME/.config/pact/git-allowed-signers"
+  if pact-git-sign --public-key > "$HOME/.config/pact/git-signing.pub"; then
+    printf '%s %s\n' "${PACT_GIT_EMAIL:-}" "$(cat "$HOME/.config/pact/git-signing.pub")" \
+      > "$HOME/.config/pact/git-allowed-signers"
+  else
+    echo "Pact Git credentials are unavailable; configure them on the host to enable signing and SSH." >&2
+  fi
   pact_git_settings+=(
     "user.signingkey=$HOME/.config/pact/git-signing.pub"
     "gpg.format=ssh"

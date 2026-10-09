@@ -34,7 +34,7 @@ type agentConfig struct {
 	model     string
 	effort    string
 	config    string
-	git       *config.Git
+	git       config.Git
 	mcpBridge mcphost.Bridge
 	mcpNames  []string
 }
@@ -115,17 +115,11 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 			args = append(args, "--env", env)
 		}
 	}
-	if cfg.git != nil {
-		args = append(args,
-			"--env", "PACT_GIT_NAME="+cfg.git.Name,
-			"--env", "PACT_GIT_EMAIL="+cfg.git.Email,
-		)
-		if cfg.git.SSHKey != "" {
-			args = append(args,
-				"--env", "PACT_GIT_URL="+cfg.mcpBridge.AgentURL()+"/mcp/"+gitbroker.ServerName,
-			)
-		}
-	}
+	args = append(args,
+		"--env", "PACT_GIT_NAME="+cfg.git.Name,
+		"--env", "PACT_GIT_EMAIL="+cfg.git.Email,
+		"--env", "PACT_GIT_URL="+cfg.mcpBridge.AgentURL()+"/mcp/"+gitbroker.ServerName,
+	)
 	args = append(args, runtimeOptions...)
 	args = append(args, image, cfg.prompt, cfg.model, cfg.effort)
 	for _, name := range cfg.mcpNames {
@@ -183,29 +177,25 @@ func run(args []string) (runErr error) {
 	for _, server := range servers {
 		cfg.mcpNames = append(cfg.mcpNames, server.Name)
 	}
-	if cfg.git != nil && cfg.git.SSHKey != "" {
-		broker, err := gitbroker.New(ctx, *cfg.git, cfg.workspace)
-		if err != nil {
-			return fmt.Errorf("start Git broker: %w", err)
-		}
-		defer func() { runErr = errors.Join(runErr, broker.Close()) }()
-		servers = append(servers, mcpproxy.Server{Name: gitbroker.ServerName, Handler: broker})
+	broker, err := gitbroker.New(cfg.config, cfg.workspace)
+	if err != nil {
+		return fmt.Errorf("start Git broker: %w", err)
 	}
-	if len(servers) != 0 {
-		bridge, err := mcphost.Start(servers, cfg.workspace)
-		if err != nil {
-			return err
-		}
-		defer func() { runErr = errors.Join(runErr, bridge.Close()) }()
-		cfg.mcpBridge = bridge
-		go func() {
-			select {
-			case err := <-bridge.Done():
-				cancel(errors.Join(errors.New("MCP proxy stopped"), err))
-			case <-ctx.Done():
-			}
-		}()
+	defer func() { runErr = errors.Join(runErr, broker.Close()) }()
+	servers = append(servers, mcpproxy.Server{Name: gitbroker.ServerName, Handler: broker})
+	bridge, err := mcphost.Start(servers, cfg.workspace)
+	if err != nil {
+		return err
 	}
+	defer func() { runErr = errors.Join(runErr, bridge.Close()) }()
+	cfg.mcpBridge = bridge
+	go func() {
+		select {
+		case err := <-bridge.Done():
+			cancel(errors.Join(errors.New("MCP proxy stopped"), err))
+		case <-ctx.Done():
+		}
+	}()
 	image, err := container.BuildImage(ctx)
 	if err != nil {
 		return errors.Join(err, context.Cause(ctx))

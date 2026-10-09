@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -46,17 +47,30 @@ func writeFile(t *testing.T, path, content string, mode os.FileMode) {
 	}
 }
 
+func writeConfig(t *testing.T, path string, cfg config.Git) {
+	t.Helper()
+	data, err := json.Marshal(config.Config{Git: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Editors commonly replace the file on save; reloads must follow the path.
+	writeFile(t, path+".tmp", string(data), 0600)
+	if err := os.Rename(path+".tmp", path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testBroker(t *testing.T, remotes ...string) (*Broker, config.Git, string) {
 	t.Helper()
 	host, workspace := t.TempDir(), t.TempDir()
 	key := filepath.Join(host, "identity")
 	runCommand(t, host, nil, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key)
 	cfg := config.Git{Name: "Pact Agent", Email: "agent@example.test", SSHKey: key, AllowedRemotes: remotes}
-	if len(remotes) > 0 {
-		cfg.KnownHosts = filepath.Join(host, "known_hosts")
-		writeFile(t, cfg.KnownHosts, "", 0600)
-	}
-	b, err := New(context.Background(), cfg, workspace)
+	cfg.KnownHosts = filepath.Join(host, "known_hosts")
+	writeFile(t, cfg.KnownHosts, "", 0600)
+	path := filepath.Join(host, "config.json")
+	writeConfig(t, path, cfg)
+	b, err := New(path, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,12 +87,14 @@ func TestGitWorkflow(t *testing.T) {
 func TestAllowedRemotes(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "pact-git-ssh")
 	runCommand(t, "../..", nil, "go", "build", "-o", bin, "./cmd/git-client")
-	for _, remotes := range [][]string{nil, {"git@forge.test:team/repo.git", "ssh://git@forge.test:2222/team/other"}} {
+	b, cfg, _ := testBroker(t)
+	server := httptest.NewServer(b)
+	defer server.Close()
+	env := []string{"PACT_GIT_URL=" + server.URL}
+	for _, remotes := range [][]string{nil, {"git@forge.test:team/repo.git", "ssh://git@forge.test:2222/team/other"}, nil} {
 		t.Run(fmt.Sprintf("remotes=%d", len(remotes)), func(t *testing.T) {
-			b, _, _ := testBroker(t, remotes...)
-			server := httptest.NewServer(b)
-			defer server.Close()
-			env := []string{"PACT_GIT_URL=" + server.URL}
+			cfg.AllowedRemotes = remotes
+			writeConfig(t, b.configPath, cfg)
 			cmd := exec.CommandContext(t.Context(), bin, "--allowed-remotes")
 			cmd.Env = env
 			output, err := cmd.CombinedOutput()
@@ -89,13 +105,107 @@ func TestAllowedRemotes(t *testing.T) {
 			if err != nil || string(output) != want {
 				t.Fatalf("allowed remotes: %v, got %q, want %q", err, output, want)
 			}
-			server.Close()
-			cmd = exec.CommandContext(t.Context(), bin, "--allowed-remotes")
-			cmd.Env = env
-			if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "cannot reach") {
-				t.Fatalf("unavailable broker must fail, not report an empty list: %v, %s", err, output)
+		})
+	}
+	server.Close()
+	cmd := exec.CommandContext(t.Context(), bin, "--allowed-remotes")
+	cmd.Env = env
+	if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "cannot reach") {
+		t.Fatalf("unavailable broker must fail, not report an empty list: %v, %s", err, output)
+	}
+}
+
+func TestConfigReloadFailsClosed(t *testing.T) {
+	b, cfg, workspace := testBroker(t, "git@forge.test:team/repo")
+	marker := filepath.Join(filepath.Dir(cfg.SSHKey), "executed")
+	b.ssh = filepath.Join(filepath.Dir(cfg.SSHKey), "trap")
+	writeFile(t, b.ssh, "#!/bin/sh\nprintf executed > '"+marker+"'\n", 0700)
+	b.keygen = b.ssh
+	server := httptest.NewServer(b)
+	defer server.Close()
+	workspaceConfig := filepath.Join(workspace, "config.json")
+	writeConfig(t, workspaceConfig, cfg)
+	configAlias := filepath.Join(workspace, "config-link.json")
+	if err := os.Symlink(b.configPath, configAlias); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{workspaceConfig, configAlias} {
+		broker, err := New(path, workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res := httptest.NewRecorder()
+		broker.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/?op=public-key", nil))
+		broker.Close()
+		if res.Code != http.StatusServiceUnavailable {
+			t.Fatal("read a config path inside the workspace")
+		}
+	}
+	workspaceHosts := filepath.Join(workspace, "known_hosts")
+	writeFile(t, workspaceHosts, "", 0600)
+	original := cfg
+	for _, scenario := range []string{"invalid JSON", "invalid remote", "missing Git config", "invalid identity", "missing key", "missing config", "workspace config", "workspace known hosts", "workspace key"} {
+		t.Run(scenario, func(t *testing.T) {
+			cfg = original
+			writeConfig(t, b.configPath, cfg)
+			switch scenario {
+			case "invalid JSON":
+				writeFile(t, b.configPath, "{", 0600)
+			case "invalid remote":
+				cfg.AllowedRemotes = append(cfg.AllowedRemotes, "https://forge.test/team/other")
+				writeConfig(t, b.configPath, cfg)
+			case "missing Git config":
+				writeFile(t, b.configPath, "{}", 0600)
+			case "invalid identity":
+				cfg.Name = "Invalid\nName"
+				writeConfig(t, b.configPath, cfg)
+			case "missing key":
+				cfg.SSHKey += ".missing"
+				writeConfig(t, b.configPath, cfg)
+			case "missing config", "workspace config":
+				if err := os.Remove(b.configPath); err != nil {
+					t.Fatal(err)
+				}
+				if scenario == "workspace config" {
+					if err := os.Symlink(workspaceConfig, b.configPath); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "workspace known hosts", "workspace key":
+				alias := filepath.Join(t.TempDir(), "workspace-link")
+				if err := os.Symlink(workspaceHosts, alias); err != nil {
+					t.Fatal(err)
+				}
+				if scenario == "workspace key" {
+					cfg.SSHKey = alias
+				} else {
+					cfg.KnownHosts = alias
+				}
+				writeConfig(t, b.configPath, cfg)
+			}
+			for _, op := range []string{"allowed-remotes", "public-key", "sign", "ssh"} {
+				q := url.Values{"op": {op}, "host": {"git@forge.test"}, "command": {"git-upload-pack 'team/repo'"}}
+				method := http.MethodGet
+				if op == "ssh" || op == "sign" {
+					method = http.MethodPost
+				}
+				req, err := http.NewRequestWithContext(t.Context(), method, server.URL+"?"+q.Encode(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				res, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				res.Body.Close()
+				if res.StatusCode != http.StatusServiceUnavailable {
+					t.Fatalf("%s with %s: got %s", op, scenario, res.Status)
+				}
 			}
 		})
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("invalid config started a host executable")
 	}
 }
 
@@ -104,8 +214,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	if suffix == ".git" {
 		otherSuffix = ""
 	}
-	b, cfg, workspace := testBroker(t, "ssh://git@forge.test:2222/team/repo"+suffix,
-		"ssh://git@forge.test:2222/team/repo"+otherSuffix)
+	b, cfg, workspace := testBroker(t)
 	host := filepath.Dir(cfg.SSHKey)
 	bin := t.TempDir()
 	runCommand(t, "../..", nil, "go", "build", "-o", filepath.Join(bin, "pact-git-sign"), "./cmd/git-client")
@@ -134,14 +243,6 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	remoteURL := "ssh://git@forge.test:2222/team/repo"
 	if os.Getenv("PACT_TEST_SSHD") == "1" {
 		remoteURL = startSSHD(t, cfg, fixture)
-		target, err := parseRemote(remoteURL)
-		if err != nil {
-			t.Fatal(err)
-		}
-		target.path += suffix
-		b.remotes = []remote{target}
-		target.path = strings.TrimSuffix(target.path, ".git") + otherSuffix
-		b.remotes = append(b.remotes, target)
 	} else {
 		b.ssh = fixture
 	}
@@ -170,6 +271,17 @@ func testGitWorkflow(t *testing.T, suffix string) {
 		t.Helper()
 		return runCommand(t, dir, env, bash, append([]string{"-ec", "source \"$1\"; shift; exec git \"$@\"", "git", script}, args...)...)
 	}
+	denied := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), bash, append([]string{"-ec", "source \"$1\"; shift; exec git \"$@\"", "git", script}, args...)...)
+		cmd.Dir, cmd.Env = dir, env
+		if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "does not match git.allowedRemotes") {
+			t.Fatalf("remote must be denied: %v, %s", err, output)
+		}
+	}
+	denied(workspace, "ls-remote", remoteURL)
+	cfg.AllowedRemotes = []string{remoteURL + suffix, remoteURL + otherSuffix}
+	writeConfig(t, b.configPath, cfg)
 	gitRun(workspace, "clone", remoteURL, "checkout")
 	checkout := filepath.Join(workspace, "checkout")
 	gitRun(checkout, "checkout", "-B", "main")
@@ -182,7 +294,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	gitRun(checkout, "add", "data")
 	gitRun(checkout, "commit", "-m", "signed through host")
 	gitRun(checkout, "verify-commit", "HEAD")
-	if got := gitRun(checkout, "log", "-1", "--format=%cn <%ce>"); got != b.identity {
+	if got := gitRun(checkout, "log", "-1", "--format=%cn <%ce>"); got != cfg.Name+" <"+cfg.Email+">" {
 		t.Fatalf("identity: %q", got)
 	}
 	gitRun(checkout, "tag", "-s", "v1", "-m", "signed tag")
@@ -214,6 +326,50 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	if _, err := os.Stat(filepath.Join(workspace, ".ssh", "pact_identity")); !os.IsNotExist(err) {
 		t.Fatal("private identity was installed in agent home")
 	}
+	// Rotate all credential settings without restarting the broker. The old
+	// identity must stop signing, and the new key must sign and authenticate.
+	oldKey := cfg.SSHKey
+	cfg.SSHKey = filepath.Join(host, "rotated-key")
+	runCommand(t, host, nil, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", cfg.SSHKey)
+	publicKey, err := os.ReadFile(cfg.SSHKey + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The real sshd fixture reads its authorized key from this original path.
+	writeFile(t, oldKey+".pub", string(publicKey), 0600)
+	hosts, err := os.ReadFile(cfg.KnownHosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(cfg.KnownHosts); err != nil {
+		t.Fatal(err)
+	}
+	cfg.KnownHosts = filepath.Join(host, "rotated-known-hosts")
+	writeFile(t, cfg.KnownHosts, string(hosts), 0600)
+	cfg.Name, cfg.Email = "New Agent", "new@example.test"
+	writeConfig(t, b.configPath, cfg)
+	cmd = exec.CommandContext(t.Context(), bash, "-ec", "source \"$1\"; git commit --allow-empty -m stale", "git", script)
+	cmd.Dir, cmd.Env = checkout, env
+	if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "configured committer or tagger") {
+		t.Fatalf("old identity must be denied after config change: %v, %s", err, output)
+	}
+	// Refresh the container's startup identity and public verification material.
+	for i, value := range env {
+		if strings.HasPrefix(value, "PACT_GIT_NAME=") {
+			env[i] = "PACT_GIT_NAME=" + cfg.Name
+		}
+		if strings.HasPrefix(value, "PACT_GIT_EMAIL=") {
+			env[i] = "PACT_GIT_EMAIL=" + cfg.Email
+		}
+	}
+	gitRun(checkout, "commit", "--allow-empty", "-m", "rotated identity and key")
+	gitRun(checkout, "verify-commit", "HEAD")
+	if got := runCommand(t, workspace, env, filepath.Join(bin, "pact-git-sign"), "--public-key"); got != strings.TrimSpace(string(publicKey)) {
+		t.Fatalf("public-key query returned stale key: %s", got)
+	}
+	gitRun(checkout, "push", "origin", "main")
+	gitRun(second, "fetch", "origin")
+	gitRun(second, "verify-commit", "origin/main")
 	if os.Getenv("PACT_TEST_SSHD") == "1" {
 		writeFile(t, cfg.KnownHosts, "", 0600)
 		cmd = exec.Command(bash, "-ec", "source \"$1\"; git ls-remote origin", "git", script)
@@ -222,6 +378,10 @@ func testGitWorkflow(t *testing.T, suffix string) {
 			t.Fatalf("unknown SSH host was not rejected: %v, %s", err, output)
 		}
 	}
+	cfg.AllowedRemotes = nil
+	writeConfig(t, b.configPath, cfg)
+	denied(checkout, "fetch", "origin")
+	denied(checkout, "push", "origin", "main")
 	if err := bridge.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -372,6 +532,7 @@ func TestBrokerRejectsCredentialAbuse(t *testing.T) {
 	marker := filepath.Join(filepath.Dir(cfg.SSHKey), "executed")
 	trap := filepath.Join(filepath.Dir(cfg.SSHKey), "trap")
 	writeFile(t, trap, "#!/bin/sh\nprintf executed > '"+marker+"'\n", 0700)
+	keygen := b.keygen
 	b.ssh, b.keygen = trap, trap
 	server := httptest.NewServer(b)
 	defer server.Close()
@@ -420,6 +581,7 @@ func TestBrokerRejectsCredentialAbuse(t *testing.T) {
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("forbidden request started a host executable")
 	}
+	b.keygen = keygen
 	res, err := http.Get(server.URL + "?op=public-key")
 	if err != nil {
 		t.Fatal(err)
@@ -437,9 +599,66 @@ func TestBrokerRejectsCredentialAbuse(t *testing.T) {
 	}
 	for _, key := range []string{keyInWorkspace, alias} {
 		cfg.SSHKey = key
-		if broker, err := New(context.Background(), cfg, workspace); err == nil {
-			broker.Close()
-			t.Fatal("accepted a private key inside the workspace")
+		writeConfig(t, b.configPath, cfg)
+		res := httptest.NewRecorder()
+		b.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/?op=public-key", nil))
+		if res.Code != http.StatusServiceUnavailable {
+			t.Fatal("read a private key inside the workspace")
 		}
+	}
+}
+
+func TestKeyAddedAfterStartup(t *testing.T) {
+	for _, initialKey := range []string{"", "not-created-yet", "no Git section", "no config file"} {
+		t.Run("key="+initialKey, func(t *testing.T) {
+			host, workspace := t.TempDir(), t.TempDir()
+			path := filepath.Join(host, "config.json")
+			cfg := config.Git{Name: "Pact Agent", Email: "agent@example.test", SSHKey: initialKey}
+			writeConfig(t, path, cfg)
+			switch initialKey {
+			case "no Git section":
+				writeFile(t, path, "{}", 0600)
+			case "no config file":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			b, err := New(path, workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { b.Close() })
+			server := httptest.NewServer(b)
+			defer server.Close()
+			bin := filepath.Join(host, "pact-git-sign")
+			runCommand(t, "../..", nil, "go", "build", "-o", bin, "./cmd/git-client")
+			identity, err := fs.ReadFile(container.BuildContext, "git-identity.sh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := filepath.Join(host, "identity.sh")
+			writeFile(t, script, string(identity), 0600)
+			env := []string{"PATH=" + host + ":" + os.Getenv("PATH"), "HOME=" + workspace,
+				"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
+				"PACT_GIT_URL=" + server.URL}
+			// Initialize once under the entrypoint's strict shell flags, before any
+			// key exists. Preserve that environment for the later Git invocation.
+			settings := filepath.Join(host, "settings.sh")
+			runCommand(t, workspace, env, "bash", "-euc", "source \"$1\"; export -p > \"$2\"", "bash", script, settings)
+			runCommand(t, workspace, env, "git", "init")
+			commit := "source \"$1\"; git -c user.name=\"$2\" -c user.email=\"$3\" commit --allow-empty -m test"
+			cmd := exec.CommandContext(t.Context(), "bash", "-euc", commit, "bash", settings, cfg.Name, cfg.Email)
+			cmd.Dir, cmd.Env = workspace, env
+			if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "cannot load Git config") {
+				t.Fatalf("missing key must reject signing: %v, %s", err, output)
+			}
+			cfg.SSHKey = filepath.Join(host, "not-created-yet")
+			runCommand(t, host, nil, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", cfg.SSHKey)
+			writeConfig(t, path, cfg)
+			runCommand(t, workspace, env, "bash", "-euc", commit, "bash", settings, cfg.Name, cfg.Email)
+			// Refresh only the public verification material after adding the key.
+			env = append(env, "PACT_GIT_EMAIL="+cfg.Email)
+			runCommand(t, workspace, env, "bash", "-euc", "source \"$1\"; git verify-commit HEAD", "bash", script)
+		})
 	}
 }

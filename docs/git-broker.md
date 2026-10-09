@@ -15,7 +15,7 @@ configuration includes, external commands, and filesystem paths. Safely supporti
 the whole Git command surface would require a separate repository isolation layer.
 
 This broker keeps that work in the existing container. The host runs only its own
-OpenSSH executables, using fixed options and configuration chosen before startup.
+OpenSSH executables, using fixed options and host-controlled configuration.
 It never runs Git or opens a workspace repository. Git's standard
 [`core.sshCommand` and `gpg.ssh.program`](https://git-scm.com/docs/git-config)
 interfaces preserve ordinary CLI workflows, including worktrees and submodules
@@ -57,7 +57,13 @@ are never involved in staging, hooks, filters, merges, or checking out files.
 
 `sshKey` must be an unencrypted OpenSSH private key. The host needs `ssh` and
 `ssh-keygen` on PATH. Name and email are required when a key is configured.
-Without `sshKey`, Pact still supplies the configured name/email for local Git.
+Pact always starts the broker, even if the config file or `git` section is absent,
+`sshKey` is omitted, or the key file does not exist yet. An absent `git` section
+uses the zero-value Git settings. Pact supplies any configured name/email and installs the Git
+helpers at startup. Signing and authenticated SSH fail until usable credentials
+are configured on the host; adding the key enables subsequent requests without
+restarting Pact. To make an unsigned local commit before then, explicitly use
+`git -c commit.gpgsign=false commit`.
 Relative key and known-hosts paths resolve against the Pact config directory;
 `~/` resolves against the host user's home.
 
@@ -67,8 +73,8 @@ Neither unknown keys nor changed keys are accepted automatically. SSH config,
 agent identities, proxy commands, interactive authentication, and caller
 environment variables are not used by the broker.
 
-`allowedRemotes` is a deny-by-default list, read once at startup. An empty list
-permits signing but no authenticated transport. Each entry grants fetch and push
+`allowedRemotes` is a deny-by-default list, read for each new SSH request. An empty
+list permits signing but no authenticated transport. Each entry grants fetch and push
 to that repository, subject to the Git server's permissions. Use the exact URL
 spelling used by Git, including the user, optional port, and
 leading slash: `user@host:team/repo` and `ssh://user@host/team/repo` have different
@@ -93,15 +99,33 @@ The command queries the host broker on each invocation, preserving each
 configured URL's spelling and order. Successful empty output means no
 authenticated SSH remotes are allowed; an unavailable broker returns an error.
 The list comes from the same configuration the broker uses to authorize SSH
-operations. Config is currently read at startup: update `git.allowedRemotes` on
-the host and start a new Pact session to change access. Future config reloads can
-update the broker's list without changing the agent's environment or this
-command. Server permissions and host-key checks still apply to listed remotes.
+operations. Edit `git.allowedRemotes` in the host config to add or remove access
+during a session. Every broker request reads and validates the full Git config,
+including the identity, SSH key, known-hosts path, and allowed remotes. No reload
+command or broker restart is needed.
+Server permissions and host-key checks still apply to listed remotes.
 
-Key files, known-hosts files, and host executables must resolve outside the
-mounted workspace. Pact checks this at startup, including symlinks. Keep all
-copies and hard links of credentials outside the workspace too. Do not mount
-your home directory as the workspace.
+Missing, unreadable, or invalid config rejects all new broker requests until it
+is corrected; old settings are not retained. Removing the `git` section disables
+signing and transport. Emptying `allowedRemotes` only denies authenticated transport.
+An operation already in progress finishes with the settings it started with.
+
+The container's Git name, email, and public verification files are initialized at
+startup. After changing the host identity, pass the matching `git -c user.name=…
+-c user.email=…` settings for new commits and tags, or restart Pact to refresh the
+container defaults. The broker rejects signing with the old identity immediately.
+Key changes apply immediately to signing and SSH authentication;
+`pact-git-sign --public-key` returns the current public key. Refresh the container's
+public key and allowed-signers files to verify new signatures locally, or restart
+Pact. The same public-file refresh is needed when adding the first key after
+startup. Keep old public keys in the allowed-signers file if historical signatures
+must still verify. Only MCP registration changes require a restart.
+
+The config and its directory, key files, known-hosts files, and host executables
+must resolve outside the mounted workspace. Pact checks host executables at
+startup and checks config and credential paths, including symlinks, on each
+request. Keep all copies and hard links of credentials outside the workspace too.
+Do not mount your home directory as the workspace.
 
 ## Boundary and lifecycle
 
@@ -154,9 +178,12 @@ by Git; use `p-build` to regenerate them whenever building the launcher.
 Run `./shell p-ci` and `./shell p-build`. Tests verify signed commits/tags, real
 Git clone/fetch/push through the bridge and relay (with a local Git service fixture
 in place of the SSH network hop), rejected signing/transport requests, and bridge
-revocation. The allowed-remotes command is checked against a real broker,
-including empty lists and connection failures. Tests do not require a privileged
-SSH daemon.
+revocation. The allowed-remotes command is checked against a real broker, including
+live updates, empty lists and connection failures. The Git workflow also checks
+that host config edits grant and revoke transport access, rotate keys and
+known-hosts paths, and change the signing identity without a broker restart.
+Invalid config and workspace symlinks must fail without starting a host process.
+Tests do not require a privileged SSH daemon.
 
 On a host where an unprivileged OpenSSH daemon can run,
 `PACT_TEST_SSHD=1 ./shell go test ./internal/gitbroker -run TestGitWorkflow -count=1`
