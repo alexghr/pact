@@ -4,6 +4,13 @@ Prefer small, concise code that a human can read and understand.
 Keep changes focused. Every abstraction, dependency, and test should
 justify the complexity it adds.
 
+## Documentation
+
+Keep the README user-facing. Only modify if the contract between the
+operator and Pact changes. Do not put internal docs in the README.
+
+For major features write documentation for humans and agents in `./docs/`.
+
 ## Development
 
 Use the project's devenv environment:
