@@ -84,18 +84,6 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	return cfg, nil
 }
 
-func buildImage(ctx context.Context) error {
-	buildContext, err := os.MkdirTemp("", "pact-build-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(buildContext)
-	if err := os.CopyFS(buildContext, container.BuildContext); err != nil {
-		return fmt.Errorf("extract Docker build context: %w", err)
-	}
-	return runDocker(ctx, "build", "--tag", "pact-codex", "--file", filepath.Join(buildContext, "Dockerfile"), buildContext)
-}
-
 func readOnlyMount(source, target string) string {
 	// Docker's --mount uses CSV, so quote paths that contain commas.
 	var mount strings.Builder
@@ -105,7 +93,7 @@ func readOnlyMount(source, target string) string {
 	return strings.TrimSuffix(mount.String(), "\n")
 }
 
-func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...string) []string {
+func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOptions ...string) []string {
 	args := []string{"run", "--rm"}
 	if cfg.prompt == "" {
 		args = append(args, "-it")
@@ -139,7 +127,7 @@ func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...st
 		}
 	}
 	args = append(args, runtimeOptions...)
-	args = append(args, "pact-codex", cfg.prompt, cfg.model, cfg.effort)
+	args = append(args, image, cfg.prompt, cfg.model, cfg.effort)
 	for _, name := range cfg.mcpNames {
 		args = append(args, "--config", fmt.Sprintf(
 			`mcp_servers.%s={url="%s/mcp/%s"}`, name, cfg.mcpBridge.AgentURL(), name,
@@ -147,12 +135,6 @@ func dockerArgs(cfg agentConfig, home string, uid, gid int, runtimeOptions ...st
 	}
 
 	return args
-}
-
-func runDocker(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
 }
 
 func runContainer(ctx context.Context, args []string) error {
@@ -224,7 +206,8 @@ func run(args []string) (runErr error) {
 			}
 		}()
 	}
-	if err := buildImage(ctx); err != nil {
+	image, err := container.BuildImage(ctx)
+	if err != nil {
 		return errors.Join(err, context.Cause(ctx))
 	}
 	var runtimeOptions []string
@@ -236,7 +219,7 @@ func run(args []string) (runErr error) {
 		defer cleanup()
 		runtimeOptions = []string{"--volume", name + ":" + dind.SocketDir, "--env", "DOCKER_HOST=" + dind.Socket}
 	}
-	if err := runContainer(ctx, dockerArgs(cfg, home, os.Getuid(), os.Getgid(), runtimeOptions...)); err != nil {
+	if err := runContainer(ctx, dockerArgs(cfg, image, home, os.Getuid(), os.Getgid(), runtimeOptions...)); err != nil {
 		return errors.Join(err, context.Cause(ctx))
 	}
 	return context.Cause(ctx)
