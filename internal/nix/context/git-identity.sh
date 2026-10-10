@@ -4,21 +4,19 @@
 # The image installs cmd/git-client as /usr/local/bin/pact-git-sign and symlinks
 # pact-git-ssh to it. The executable name selects signing or SSH transport.
 pact_git_settings=()
+install -d -m 0700 "$HOME/.config/pact"
+# A command-scope include preserves precedence over repository settings while
+# allowing pact-git-sign --refresh to update future Git commands in this shell.
+pact_git_identity="$HOME/.config/pact/git-identity.config"
 if [[ -n "${PACT_GIT_NAME:-}" ]]; then
-  pact_git_settings+=("user.name=$PACT_GIT_NAME")
+  git config --file "$pact_git_identity" user.name "$PACT_GIT_NAME"
 fi
 if [[ -n "${PACT_GIT_EMAIL:-}" ]]; then
-  pact_git_settings+=("user.email=$PACT_GIT_EMAIL")
+  git config --file "$pact_git_identity" user.email "$PACT_GIT_EMAIL"
 fi
+pact_git_settings+=("include.path=$pact_git_identity")
 if [[ -n "${PACT_GIT_URL:-}" ]]; then
-  # Only public material enters the container. The host keeps the private key.
-  install -d -m 0700 "$HOME/.config/pact"
-  if pact-git-sign --public-key > "$HOME/.config/pact/git-signing.pub"; then
-    printf '%s %s\n' "${PACT_GIT_EMAIL:-}" "$(cat "$HOME/.config/pact/git-signing.pub")" \
-      > "$HOME/.config/pact/git-allowed-signers"
-  else
-    echo "Pact Git credentials are unavailable; configure them on the host to enable signing and SSH." >&2
-  fi
+  # Public verification files are populated lazily by the signing helper.
   pact_git_settings+=(
     "user.signingkey=$HOME/.config/pact/git-signing.pub"
     "gpg.format=ssh"
@@ -34,4 +32,4 @@ for i in "${!pact_git_settings[@]}"; do
   export "GIT_CONFIG_KEY_$i=${pact_git_settings[$i]%%=*}"
   export "GIT_CONFIG_VALUE_$i=${pact_git_settings[$i]#*=}"
 done
-unset pact_git_settings i
+unset pact_git_settings pact_git_identity i

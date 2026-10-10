@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func request(method, operation string, params url.Values, body io.Reader) (*http.Response, error) {
@@ -28,7 +29,8 @@ func request(method, operation string, params url.Values, body io.Reader) (*http
 	}
 	// Never route this private bridge through HTTP_PROXY, or follow redirects.
 	client := &http.Client{
-		Transport:     &http.Transport{DisableKeepAlives: true},
+		Timeout:       30 * time.Minute,
+		Transport:     &http.Transport{DisableKeepAlives: true, ResponseHeaderTimeout: 30 * time.Second},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	res, err := client.Do(req)
@@ -117,17 +119,14 @@ func ssh(args []string) error {
 }
 
 func sign(args []string) error {
-	if len(args) == 1 && args[0] == "--public-key" {
-		res, err := request(http.MethodGet, "public-key", url.Values{}, nil)
-		if err != nil {
-			return err
-		}
-		defer res.Body.Close()
-		_, err = io.Copy(os.Stdout, res.Body)
-		return err
+	if len(args) == 1 && args[0] == "--refresh" {
+		return refreshIdentity()
 	}
 	// Verification stays local and never needs a private key.
 	if len(args) >= 2 && args[0] == "-Y" && (args[1] == "find-principals" || args[1] == "verify" || args[1] == "check-novalidate") {
+		if err := refreshIdentity(); err != nil {
+			fmt.Fprintln(os.Stderr, "pact-git: cannot refresh verification keys; using cached keys:", err)
+		}
 		cmd := exec.Command("ssh-keygen", args...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return cmd.Run()
@@ -135,6 +134,9 @@ func sign(args []string) error {
 	// Git invokes ssh-keygen -Y sign -n git -f <public key> <temporary object>.
 	if len(args) != 7 || args[0] != "-Y" || args[1] != "sign" || args[2] != "-n" || args[3] != "git" || args[4] != "-f" {
 		return errors.New("only Git object signing and verification are supported")
+	}
+	if err := refreshIdentity(); err != nil {
+		return err
 	}
 	data, err := os.Open(args[6])
 	if err != nil {

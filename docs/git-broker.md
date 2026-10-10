@@ -24,7 +24,7 @@ whose remotes are explicitly allowed.
 Forwarding an SSH agent would also avoid copying key bytes, but would expose a
 general SSH signing capability. The broker instead exposes only:
 
-- The public key.
+- The public key and current signing identity.
 - The allowed remote URLs.
 - Signing of commit/tag payloads up to 1 MiB, with the configured committer/tagger.
   The author may differ for cherry-picks. OpenSSH's fixed
@@ -110,16 +110,35 @@ is corrected; old settings are not retained. Removing the `git` section disables
 signing and transport. Emptying `allowedRemotes` only denies authenticated transport.
 An operation already in progress finishes with the settings it started with.
 
-The container's Git name, email, and public verification files are initialized at
-startup. After changing the host identity, pass the matching `git -c user.name=…
--c user.email=…` settings for new commits and tags, or restart Pact to refresh the
-container defaults. The broker rejects signing with the old identity immediately.
-Key changes apply immediately to signing and SSH authentication;
-`pact-git-sign --public-key` returns the current public key. Refresh the container's
-public key and allowed-signers files to verify new signatures locally, or restart
-Pact. The same public-file refresh is needed when adding the first key after
-startup. Keep old public keys in the allowed-signers file if historical signatures
-must still verify. Only MCP registration changes require a restart.
+The container's Git name and email are initialized at startup when configured.
+After adding or changing the host identity, the agent should run
+`pact-git-sign --refresh`, then retry its normal Git command. This fetches the
+current name, email, and public key, and updates the local Git identity and
+verification files. It is safe to repeat: unchanged files are left alone and
+existing signer entries are not duplicated. No shell or Pact restart is needed.
+The broker rejects signing with the old identity immediately.
+Key changes apply immediately to signing and SSH authentication. The signing helper
+refreshes identity and public verification material before signing or verifying; startup only
+configures Git and does not contact the broker.
+It fetches the current public key and identity together through `signing-identity`,
+so the allowed-signers file uses the host's current email, not the startup email.
+Git reads the identity from `~/.config/pact/git-identity.config` through a
+command-scope include, which overrides repository-local identity settings.
+The explicit refresh is needed before constructing a commit when the identity
+was initially missing or changed: Git constructs the payload before invoking
+the signing helper. Refresh never rewrites an already constructed commit.
+
+Refreshes serialize updates and atomically replace each changed file.
+Previously trusted email/key pairs are retained in
+`~/.config/pact/git-allowed-signers`, so
+historical signatures still verify after rotation. Rotation does not revoke that
+historical trust: remove obsolete entries manually if necessary. Emails containing
+SSH principal pattern syntax or whitespace cannot be cached as literal signers.
+If refresh fails, signing fails; verification warns and uses cached public keys.
+Verification itself stays local. Only MCP registration changes require a restart.
+
+All helper HTTP requests share a 30-second response-header timeout and a
+30-minute overall timeout, allowing long-running Git transfers.
 
 The config and its directory, key files, known-hosts files, and host executables
 must resolve outside the mounted workspace. Pact checks host executables at

@@ -40,6 +40,10 @@ listed repositories can use the host key. Edit `git.allowedRemotes` on the host
 during a session to change access for the next Git operation. The config is
 refreshed from disk on every request.
 
+After adding or changing the Git identity, the agent can run
+`pact-git-sign --refresh` inside the container, then use Git normally. The command
+is safe to repeat and requires no restart.
+
 ## MCP
 
 Configure MCP forwarding with named entries under `mcp` in your Pact config. See

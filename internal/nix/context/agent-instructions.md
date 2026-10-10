@@ -18,7 +18,12 @@ The Git broker always starts, even without a git section in the host config,
 and reads all Git settings on every request. Invalid or unreadable config
 rejects new requests until corrected. A missing key can be added on the host
 during the session; signing and authenticated SSH fail until it is available.
-If the host identity changes, new commits
-and tags must use matching `git -c user.name=… -c user.email=…` settings. After key
-rotation, refresh public verification material using `pact-git-sign --public-key`.
-A new Pact session refreshes these container defaults; MCP changes still require one.
+Before the first commit after host Git configuration is added or changed, run
+`pact-git-sign --refresh` inside the container, then use normal Git commands.
+Also run it if Git reports a missing identity or the broker rejects the configured
+committer/tagger. It safely refreshes the local name, email, and public verification
+files for subsequent Git commands; repeated calls are idempotent and require no
+shell restart. If refresh fails, report the error so the operator can fix the host
+config; do not invent an identity or disable signing to bypass it.
+Public verification keys also refresh automatically before signing and verification,
+retaining previously trusted keys. MCP configuration changes still require a new session.

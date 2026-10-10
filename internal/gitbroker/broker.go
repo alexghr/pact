@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -216,7 +217,7 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = controller.SetReadDeadline(time.Now().Add(30 * time.Minute))
 	_ = controller.SetWriteDeadline(time.Now().Add(time.Minute))
 	op := r.URL.Query().Get("op")
-	if r.Method != http.MethodPost && !(r.Method == http.MethodGet && (op == "allowed-remotes" || op == "public-key")) {
+	if r.Method != http.MethodPost && !(r.Method == http.MethodGet && (op == "allowed-remotes" || op == "signing-identity")) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -239,14 +240,18 @@ func (b *Broker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, remote := range cfg.remotes {
 			_, _ = fmt.Fprintln(w, remote.url)
 		}
-	case r.Method == http.MethodGet && op == "public-key":
+	case r.Method == http.MethodGet && op == "signing-identity":
 		key, err := b.publicKey(r.Context(), cfg.SSHKey)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		w.Header().Set("Content-Type", "text/plain")
-		_, _ = io.WriteString(w, key+"\n")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(struct {
+			Name      string `json:"name"`
+			Email     string `json:"email"`
+			PublicKey string `json:"publicKey"`
+		}{cfg.Name, cfg.Email, key})
 	case r.Method == http.MethodPost && op == "sign":
 		b.sign(w, r, cfg)
 	case r.Method == http.MethodPost && op == "ssh":

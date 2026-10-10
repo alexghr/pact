@@ -1,7 +1,6 @@
 package gitbroker
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -135,7 +134,7 @@ func TestConfigReloadFailsClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		res := httptest.NewRecorder()
-		broker.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/?op=public-key", nil))
+		broker.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/?op=signing-identity", nil))
 		broker.Close()
 		if res.Code != http.StatusServiceUnavailable {
 			t.Fatal("read a config path inside the workspace")
@@ -183,7 +182,7 @@ func TestConfigReloadFailsClosed(t *testing.T) {
 				}
 				writeConfig(t, b.configPath, cfg)
 			}
-			for _, op := range []string{"allowed-remotes", "public-key", "sign", "ssh"} {
+			for _, op := range []string{"allowed-remotes", "signing-identity", "sign", "ssh"} {
 				q := url.Values{"op": {op}, "host": {"git@forge.test"}, "command": {"git-upload-pack 'team/repo'"}}
 				method := http.MethodGet
 				if op == "ssh" || op == "sign" {
@@ -267,6 +266,11 @@ func testGitWorkflow(t *testing.T, suffix string) {
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
 		"PACT_GIT_NAME=" + cfg.Name, "PACT_GIT_EMAIL=" + cfg.Email,
 		"PACT_GIT_URL=" + endpoint + "/mcp/" + ServerName}
+	// The entrypoint runs once. Later verification must refresh keys through the
+	// helper itself, without re-sourcing the initialization script.
+	settings := filepath.Join(bin, "git-settings.sh")
+	runCommand(t, workspace, env, bash, "-ec", "source \"$1\"; export -p > \"$2\"", "bash", script, settings)
+	script = settings
 	gitRun := func(dir string, args ...string) string {
 		t.Helper()
 		return runCommand(t, dir, env, bash, append([]string{"-ec", "source \"$1\"; shift; exec git \"$@\"", "git", script}, args...)...)
@@ -348,25 +352,21 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	writeFile(t, cfg.KnownHosts, string(hosts), 0600)
 	cfg.Name, cfg.Email = "New Agent", "new@example.test"
 	writeConfig(t, b.configPath, cfg)
-	cmd = exec.CommandContext(t.Context(), bash, "-ec", "source \"$1\"; git commit --allow-empty -m stale", "git", script)
+	// A commit signed elsewhere with the new key must verify before this helper
+	// has signed anything with it. Keep the container's startup email unchanged.
+	runCommand(t, checkout, hostEnv, git, "-c", "user.name="+cfg.Name, "-c", "user.email="+cfg.Email,
+		"-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen", "-c", "user.signingkey="+cfg.SSHKey,
+		"commit", "-S", "--allow-empty", "-m", "signed externally after rotation")
+	gitRun(checkout, "verify-commit", "HEAD")
+	cmd = exec.CommandContext(t.Context(), bash, "-ec", "source \"$1\"; git -c user.name='Pact Agent' -c user.email=agent@example.test commit --allow-empty -m stale", "git", script)
 	cmd.Dir, cmd.Env = checkout, env
 	if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "configured committer or tagger") {
 		t.Fatalf("old identity must be denied after config change: %v, %s", err, output)
 	}
-	// Refresh the container's startup identity and public verification material.
-	for i, value := range env {
-		if strings.HasPrefix(value, "PACT_GIT_NAME=") {
-			env[i] = "PACT_GIT_NAME=" + cfg.Name
-		}
-		if strings.HasPrefix(value, "PACT_GIT_EMAIL=") {
-			env[i] = "PACT_GIT_EMAIL=" + cfg.Email
-		}
-	}
 	gitRun(checkout, "commit", "--allow-empty", "-m", "rotated identity and key")
 	gitRun(checkout, "verify-commit", "HEAD")
-	if got := runCommand(t, workspace, env, filepath.Join(bin, "pact-git-sign"), "--public-key"); got != strings.TrimSpace(string(publicKey)) {
-		t.Fatalf("public-key query returned stale key: %s", got)
-	}
+	gitRun(checkout, "verify-commit", "HEAD~2")
+	gitRun(checkout, "verify-tag", "v1")
 	gitRun(checkout, "push", "origin", "main")
 	gitRun(second, "fetch", "origin")
 	gitRun(second, "verify-commit", "origin/main")
@@ -385,6 +385,9 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	if err := bridge.Close(); err != nil {
 		t.Fatal(err)
 	}
+	// Cached public trust remains useful while the broker is unavailable.
+	gitRun(checkout, "verify-commit", "HEAD")
+	gitRun(checkout, "verify-tag", "v1")
 	cmd = exec.Command(bash, "-ec", "source \"$1\"; git commit --allow-empty -m revoked", "git", script)
 	cmd.Dir, cmd.Env = checkout, env
 	if err := cmd.Run(); err == nil {
@@ -582,14 +585,20 @@ func TestBrokerRejectsCredentialAbuse(t *testing.T) {
 		t.Fatal("forbidden request started a host executable")
 	}
 	b.keygen = keygen
-	res, err := http.Get(server.URL + "?op=public-key")
+	res, err := http.Get(server.URL + "?op=signing-identity")
 	if err != nil {
 		t.Fatal(err)
 	}
-	public, _ := io.ReadAll(res.Body)
+	var identity struct {
+		Name      string `json:"name"`
+		Email     string `json:"email"`
+		PublicKey string `json:"publicKey"`
+	}
+	err = json.NewDecoder(res.Body).Decode(&identity)
 	res.Body.Close()
-	if !bytes.HasPrefix(public, []byte("ssh-ed25519 ")) || bytes.Contains(public, []byte("PRIVATE KEY")) {
-		t.Fatal("public-key endpoint returned unexpected material")
+	if err != nil || identity.Name != cfg.Name || identity.Email != cfg.Email ||
+		!strings.HasPrefix(identity.PublicKey, "ssh-ed25519 ") || strings.Contains(identity.PublicKey, "PRIVATE KEY") {
+		t.Fatalf("signing-identity endpoint returned unexpected material: %+v, %v", identity, err)
 	}
 	keyInWorkspace := filepath.Join(workspace, "key")
 	writeFile(t, keyInWorkspace, "secret", 0600)
@@ -601,7 +610,7 @@ func TestBrokerRejectsCredentialAbuse(t *testing.T) {
 		cfg.SSHKey = key
 		writeConfig(t, b.configPath, cfg)
 		res := httptest.NewRecorder()
-		b.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/?op=public-key", nil))
+		b.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/?op=signing-identity", nil))
 		if res.Code != http.StatusServiceUnavailable {
 			t.Fatal("read a private key inside the workspace")
 		}
@@ -613,7 +622,7 @@ func TestKeyAddedAfterStartup(t *testing.T) {
 		t.Run("key="+initialKey, func(t *testing.T) {
 			host, workspace := t.TempDir(), t.TempDir()
 			path := filepath.Join(host, "config.json")
-			cfg := config.Git{Name: "Pact Agent", Email: "agent@example.test", SSHKey: initialKey}
+			cfg := config.Git{Name: "Pact \"Agent\" \\ team\tOne", Email: "agent@example.test", SSHKey: initialKey}
 			writeConfig(t, path, cfg)
 			switch initialKey {
 			case "no Git section":
@@ -646,19 +655,27 @@ func TestKeyAddedAfterStartup(t *testing.T) {
 			settings := filepath.Join(host, "settings.sh")
 			runCommand(t, workspace, env, "bash", "-euc", "source \"$1\"; export -p > \"$2\"", "bash", script, settings)
 			runCommand(t, workspace, env, "git", "init")
-			commit := "source \"$1\"; git -c user.name=\"$2\" -c user.email=\"$3\" commit --allow-empty -m test"
-			cmd := exec.CommandContext(t.Context(), "bash", "-euc", commit, "bash", settings, cfg.Name, cfg.Email)
+			commit := "source \"$1\"; git commit --allow-empty -m test"
+			cmd := exec.CommandContext(t.Context(), bin, "--refresh")
 			cmd.Dir, cmd.Env = workspace, env
 			if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "cannot load Git config") {
-				t.Fatalf("missing key must reject signing: %v, %s", err, output)
+				t.Fatalf("missing key must reject refresh: %v, %s", err, output)
 			}
 			cfg.SSHKey = filepath.Join(host, "not-created-yet")
 			runCommand(t, host, nil, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", cfg.SSHKey)
 			writeConfig(t, path, cfg)
-			runCommand(t, workspace, env, "bash", "-euc", commit, "bash", settings, cfg.Name, cfg.Email)
-			// Refresh only the public verification material after adding the key.
-			env = append(env, "PACT_GIT_EMAIL="+cfg.Email)
-			runCommand(t, workspace, env, "bash", "-euc", "source \"$1\"; git verify-commit HEAD", "bash", script)
+			// Refresh from the agent's shell without sourcing new settings or
+			// overriding Git's identity on the command line.
+			for range 2 {
+				runCommand(t, workspace, env, bin, "--refresh")
+			}
+			runCommand(t, workspace, env, "git", "config", "user.name", "Wrong repository identity")
+			runCommand(t, workspace, env, "bash", "-euc", commit, "bash", settings)
+			runCommand(t, workspace, env, "bash", "-euc", "source \"$1\"; git verify-commit HEAD", "bash", settings)
+			got := runCommand(t, workspace, env, "bash", "-euc", "source \"$1\"; git log -1 --format='%cn <%ce>'", "bash", settings)
+			if got != cfg.Name+" <"+cfg.Email+">" {
+				t.Fatalf("refreshed identity: %q", got)
+			}
 		})
 	}
 }
