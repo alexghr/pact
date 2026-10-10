@@ -29,6 +29,7 @@ import (
 // agentConfig holds the options passed to the container's agent entrypoint.
 // Pact's environment instructions are supplied by the container entrypoint.
 type agentConfig struct {
+	hostNet     bool
 	dind        bool
 	workspace   string
 	prompt      string
@@ -46,6 +47,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	flags := flag.NewFlagSet("pact", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.BoolVar(&cfg.dind, "dind", false, "Give the agent a dedicated Docker-in-Docker daemon")
+	flags.BoolVar(&cfg.hostNet, "hostnet", false, "Run the container on the host's network")
 	flags.StringVar(&cfg.workspace, "workspace", "", "Workspace directory to mount (required)")
 	flags.StringVar(&cfg.workspace, "w", "", "Alias for --workspace")
 	flags.StringVar(&cfg.prompt, "prompt", "", "Prompt to run (omit for an interactive session)")
@@ -100,6 +102,9 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 	args := []string{"run", "--rm"}
 	if cfg.prompt == "" {
 		args = append(args, "-it")
+	}
+	if cfg.hostNet {
+		args = append(args, "--network", "host")
 	}
 	args = append(args,
 		"--volume", cfg.workspace+":/home/pact/workspace",
