@@ -2,20 +2,20 @@
 
 # Sourced after dropping privileges. The EXIT trap handles startup failures;
 # after exec'ing Codex, Docker tears down the relay when the container exits.
-start_mcp_relay() {
+start_host_relay() {
   local socket_path="$1" port="$2" attempt
   if [[ ! -S "$socket_path" ]]; then
-    echo "Error: Pact MCP socket is missing." >&2
+    echo "Error: Pact host socket is missing." >&2
     return 1
   fi
 
   socat "TCP4-LISTEN:$port,bind=127.0.0.1,reuseaddr,fork" \
     "UNIX-CONNECT:$socket_path" &
-  pact_mcp_relay_pid=$!
-  trap 'kill "$pact_mcp_relay_pid" 2>/dev/null || true; wait "$pact_mcp_relay_pid" 2>/dev/null || true' EXIT
+  pact_host_relay_pid=$!
+  trap 'kill "$pact_host_relay_pid" 2>/dev/null || true; wait "$pact_host_relay_pid" 2>/dev/null || true' EXIT
 
   for ((attempt = 0; attempt < 50; attempt++)); do
-    if ! kill -0 "$pact_mcp_relay_pid" 2>/dev/null; then
+    if ! kill -0 "$pact_host_relay_pid" 2>/dev/null; then
       break
     fi
     if curl -q --noproxy '*' --fail --silent --max-time 0.2 \
@@ -24,6 +24,6 @@ start_mcp_relay() {
     fi
     sleep 0.1
   done
-  echo "Error: Pact MCP relay did not become ready." >&2
+  echo "Error: Pact host relay did not become ready." >&2
   return 1
 }

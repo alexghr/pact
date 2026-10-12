@@ -20,9 +20,8 @@ import (
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/dind"
 	"github.com/alexghr/pact/internal/gitbroker"
-	"github.com/alexghr/pact/internal/mcphost"
+	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/nix"
-	"github.com/alexghr/pact/mcpproxy"
 )
 
 // agentConfig holds the options passed to the container's agent entrypoint.
@@ -35,7 +34,7 @@ type agentConfig struct {
 	effort    string
 	config    string
 	git       config.Git
-	mcpBridge mcphost.Bridge
+	bridge    hostbridge.Bridge
 	mcpNames  []string
 }
 
@@ -106,8 +105,8 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
 	)
-	if cfg.mcpBridge != nil {
-		bridgeConfig := cfg.mcpBridge.ContainerConfig()
+	if cfg.bridge != nil {
+		bridgeConfig := cfg.bridge.ContainerConfig()
 		for _, mount := range bridgeConfig.ReadOnlyMounts {
 			args = append(args, "--mount", readOnlyMount(mount.Source, mount.Target))
 		}
@@ -118,13 +117,13 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 	args = append(args,
 		"--env", "PACT_GIT_NAME="+cfg.git.Name,
 		"--env", "PACT_GIT_EMAIL="+cfg.git.Email,
-		"--env", "PACT_GIT_URL="+cfg.mcpBridge.AgentURL()+"/mcp/"+gitbroker.ServerName,
+		"--env", "PACT_GIT_URL="+cfg.bridge.AgentURL()+"/mcp/"+gitbroker.ServerName,
 	)
 	args = append(args, runtimeOptions...)
 	args = append(args, image, cfg.prompt, cfg.model, cfg.effort)
 	for _, name := range cfg.mcpNames {
 		args = append(args, "--config", fmt.Sprintf(
-			`mcp_servers.%s={url="%s/mcp/%s"}`, name, cfg.mcpBridge.AgentURL(), name,
+			`mcp_servers.%s={url="%s/mcp/%s"}`, name, cfg.bridge.AgentURL(), name,
 		))
 	}
 
@@ -182,17 +181,17 @@ func run(args []string) (runErr error) {
 		return fmt.Errorf("start Git broker: %w", err)
 	}
 	defer func() { runErr = errors.Join(runErr, broker.Close()) }()
-	servers = append(servers, mcpproxy.Server{Name: gitbroker.ServerName, Handler: broker})
-	bridge, err := mcphost.Start(servers, cfg.workspace)
+	servers = append(servers, hostbridge.Server{Name: gitbroker.ServerName, Handler: broker})
+	bridge, err := hostbridge.Start(servers, cfg.workspace)
 	if err != nil {
 		return err
 	}
 	defer func() { runErr = errors.Join(runErr, bridge.Close()) }()
-	cfg.mcpBridge = bridge
+	cfg.bridge = bridge
 	go func() {
 		select {
 		case err := <-bridge.Done():
-			cancel(errors.Join(errors.New("MCP proxy stopped"), err))
+			cancel(errors.Join(errors.New("host bridge stopped"), err))
 		case <-ctx.Done():
 		}
 	}()

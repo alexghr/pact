@@ -1,6 +1,6 @@
-// Package mcpproxy forwards HTTP MCP traffic using credentials held by the host.
-// It does not interpret MCP messages or filter tools.
-package mcpproxy
+// Package httpproxy forwards HTTP requests using credentials held by the host.
+// It passes request and response bodies through without interpreting them.
+package httpproxy
 
 import (
 	"context"
@@ -18,12 +18,6 @@ import (
 // upstream; its error text is never returned to the client or logged.
 type HeadersFunc func(context.Context) (http.Header, error)
 
-// Server registers a named HTTP MCP handler with Pact.
-type Server struct {
-	Name    string
-	Handler http.Handler
-}
-
 // NewHTTP forwards to the exact endpoint, including its path and query. Incoming
 // URLs cannot change that destination. Credentials belong in headers, not URL
 // userinfo. A nil headers callback is valid for an unauthenticated upstream.
@@ -37,7 +31,7 @@ func NewHTTP(endpoint string, headers HeadersFunc) (http.Handler, error) {
 	if err != nil || target.Hostname() == "" ||
 		(target.Scheme != "http" && target.Scheme != "https") ||
 		target.User != nil || target.Fragment != "" || target.Opaque != "" {
-		return nil, errors.New("MCP endpoint must be an absolute HTTP(S) URL without userinfo or a fragment")
+		return nil, errors.New("proxy endpoint must be an absolute HTTP(S) URL without userinfo or a fragment")
 	}
 
 	return &httputil.ReverseProxy{
@@ -54,7 +48,7 @@ func NewHTTP(endpoint string, headers HeadersFunc) (http.Handler, error) {
 		// Transport errors can contain credential-provider errors or URL queries.
 		ErrorLog: log.New(io.Discard, "", 0),
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
-			http.Error(w, "MCP upstream unavailable", http.StatusBadGateway)
+			http.Error(w, "HTTP upstream unavailable", http.StatusBadGateway)
 		},
 	}, nil
 }

@@ -1,4 +1,4 @@
-package mcphost
+package hostbridge
 
 import (
 	"context"
@@ -10,13 +10,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/alexghr/pact/mcpproxy"
 )
 
 func TestTCPAuthenticationAndLifetime(t *testing.T) {
 	var calls atomic.Int32
-	bridge, err := startTCP([]mcpproxy.Server{{Name: "example", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	bridge, err := startTCP([]Server{{Name: "example", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.URL.Path != "/mcp/example" {
 			t.Error("bridge token reached handler or request path changed")

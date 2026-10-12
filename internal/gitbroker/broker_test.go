@@ -21,9 +21,8 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/config"
-	"github.com/alexghr/pact/internal/mcphost"
+	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/nix"
-	"github.com/alexghr/pact/mcpproxy"
 )
 
 func runCommand(t *testing.T, dir string, env []string, program string, args ...string) string {
@@ -247,7 +246,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	}
 
 	// Exercise the production bridge and the container's Unix-to-HTTP relay.
-	bridge, err := mcphost.Start([]mcpproxy.Server{{Name: ServerName, Handler: b}}, workspace)
+	bridge, err := hostbridge.Start([]hostbridge.Server{{Name: ServerName, Handler: b}}, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,13 +501,13 @@ func testRelay(t *testing.T, socket string) string {
 	endpoint := probe.URL
 	probe.Close()
 	u, _ := url.Parse(endpoint)
-	script, err := fs.ReadFile(container.BuildContext, "mcp-relay.sh")
+	script, err := fs.ReadFile(container.BuildContext, "host-relay.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, "bash", "-e", "-s", "--", socket, u.Port())
-	cmd.Stdin = strings.NewReader(string(script) + "\nstart_mcp_relay \"$1\" \"$2\"\necho ready\nwait \"$pact_mcp_relay_pid\"\n")
+	cmd.Stdin = strings.NewReader(string(script) + "\nstart_host_relay \"$1\" \"$2\"\necho ready\nwait \"$pact_host_relay_pid\"\n")
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }

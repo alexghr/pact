@@ -1,4 +1,4 @@
-package mcphost
+package hostbridge
 
 import (
 	"crypto/rand"
@@ -7,8 +7,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-
-	"github.com/alexghr/pact/mcpproxy"
 )
 
 type tcpBridge struct {
@@ -19,14 +17,14 @@ type tcpBridge struct {
 
 // startTCP creates a loopback bridge for Docker Desktop. Its random URL path
 // grants access only to this run's bridge, never to upstream credentials.
-func startTCP(servers []mcpproxy.Server) (*tcpBridge, error) {
+func startTCP(servers []Server) (*tcpBridge, error) {
 	mux, err := routes(servers)
 	if err != nil {
 		return nil, err
 	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
-		return nil, fmt.Errorf("listen on MCP TCP bridge: %w", err)
+		return nil, fmt.Errorf("listen on host TCP bridge: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	token := rand.Text()

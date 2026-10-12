@@ -32,6 +32,23 @@ the same fields; names may contain letters, digits, underscores, or hyphens.
 Pact registers each server under its map key and forwards all tools without
 filtering. Omit an entry to disable it.
 
+## HTTP infrastructure
+
+`internal/hostbridge` owns the private host/container HTTP listener, access
+control, named handler routing, and cleanup. Register handlers with
+`hostbridge.Server`. `httpproxy.NewHTTP` forwards requests to a fixed upstream
+endpoint and applies host-held credentials. Neither package interprets MCP.
+`cmd/pact/mcp.go` adapts MCP configuration into these HTTP handlers; the launcher
+advertises only configured MCP servers to Codex. The Git broker uses the same
+bridge as an ordinary HTTP handler.
+
+For compatibility, handler routes retain the `/mcp/<name>` prefix, including
+`/mcp/pact_git`. The container socket path `/opt/pact/mcp.sock`, the
+`PACT_MCP_SOCKET` and `PACT_GIT_URL` environment variables, and the health route
+`/_pact/health` are unchanged. These historical MCP names also serve generic
+HTTP traffic. The internal relay script is now `host-relay.sh`; the launcher
+builds it into the image together with its updated entrypoint.
+
 ## Transport and lifetime
 
 On Linux, each run creates a private Unix socket outside the workspace and mounts only
@@ -45,7 +62,7 @@ On macOS with Docker Desktop, Pact instead listens on host loopback and connects
 through `host.docker.internal` on a random host port. A random per-session token
 in the URL path protects the bridge; only this bridge URL enters the container,
 never upstream credentials. The bridge strips the token before forwarding.
-With no registrations, no listener or relay is created.
+The Git broker is always registered, even with no configured MCP servers.
 
 The proxy sends requests to the exact registered endpoint, including its path
 and query. It discards client authorization and cookies, applies host headers,
@@ -72,4 +89,4 @@ with an appropriate tool request. After each run, check that its container has
 exited and its `/tmp/pact-mcp-*` socket directory has been removed.
 
 To check TCP connectivity through Docker Desktop using the built Pact image, run
-`PACT_TEST_DOCKER=1 ./shell go test ./internal/mcphost -run TestTCPAuthenticationAndLifetime`.
+`PACT_TEST_DOCKER=1 ./shell go test ./internal/hostbridge -run TestTCPAuthenticationAndLifetime`.

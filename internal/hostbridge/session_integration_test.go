@@ -1,4 +1,4 @@
-package mcphost
+package hostbridge
 
 import (
 	"bufio"
@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexghr/pact/httpproxy"
 	"github.com/alexghr/pact/internal/nix"
-	"github.com/alexghr/pact/mcpproxy"
 )
 
 func TestRelayStreamingAndSessionLifetime(t *testing.T) {
@@ -36,11 +36,11 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 		ended <- struct{}{}
 	}))
 	defer upstream.Close()
-	proxy, err := mcpproxy.NewHTTP(upstream.URL+"/mcp", nil)
+	proxy, err := httpproxy.NewHTTP(upstream.URL+"/mcp", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bridge, err := startUnix([]mcpproxy.Server{{Name: "example", Handler: proxy}}, t.TempDir())
+	bridge, err := startUnix([]Server{{Name: "example", Handler: proxy}}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func startRelay(t *testing.T, socket string) string {
 	t.Helper()
 	// Exercise the same relay script embedded in the container image. p-test
 	// supplies socat and curl; missing dependencies must fail this check.
-	script, err := fs.ReadFile(container.BuildContext, "mcp-relay.sh")
+	script, err := fs.ReadFile(container.BuildContext, "host-relay.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func startRelay(t *testing.T, socket string) string {
 	listener.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	cmd := exec.CommandContext(ctx, "bash", "-e", "-s", "--", socket, fmt.Sprint(port))
-	cmd.Stdin = strings.NewReader(string(script) + "\nstart_mcp_relay \"$1\" \"$2\"\necho ready\nwait \"$pact_mcp_relay_pid\"\n")
+	cmd.Stdin = strings.NewReader(string(script) + "\nstart_host_relay \"$1\" \"$2\"\necho ready\nwait \"$pact_host_relay_pid\"\n")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = time.Second

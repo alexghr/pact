@@ -82,6 +82,10 @@ func ssh(args []string) error {
 		return err
 	}
 	defer res.Body.Close()
+	// The broker multiplexes SSH output into frames: one channel byte
+	// (1 = stdout, 2 = stderr, 3 = exit status), then a big-endian uint32
+	// payload length. Exit frames contain one status byte; e.g. 03 00000001 00
+	// means success. See frameWriter in internal/gitbroker for the encoder.
 	for {
 		var header [5]byte
 		if _, err := io.ReadFull(res.Body, header[:]); err != nil {

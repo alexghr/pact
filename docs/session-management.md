@@ -173,7 +173,7 @@ owns containers, bridges, sidecars, and their cleanup. Client adapters translate
 input and present results; none should implement a second session scheduler.
 
 Extract runtime setup from `cmd/pact/main.go` into `internal/runtime`. Keep
-`internal/mcphost`, `internal/gitbroker`, and `internal/dind` as dependencies.
+`internal/hostbridge`, `internal/gitbroker`, and `internal/dind` as dependencies.
 Currently their lifetime follows the launcher process. For detached work their
 lifetime must follow the supervisor, including Git signing and MCP access after
 the initiating CLI disconnects. DinD also hardcodes the global Codex volume;

@@ -34,7 +34,7 @@ RUN ln -s pact-git-sign /usr/local/bin/pact-git-ssh
 COPY nix.conf /etc/nix/nix.conf
 COPY entrypoint.sh /opt/pact/entrypoint.sh
 COPY git-identity.sh /opt/pact/git-identity.sh
-COPY mcp-relay.sh /opt/pact/mcp-relay.sh
+COPY host-relay.sh /opt/pact/host-relay.sh
 COPY agent-instructions.md /opt/pact/agent-instructions.md
 RUN chmod 0755 /opt/pact/entrypoint.sh
 

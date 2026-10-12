@@ -1,4 +1,4 @@
-package mcpproxy_test
+package httpproxy_test
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/alexghr/pact/mcpproxy"
+	"github.com/alexghr/pact/httpproxy"
 )
 
 func TestHostCredentialsAndDestination(t *testing.T) {
@@ -38,7 +38,7 @@ func TestHostCredentialsAndDestination(t *testing.T) {
 	defer upstream.Close()
 
 	var credentials atomic.Int32
-	proxy, err := mcpproxy.NewHTTP(upstream.URL+"/private/mcp?tenant=host", func(context.Context) (http.Header, error) {
+	proxy, err := httpproxy.NewHTTP(upstream.URL+"/private/mcp?tenant=host", func(context.Context) (http.Header, error) {
 		return http.Header{
 			"Authorization": {fmt.Sprintf("Bearer host-%d", credentials.Add(1))},
 			"X-Api-Key":     {"host-key"},
@@ -83,9 +83,9 @@ func TestProxyErrorsDoNotExposeCredentials(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
 	defer upstream.Close()
-	checkError := func(endpoint string, headers mcpproxy.HeadersFunc) {
+	checkError := func(endpoint string, headers httpproxy.HeadersFunc) {
 		t.Helper()
-		proxy, err := mcpproxy.NewHTTP(endpoint, headers)
+		proxy, err := httpproxy.NewHTTP(endpoint, headers)
 		if err != nil {
 			t.Fatal(err)
 		}
