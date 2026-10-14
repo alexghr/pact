@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/alexghr/pact/httpproxy"
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/hostbridge"
+	"github.com/alexghr/pact/internal/httpproxy"
 )
 
 func mcpServers(settings map[string]config.MCPServer) ([]hostbridge.Server, error) {

@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/alexghr/pact/httpproxy"
+	"github.com/alexghr/pact/internal/httpproxy"
 )
 
 func TestHostCredentialsAndDestination(t *testing.T) {

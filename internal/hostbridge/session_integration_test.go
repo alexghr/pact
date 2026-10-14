@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexghr/pact/httpproxy"
+	"github.com/alexghr/pact/internal/httpproxy"
 	"github.com/alexghr/pact/internal/nix"
 )
 

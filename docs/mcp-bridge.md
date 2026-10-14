@@ -36,8 +36,9 @@ filtering. Omit an entry to disable it.
 
 `internal/hostbridge` owns the private host/container HTTP listener, access
 control, named handler routing, and cleanup. Register handlers with
-`hostbridge.Server`. `httpproxy.NewHTTP` forwards requests to a fixed upstream
-endpoint and applies host-held credentials. Neither package interprets MCP.
+`hostbridge.Server`. `internal/httpproxy` provides `NewHTTP` to forward requests
+to a fixed upstream endpoint and apply host-held credentials. Neither package
+interprets MCP.
 `cmd/pact/mcp.go` adapts MCP configuration into these HTTP handlers; the launcher
 advertises only configured MCP servers to Codex. The Git broker uses the same
 bridge as an ordinary HTTP handler.

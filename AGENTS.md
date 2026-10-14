@@ -95,6 +95,8 @@ Before adding a test:
 
 ## Project conventions
 
+- Keep all Go implementation packages under `internal/`. Do not add public
+  packages unless the user explicitly requests a public Go API.
 - Keep executable entrypoints under `cmd/` and container build inputs
   under `internal/nix/context/`. Use the existing build scripts.
 - Reuse upstream Nix packaging instead of maintaining duplicate recipes.
