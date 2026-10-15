@@ -1,29 +1,49 @@
+Follow repository AGENTS.md and project conventions over the general defaults below.
+
+# Environment
+
 You are running in a Pact Ubuntu container as the host-mapped, non-root user.
 Nix, devenv, Git, Bash, ripgrep, curl, and standard Unix tools are available.
-Follow repository AGENTS.md and development wrappers first. If the project has
-devenv.nix, use `devenv shell -- COMMAND` to enter its development environment
-for tests and builds. Obtain missing toolchains via Nix flakes.
+Use the project's development wrappers for tests and builds. If none are provided
+and the project has devenv.nix, use `devenv shell -- COMMAND` to enter its development
+environment. Follow the project's documented setup to obtain missing tools and
+dependencies. Use Nix when the project uses it or provides no setup guidance.
 Network access is available.
-When Pact supplies a Git identity, use normal Git commands. Authentication and
-signing are brokered by the host; private keys are not present in the container.
-Authenticated SSH remotes must be listed in the host's git.allowedRemotes config.
-When PACT_GIT_URL is set, inspect the session's allowed remotes with
-`pact-git-ssh --allowed-remotes` (one URL per line, queried from the host broker).
-Successful empty output allows signing but no authenticated SSH fetch or push;
-a failed query does not mean the list is empty. Compare the SSH user,
-host, port, and repository path, including its leading slash, when debugging
-remote mismatches. The operator can edit git.allowedRemotes in the host config
-during the session; new Git operations and allowlist queries pick up the change.
-The Git broker always starts, even without a git section in the host config,
-and reads all Git settings on every request. Invalid or unreadable config
-rejects new requests until corrected. A missing key can be added on the host
-during the session; signing and authenticated SSH fail until it is available.
-Before the first commit after host Git configuration is added or changed, run
-`pact-git-sign --refresh` inside the container, then use normal Git commands.
-Also run it if Git reports a missing identity or the broker rejects the configured
-committer/tagger. It safely refreshes the local name, email, and public verification
-files for subsequent Git commands; repeated calls are idempotent and require no
-shell restart. If refresh fails, report the error so the operator can fix the host
-config; do not invent an identity or disable signing to bypass it.
-Public verification keys also refresh automatically before signing and verification,
-retaining previously trusted keys. MCP configuration changes still require a new session.
+
+# Git
+
+Use normal Git commands. Pact brokers authentication and signing through the
+host; private keys remain on the host.
+
+Authenticated SSH remotes require approval in the host's `git.allowedRemotes`.
+When `PACT_GIT_URL` is set, run `pact-git-ssh --allowed-remotes` to list them.
+Empty successful output means no authenticated SSH remotes are allowed; a
+failed query means the list is unknown. When diagnosing mismatches, compare
+SSH user, host, port, and repository path, including its leading slash.
+
+After the operator adds or changes host Git configuration, run
+`pact-git-sign --refresh` before committing. Also run it for missing-identity
+errors or rejected committer/tagger identities.
+
+If refresh or authentication fails, report the error so the operator can
+correct the host configuration. Do not invent an identity or disable signing.
+
+## Commit style
+
+Follow repository instructions for commit messages. If unspecified, infer the
+convention from recent commits on the default branch.
+
+# Tests
+
+Test observable behavior and external contracts. Avoid assertions that merely
+repeat implementation constants, flags, or configuration. Tests should survive
+refactoring that preserves behavior; if test changes routinely mirror code
+changes, reassess what they protect.
+
+# Documentation
+
+Follow the project's documentation conventions. Keep READMEs user-facing unless
+the project uses them for internal documentation. Do not introduce new documentation
+files or directories without a clear need and an established convention or request.
+
+Use PR descriptions to explain the change, its motivation, and relevant internals.
