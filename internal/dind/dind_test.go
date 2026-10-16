@@ -45,7 +45,7 @@ fi
 		}
 	}()
 	started := time.Now()
-	_, cleanup, err := Start(ctx, dir)
+	_, cleanup, err := Start(ctx, dir, "unused-state")
 	elapsed := time.Since(started)
 	cancel(nil)
 	<-interrupted

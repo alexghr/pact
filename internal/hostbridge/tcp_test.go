@@ -10,6 +10,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/alexghr/pact/internal/environment"
+	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/state"
 )
 
 func TestTCPAuthenticationAndLifetime(t *testing.T) {
@@ -56,12 +60,42 @@ func TestTCPAuthenticationAndLifetime(t *testing.T) {
 	}
 	// Opt in when a local Docker Desktop daemon and the Pact image are available.
 	if os.Getenv("PACT_TEST_DOCKER") == "1" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 		defer cancel()
-		// The image stores its Nix tools in a tarball until its first startup.
-		cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "--entrypoint", "/bin/bash", "pact-codex", "-e", "-c",
-			`mkdir -p /nix/store; tar -xf /opt/pact/store.tar -C /nix/store; exec /opt/pact/tools/bin/curl "$@"`,
-			"bridge-check", "--noproxy", "*", "--fail", "--silent", "--show-error", "--max-time", "10", bridge.AgentURL()+"/mcp/example")
+		t.Setenv("XDG_STATE_HOME", t.TempDir())
+		store, err := state.Open(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { store.Close() })
+		launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Owner: "test", Backend: "codex"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := launch.Environment
+		t.Cleanup(func() {
+			cleanupCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+			defer stop()
+			_ = exec.CommandContext(cleanupCtx, "docker", "rm", "--force", env.NixVolume).Run()
+			_ = exec.CommandContext(cleanupCtx, "docker", "volume", "rm", env.StateVolume, env.NixVolume).Run()
+		})
+		image, err := container.BuildAgentImage(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unlock, err := store.LockStorage(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = environment.Prepare(ctx, store, env)
+		unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := append([]string{"run", "--rm"}, environment.Mounts(env)...)
+		args = append(args, "--entrypoint", "/opt/pact/tools/bin/curl", image,
+			"--noproxy", "*", "--fail", "--silent", "--show-error", "--max-time", "10", bridge.AgentURL()+"/mcp/example")
+		cmd := exec.CommandContext(ctx, "docker", args...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("Docker Desktop bridge: %v: %s", err, strings.ReplaceAll(string(output), base.Path, "/<token>"))
 		}

@@ -10,6 +10,11 @@ environment. Follow the project's documented setup to obtain missing tools and
 dependencies. Use Nix when the project uses it or provides no setup guidance.
 Network access is available.
 
+Keep persistent build and development profiles under `$PACT_NIX_ROOTS` so they
+survive between runs. Use `nix build .#package --out-link "$PACT_NIX_ROOTS/package"`
+and `nix develop --profile "$PACT_NIX_ROOTS/development"`; configure project wrappers
+to keep profiles there too.
+
 # Git
 
 Use normal Git commands. Pact brokers authentication and signing through the

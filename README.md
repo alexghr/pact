@@ -7,20 +7,27 @@ Pact is an agent isolation solution.
 Each validated launch prints a Pact session ID to stderr and records the workspace,
 launch settings, and outcome on the host, including when startup fails. The
 catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
-`~/.local/state/pact/sessions.db`. Conversation history stays in the agent's
-existing state volume.
+`~/.local/state/pact/sessions.db`. Each new session has private persistent agent
+state; sessions share a managed Nix daemon and read-only package store.
+
+See [storage and recovery](docs/nix-storage.md) for persistent Nix roots and daemon
+lifecycle details.
 
 ## System skills
 
 The container includes [Graphene](https://github.com/alexghr/graphene) and its
 `graphene-stacked-prs` skill. Nix pins the CLI and skill to the same source revision
-in `internal/nix/context/flake.lock`.
+in `internal/nix/context/tools/flake.lock`.
 
-Bundled skills are listed in `internal/nix/context/flake.nix` and exposed through
+Bundled skills are listed in `internal/nix/context/tools/flake.nix` and exposed through
 `/etc/codex/skills`. To add or remove one, edit the `skills` list (and add any
 required tools to `pact-tools`), then rebuild the launcher with `./shell p-build`.
-The next Pact launch rebuilds the container image. Skills come from the image,
-so removed skills do not linger in the persistent Codex home.
+Each launch asks Nix to realise the pinned toolset, reusing existing build outputs,
+then updates the shared tools profile. Running containers see newly added commands
+without restarting. Skills are published from that profile into the stable
+`/etc/codex/skills` directory so Codex can detect additions and removals.
+Already-running programs keep their existing version; upgrading Codex itself
+requires restarting its process. Tools and skills do not change the daemon image.
 
 Project skills in `.agents/skills` inside the Git clone remain available through
 Codex's normal skill discovery.

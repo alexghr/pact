@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -25,15 +26,14 @@ type Environment struct {
 	WorkspaceID string
 	StateVolume string
 	NixVolume   string
+	Provisioned bool
 }
 
 type LaunchOptions struct {
-	Workspace   string
-	Owner       string
-	Backend     string
-	StateVolume string
-	NixVolume   string
-	Settings    LaunchSettings
+	Workspace string
+	Owner     string
+	Backend   string
+	Settings  LaunchSettings
 }
 
 type Launch struct {
@@ -99,14 +99,22 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 	launch := Launch{
 		Workspace:   workspace,
 		ExecutionID: rand.Text(),
-		Environment: Environment{ID: rand.Text(), StateVolume: options.StateVolume, NixVolume: options.NixVolume},
+		Environment: Environment{ID: rand.Text()},
 	}
+	volume := "pact-nix-" + strings.ToLower(rand.Text())
+	if _, err := tx.ExecContext(ctx, "INSERT INTO shared_storage(singleton, volume) VALUES(1, ?) ON CONFLICT DO NOTHING", volume); err != nil {
+		return Launch{}, fmt.Errorf("record shared storage intent: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT volume FROM shared_storage WHERE singleton = 1").Scan(&launch.Environment.NixVolume); err != nil {
+		return Launch{}, err
+	}
+	launch.Environment.StateVolume = "pact-state-" + strings.ToLower(launch.Environment.ID)
 	if err := tx.QueryRowContext(ctx, "SELECT id FROM workspaces WHERE path = ?", workspace).Scan(&launch.Environment.WorkspaceID); err != nil {
 		return Launch{}, fmt.Errorf("find workspace: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		"INSERT INTO environments(id, workspace_id, state_volume, nix_volume, created_at) VALUES(?, ?, ?, ?, ?)",
-		launch.Environment.ID, launch.Environment.WorkspaceID, options.StateVolume, options.NixVolume, now,
+		launch.Environment.ID, launch.Environment.WorkspaceID, launch.Environment.StateVolume, launch.Environment.NixVolume, now,
 	); err != nil {
 		return Launch{}, fmt.Errorf("record environment: %w", err)
 	}

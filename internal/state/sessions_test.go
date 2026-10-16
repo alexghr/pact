@@ -47,6 +47,9 @@ func TestLaunchAllocation(t *testing.T) {
 	if a.launch.Environment.ID == b.launch.Environment.ID || a.launch.ExecutionID == b.launch.ExecutionID {
 		t.Fatal("independent launches share environment or execution identity")
 	}
+	if a.launch.Environment.StateVolume == b.launch.Environment.StateVolume || a.launch.Environment.NixVolume != b.launch.Environment.NixVolume {
+		t.Fatal("independent environments must have private state and one shared store")
+	}
 	// Deleting the newest session must not make its issued ID available again.
 	if _, err := first.db.ExecContext(t.Context(), "DELETE FROM executions WHERE session_id = ?", b.launch.SessionID); err != nil {
 		t.Fatal(err)
@@ -64,6 +67,42 @@ func TestLaunchAllocation(t *testing.T) {
 	}
 }
 
+func TestStorageReclamationReferences(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store := openStore(t)
+	opts := LaunchOptions{Workspace: t.TempDir(), Owner: "operator", Backend: "codex"}
+	launch, err := store.CreateLaunch(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinishExecution(t.Context(), launch.ExecutionID, StartupFailed, 1, "interrupted provisioning"); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := store.StaleEnvironments(t.Context())
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("retained failed session eligible for GC: %v, %v", stale, err)
+	}
+	// A second retained session protects the same environment after the first
+	// reference is removed. Completed executions do not imply abandonment.
+	if _, err := store.db.ExecContext(t.Context(), `
+		INSERT INTO sessions(environment_id, owner, backend, created_at) SELECT environment_id, owner, backend, created_at FROM sessions;
+		DELETE FROM executions;
+		DELETE FROM sessions WHERE id = ?`, launch.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	stale, err = store.StaleEnvironments(t.Context())
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("second session reference was ignored: %v, %v", stale, err)
+	}
+	if _, err := store.db.ExecContext(t.Context(), "DELETE FROM sessions"); err != nil {
+		t.Fatal(err)
+	}
+	stale, err = store.StaleEnvironments(t.Context())
+	if err != nil || len(stale) != 1 || stale[0].ID != launch.Environment.ID {
+		t.Fatalf("unreferenced partial provision not reclaimable: %v, %v", stale, err)
+	}
+}
+
 func TestLaunchAllocationRollsBack(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	store := openStore(t)
@@ -72,7 +111,7 @@ func TestLaunchAllocationRollsBack(t *testing.T) {
 	if err == nil {
 		t.Fatal("launch with an empty backend succeeded")
 	}
-	for _, table := range []string{"workspaces", "environments", "sessions", "executions"} {
+	for _, table := range []string{"workspaces", "environments", "sessions", "executions", "shared_storage"} {
 		var count int
 		if err := store.db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+table).Scan(&count); err != nil {
 			t.Fatal(err)

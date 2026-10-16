@@ -19,6 +19,7 @@ import (
 
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/dind"
+	"github.com/alexghr/pact/internal/environment"
 	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/nix"
@@ -102,11 +103,11 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 	args = append(args,
 		"--volume", cfg.workspace+":/home/pact/workspace",
 		"--volume", cfg.environment.StateVolume+":/home/pact/.codex",
-		"--volume", cfg.environment.NixVolume+":/nix",
 		"--volume", filepath.Join(home, ".codex", "auth.json")+":/opt/pact/host-auth.json:ro",
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
 	)
+	args = append(args, environment.Mounts(cfg.environment)...)
 	if cfg.bridge != nil {
 		bridgeConfig := cfg.bridge.ContainerConfig()
 		for _, mount := range bridgeConfig.ReadOnlyMounts {
@@ -194,13 +195,20 @@ func run(args []string) (runErr error) {
 		return err
 	}
 	defer func() { runErr = errors.Join(runErr, store.Close()) }()
+	unlock, err := store.LockStorage(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
 	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{
-		Workspace:   cfg.workspace,
-		Owner:       "uid:" + strconv.Itoa(os.Getuid()),
-		Backend:     "codex",
-		StateVolume: "pact-codex-state",
-		NixVolume:   "pact-codex-state-nix",
-		Settings:    state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Prompted: cfg.prompt != "", DinD: cfg.dind},
+		Workspace: cfg.workspace,
+		Owner:     "uid:" + strconv.Itoa(os.Getuid()),
+		Backend:   "codex",
+		Settings:  state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Prompted: cfg.prompt != "", DinD: cfg.dind},
 	})
 	if err != nil {
 		return err
@@ -245,13 +253,18 @@ func run(args []string) (runErr error) {
 		case <-ctx.Done():
 		}
 	}()
-	image, err := container.BuildImage(ctx)
+	image, err := container.BuildAgentImage(ctx)
 	if err != nil {
 		return errors.Join(err, context.Cause(ctx))
 	}
+	if err := environment.Prepare(ctx, store, cfg.environment); err != nil {
+		return fmt.Errorf("prepare environment for session %d: %w", launch.SessionID, err)
+	}
+	unlock()
+	unlock = nil
 	var runtimeOptions []string
 	if cfg.dind {
-		name, cleanup, err := dind.Start(ctx, cfg.workspace)
+		name, cleanup, err := dind.Start(ctx, cfg.workspace, cfg.environment.StateVolume)
 		if err != nil {
 			return err
 		}

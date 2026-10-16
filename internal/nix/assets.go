@@ -1,4 +1,4 @@
-// Package container embeds the files needed to build Pact's agent image.
+// Package container builds Pact's agent and Nix daemon images from embedded inputs.
 package container
 
 import (

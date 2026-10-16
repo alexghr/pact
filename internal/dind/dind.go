@@ -21,7 +21,7 @@ const dindImage = "docker:29.8.1-dind@sha256:3f3c01aaaebf7cce837356b688b7c059a47
 // It shares the workspace and agent authentication with the sidecar, but never
 // passes the host Docker socket to the agent.
 // The context controls startup; cleanup has an independent 10-second deadline.
-func Start(ctx context.Context, workspace string) (string, func(), error) {
+func Start(ctx context.Context, workspace, stateVolume string) (string, func(), error) {
 	var id [8]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", nil, err
@@ -46,7 +46,7 @@ func Start(ctx context.Context, workspace string) (string, func(), error) {
 		"--env", "DOCKER_TLS_CERTDIR=",
 		"--volume", name+":/run/pact-docker",
 		"--volume", workspace+":/home/pact/workspace",
-		"--volume", "pact-codex-state:/home/pact/.codex:ro",
+		"--volume", stateVolume+":/home/pact/.codex:ro",
 		dindImage, "dockerd", "--host="+Socket)
 	if err != nil {
 		cleanup()

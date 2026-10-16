@@ -24,11 +24,6 @@ if [[ "$(id -u)" == "0" ]]; then
   chown pact:"$pact_group" /home/pact
   chown -R pact:"$pact_group" "$CODEX_HOME"
 
-  # The store belongs to this container, not to the mounted workspace.
-  mkdir -p /nix/store /nix/var/nix
-  chown pact:"$pact_group" /nix /nix/store
-  chown -R pact:"$pact_group" /nix/var
-
   if [[ -f /opt/pact/host-auth.json && ! -f "$CODEX_HOME/auth.json" ]]; then
     install --owner=pact --group="$pact_group" --mode=0600 \
       /opt/pact/host-auth.json "$CODEX_HOME/auth.json"
@@ -38,18 +33,15 @@ if [[ "$(id -u)" == "0" ]]; then
   exec gosu pact "$0" "$@"
 fi
 
-# Seed and refresh image tools after dropping root. Existing project packages
-# survive image upgrades; all Nix operations run as the agent user.
-if ! cmp -s /opt/pact/store-registration /nix/.pact-store-registration; then
-  tar --extract --file /opt/pact/store.tar --directory /nix/store \
-    --skip-old-files --no-same-owner >&2
-  export PATH="/opt/pact/tools/bin:$PATH"
-  nix-store --load-db < /opt/pact/store-registration >&2
-  mkdir -p /nix/var/nix/gcroots
-  ln -sfn /opt/pact/tools /nix/var/nix/gcroots/pact-tools
-  cp /opt/pact/store-registration /nix/.pact-store-registration
-fi
 export PATH="/opt/pact/tools/bin:$PATH"
+if [[ -z "${PACT_NIX_ROOTS:-}" || ! -d "$PACT_NIX_ROOTS" ]]; then
+  echo 'Error: missing managed environment roots; repair environment provisioning on the host.' >&2
+  exit 1
+fi
+# Profiles must resolve to the same path in the daemon's filesystem namespace.
+mkdir -p "$PACT_NIX_ROOTS/profiles" "$HOME/.local/state/nix"
+ln -sfn "$PACT_NIX_ROOTS/profiles" "$HOME/.local/state/nix/profiles"
+ln -sfn "$PACT_NIX_ROOTS/profiles/profile" "$HOME/.nix-profile"
 
 if [[ $# -lt 3 ]]; then
   echo "Error: expected prompt, model, effort, and optional Codex arguments." >&2

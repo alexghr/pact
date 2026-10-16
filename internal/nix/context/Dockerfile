@@ -1,17 +1,6 @@
 # Build from the repository root:
 #   ./shell p-git-client
 #   docker build --tag pact-codex internal/nix/context
-FROM nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8 AS tools
-
-COPY flake.nix flake.lock /tmp/pact-tools/
-RUN nix --extra-experimental-features 'nix-command flakes' build \
-    /tmp/pact-tools#pact-tools --no-update-lock-file --out-link /opt/pact/tools
-RUN export PATH="/opt/pact/tools/bin:$PATH" && \
-    nix-store --query --requisites /opt/pact/tools > /tmp/closure && \
-    nix-store --dump-db $(cat /tmp/closure) > /opt/pact/store-registration && \
-    sed 's|^/nix/store/||' /tmp/closure > /tmp/store-paths && \
-    tar -C /nix/store -cf /opt/pact/store.tar -T /tmp/store-paths
-
 FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 ARG TARGETARCH
@@ -23,11 +12,10 @@ RUN apt-get update && \
     mkdir -p /home/pact/workspace /opt/pact /etc/nix && \
     chown pact:pact /home/pact/workspace
 
-COPY --from=tools /opt/pact/ /opt/pact/
-# The target becomes available when the entrypoint restores the Nix store.
-# Keep image skills outside the persistent Codex home so rebuilds replace them.
+# Stable paths let running agents see tool and skill updates through the store.
 RUN mkdir -p /etc/codex && \
-    ln -s /opt/pact/tools/share/pact/skills /etc/codex/skills
+    ln -s /nix/var/nix/profiles/pact-tools /opt/pact/tools && \
+    ln -s /nix/var/nix/pact-skills /etc/codex/skills
 # Both commands use cmd/git-client; argv[0] selects transport or signing.
 COPY --chmod=0755 bin/pact-git-client-linux-${TARGETARCH} /usr/local/bin/pact-git-sign
 RUN ln -s pact-git-sign /usr/local/bin/pact-git-ssh
@@ -39,7 +27,7 @@ COPY agent-instructions.md /opt/pact/agent-instructions.md
 RUN chmod 0755 /opt/pact/entrypoint.sh
 
 ENV CODEX_HOME=/home/pact/.codex
-ENV NIX_REMOTE=local
+ENV NIX_REMOTE=daemon
 ENV CI=0
 
 WORKDIR /home/pact/workspace
