@@ -101,6 +101,19 @@ func TestStorageReclamationReferences(t *testing.T) {
 	if err != nil || len(stale) != 1 || stale[0].ID != launch.Environment.ID {
 		t.Fatalf("unreferenced partial provision not reclaimable: %v, %v", stale, err)
 	}
+	// A different environment can still reference the volume in either role.
+	other, err := store.CreateLaunch(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(t.Context(), `
+		UPDATE environments SET nix_volume = ? WHERE id = ?`, launch.Environment.StateVolume, other.Environment.ID); err != nil {
+		t.Fatal(err)
+	}
+	stale, err = store.StaleEnvironments(t.Context())
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("cross-environment volume reference was ignored: %v, %v", stale, err)
+	}
 }
 
 func TestLaunchAllocationRollsBack(t *testing.T) {

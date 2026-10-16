@@ -24,8 +24,8 @@ workspaces, environments, sessions, and executions. Each validated launch prints
 its session ID before runtime setup. Launch records preserve model, effort,
 interactive/prompted mode, DinD selection, timestamps, and the final outcome.
 The schema records the backend explicitly and uses generic state-volume fields.
-Environments currently record the existing shared volume pair; private volume
-provisioning is the next increment.
+New environments now use private agent-state volumes and one catalogue-managed
+Nix daemon/store. See [storage, recovery, and legacy history](nix-storage.md).
 
 Execution `running` and its start time describe the foreground Docker client,
 not readiness of a model turn. Build/setup failures and Docker's reserved
@@ -40,7 +40,7 @@ The current implementation points to a discovery problem rather than deliberate
 deletion. Passing a prompt is a supported Pact workflow; it does not mean the
 user did something wrong.
 
-In [the launcher](../cmd/pact/main.go), both modes mount
+Before managed storage, [the launcher](../cmd/pact/main.go) mounted
 `pact-codex-state` at `/home/pact/.codex` and `pact-codex-state-nix` at `/nix`.
 Docker's `--rm` removes the container, but these named volumes survive. In
 [the entrypoint](../internal/nix/context/entrypoint.sh), a nonempty prompt selects
@@ -83,8 +83,8 @@ this investigation. If an explicit lookup fails, check the actual image version,
 volume, archived state, and persistence errors before concluding that history
 was deleted.
 
-There is another issue: every host workspace appears to Codex as
-`/home/pact/workspace`, and all workspaces currently share one Codex volume. Codex's
+In the legacy layout, every host workspace appears to Codex as
+`/home/pact/workspace`, and all workspaces share one Codex volume. Codex's
 directory filter therefore cannot reliably distinguish Pact projects. A global
 `--last` can select a conversation belonging to a different repository.
 
@@ -98,7 +98,7 @@ own history. Use separate identities for these concepts:
 | Record | Meaning and essential fields |
 | --- | --- |
 | Workspace | Opaque ID, owner, canonical host directory, optional metadata for repositories beneath it |
-| Environment | Workspace ID, private Codex and Nix volume names, container mount path, configuration profile |
+| Environment | Workspace ID, private agent-state volume, shared Nix store reference, container mount path, configuration profile |
 | Session | Incrementing integer ID, environment ID, title, owner, backend, creation and activity times, cached last active thread ID, archive state |
 | Thread | Session ID, native Codex thread UUID, title, optional parent thread ID, creation and last activity order, archive state |
 | Turn | One accepted input and its outcome; Pact ID, session and thread IDs, backend turn ID when available, actor, request key, timestamps, error |
@@ -114,8 +114,8 @@ without introducing a project manifest or repository provisioning system.
 
 Each new independent session gets its own environment by default; resuming
 reuses that environment. All threads within a session use its environment and
-volume pair. Creating or forking a thread does not allocate another Pact session
-or another set of volumes. Independent Pact sessions keep their thread stores
+storage references. Creating or forking a thread does not allocate another Pact session
+or another private volume. Independent Pact sessions keep their thread stores
 separate.
 
 Allocate session IDs as increasing positive integers, starting at `1`, within
@@ -191,8 +191,8 @@ Extract runtime setup from `cmd/pact/main.go` into `internal/runtime`. Keep
 `internal/hostbridge`, `internal/gitbroker`, and `internal/dind` as dependencies.
 Currently their lifetime follows the launcher process. For detached work their
 lifetime must follow the supervisor, including Git signing and MCP access after
-the initiating CLI disconnects. DinD also hardcodes the global Codex volume;
-it must receive the environment's selected volume.
+the initiating CLI disconnects. DinD now receives the environment's selected
+private agent-state volume.
 
 ### Codex integration
 
@@ -271,11 +271,11 @@ bindings; Codex remains authoritative for conversational context. Back up both.
 Losing either must produce a visible recovery state, not an empty replacement
 conversation presented as a successful resume.
 
-Give each independent environment an explicit, private pair of Codex and Nix
-volumes. Containers for different environments must not mount each other's
-conversation state. Keep the volume pair when replacing a container or resuming
-a session. Sharing Nix state for efficiency can be evaluated later; it should
-not be necessary to run independent sessions.
+Give each independent environment private agent state and retain its recorded
+shared Nix store reference. Containers for different environments must not mount
+each other's conversation state. Keep these resources when replacing a container
+or resuming a session. The managed Nix daemon coordinates store writes while
+agents mount the store read-only.
 
 Permit one active execution per environment and acquire an exclusive workspace
 lease for its duration, including a native TUI attachment. Independent
@@ -448,7 +448,7 @@ the broader milestones; service queues and remote clients are later increments.
    and capture prompted runs through JSON events. Preserve existing state.
 2. **Introduce the catalogue and independent environments.** Register arbitrary
    workspace directories, including roots containing several repositories. Add
-   session/thread/turn records, activity tracking, private volume pairs, archive,
+   session/thread/turn records, activity tracking, private agent state, archive,
    and recovery. Support exact combined IDs and session-only resume. Enforce
    exclusive workspace ownership during execution and run independent workspaces
    concurrently. Import old sessions.
@@ -472,7 +472,8 @@ visible as unassigned and prevent execution until a workspace is selected.
 For legacy imports only, create environments for the assigned workspaces that
 reference the old shared volume pair. Serialize access to that pair across all
 legacy environments, in addition to acquiring workspace ownership. New
-independent environments use private volumes. Back up and migrate state only
+independent environments use private agent state and the managed shared Nix store.
+Back up and migrate state only
 while its writers are stopped; avoid copying live SQLite files or extracting
 individual rollouts as if they were the complete store. Imports must be
 idempotent by backend store identity and thread ID. Never delete the original

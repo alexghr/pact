@@ -46,6 +46,14 @@ func (s *Store) Environment(ctx context.Context, id string) (Environment, error)
 	return env, err
 }
 
+func (s *Store) SessionEnvironment(ctx context.Context, sessionID int64) (Environment, error) {
+	var id string
+	if err := s.db.QueryRowContext(ctx, "SELECT environment_id FROM sessions WHERE id = ?", sessionID).Scan(&id); err != nil {
+		return Environment{}, fmt.Errorf("find session %d: %w", sessionID, err)
+	}
+	return s.Environment(ctx, id)
+}
+
 func (s *Store) SharedStorage(ctx context.Context) (SharedStorage, error) {
 	var storage SharedStorage
 	err := s.db.QueryRowContext(ctx, "SELECT volume, provisioned FROM shared_storage WHERE singleton = 1").Scan(&storage.Volume, &storage.Provisioned)

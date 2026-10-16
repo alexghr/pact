@@ -10,8 +10,8 @@ catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
 `~/.local/state/pact/sessions.db`. Each new session has private persistent agent
 state; sessions share a managed Nix daemon and read-only package store.
 
-See [storage and recovery](docs/nix-storage.md) for persistent Nix roots and daemon
-lifecycle details.
+See [storage and recovery](docs/nix-storage.md) for persistent Nix roots,
+`pact environments repair SESSION_ID`, and `pact environments gc`.
 
 ## System skills
 

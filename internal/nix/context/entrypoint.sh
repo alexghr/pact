@@ -35,7 +35,7 @@ fi
 
 export PATH="/opt/pact/tools/bin:$PATH"
 if [[ -z "${PACT_NIX_ROOTS:-}" || ! -d "$PACT_NIX_ROOTS" ]]; then
-  echo 'Error: missing managed environment roots; repair environment provisioning on the host.' >&2
+  echo 'Error: missing managed environment roots; run pact environments repair SESSION_ID on the host.' >&2
   exit 1
 fi
 # Profiles must resolve to the same path in the daemon's filesystem namespace.

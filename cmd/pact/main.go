@@ -57,6 +57,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	flags.StringVar(&cfg.config, "config", "", "Config file (default: $XDG_CONFIG_HOME/pact/config.json or ~/.config/pact/config.json)")
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
+		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -166,6 +167,9 @@ func runContainer(ctx context.Context, args []string, onStart func() error) (boo
 }
 
 func run(args []string) (runErr error) {
+	if len(args) > 0 && args[0] == "environments" {
+		return manageEnvironments(args[1:])
+	}
 	cfg, err := parseArgs(args, os.Stderr)
 	if err != nil {
 		return err
