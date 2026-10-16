@@ -14,7 +14,8 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 // Open creates or opens the host catalogue and applies pending migrations.
@@ -40,9 +41,10 @@ func Open(ctx context.Context) (*Store, error) {
 		"_foreign_keys": {"on"},
 		"_busy_timeout": {"5000"},
 	}
+	path := filepath.Join(dir, "sessions.db")
 	dsn := (&url.URL{
 		Scheme:   "file",
-		Path:     filepath.Join(dir, "sessions.db"),
+		Path:     path,
 		RawQuery: options.Encode(),
 	}).String()
 	db, err := sql.Open("sqlite3", dsn)
@@ -50,7 +52,7 @@ func Open(ctx context.Context) (*Store, error) {
 		return nil, fmt.Errorf("open catalogue: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, path: path}
 	if err := store.migrate(ctx, migrations); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate catalogue: %w", err)

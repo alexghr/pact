@@ -19,6 +19,21 @@ run concurrently; allow one active writer per workspace.
 Status: proposed, 7 October 2026. Commands beginning with `pact sessions`,
 `pact resume`, `pact send`, or `pact serve` below are proposed interfaces.
 
+Implemented foundation, 16 October 2026: the host SQLite catalogue now records
+workspaces, environments, sessions, and executions. Each validated launch prints
+its session ID before runtime setup. Launch records preserve model, effort,
+interactive/prompted mode, DinD selection, timestamps, and the final outcome.
+The schema records the backend explicitly and uses generic state-volume fields.
+Environments currently record the existing shared volume pair; private volume
+provisioning is the next increment.
+
+Execution `running` and its start time describe the foreground Docker client,
+not readiness of a model turn. Build/setup failures and Docker's reserved
+startup exit codes become `startupFailed`; other container failures become
+`failed`. Normal exit becomes `succeeded`, and handled SIGINT/SIGTERM becomes
+`interrupted`. Final bookkeeping has its own bounded context after resource
+cleanup. A hard crash can leave an unfinished record; recovery is a later slice.
+
 ## Why prompted sessions disappear from the picker
 
 The current implementation points to a discovery problem rather than deliberate

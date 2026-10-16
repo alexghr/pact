@@ -2,6 +2,14 @@
 
 Pact is an agent isolation solution.
 
+## Sessions
+
+Each validated launch prints a Pact session ID to stderr and records the workspace,
+launch settings, and outcome on the host, including when startup fails. The
+catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
+`~/.local/state/pact/sessions.db`. Conversation history stays in the agent's
+existing state volume.
+
 ## System skills
 
 The container includes [Graphene](https://github.com/alexghr/graphene) and its

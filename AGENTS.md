@@ -82,10 +82,13 @@ Before adding a test:
 - Test the resulting behavior instead, e.g. a signed commit verifies,
   credentials cannot be overridden or exposed, a stream is cancelled,
   or a forbidden request cannot start a host process.
-- Prefer real implementations, temporary files and repositories, local
-  HTTP servers, sockets, and subprocesses. Use mocks or fakes only when
-  the required scenario cannot be exercised with the real dependency.
-  Explain the constraint and replace only that boundary.
+- Do not use mocks, fakes, stubs, or other test doubles. This includes
+  scripts or binaries that impersonate external tools, such as a fake
+  `docker` placed on `PATH`.
+- Use real components, temporary files and repositories, sockets, and
+  subprocesses. If the actual components are too complicated, heavy, or
+  unavailable, discuss the test with the user before writing it. Do not
+  substitute a test double without explicit agreement.
 - Do not duplicate a scenario across test layers unless each test catches
   a distinct failure. Keep fixtures, helpers, and case tables small.
 - Use `t.TempDir`, `t.Cleanup`, and `t.Context` where appropriate.

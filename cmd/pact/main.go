@@ -22,20 +22,22 @@ import (
 	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/state"
 )
 
 // agentConfig holds the options passed to the container's agent entrypoint.
 // Pact's environment instructions are supplied by the container entrypoint.
 type agentConfig struct {
-	dind      bool
-	workspace string
-	prompt    string
-	model     string
-	effort    string
-	config    string
-	git       config.Git
-	bridge    hostbridge.Bridge
-	mcpNames  []string
+	dind        bool
+	workspace   string
+	prompt      string
+	model       string
+	effort      string
+	config      string
+	git         config.Git
+	bridge      hostbridge.Bridge
+	mcpNames    []string
+	environment state.Environment
 }
 
 func parseArgs(args []string, output io.Writer) (agentConfig, error) {
@@ -99,8 +101,8 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 	}
 	args = append(args,
 		"--volume", cfg.workspace+":/home/pact/workspace",
-		"--volume", "pact-codex-state:/home/pact/.codex",
-		"--volume", "pact-codex-state-nix:/nix",
+		"--volume", cfg.environment.StateVolume+":/home/pact/.codex",
+		"--volume", cfg.environment.NixVolume+":/nix",
 		"--volume", filepath.Join(home, ".codex", "auth.json")+":/opt/pact/host-auth.json:ro",
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
@@ -130,7 +132,7 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 	return args
 }
 
-func runContainer(ctx context.Context, args []string) error {
+func runContainer(ctx context.Context, args []string, onStart func() error) (bool, error) {
 	// A unique name lets us remove our container if the attached Docker client
 	// is interrupted or fails before --rm has had a chance to clean it up.
 	name := "pact-" + strings.ToLower(rand.Text())
@@ -139,7 +141,18 @@ func runContainer(ctx context.Context, args []string) error {
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = 5 * time.Second
-	err := cmd.Run()
+	err := cmd.Start()
+	started := err == nil
+	if started {
+		if err = onStart(); err != nil {
+			_ = cmd.Process.Kill()
+		}
+		err = errors.Join(err, cmd.Wait())
+	}
+	// Docker reserves these codes for failure to start the container command.
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() >= 125 && exitErr.ExitCode() <= 127 {
+		started = false
+	}
 	if cmd.Process != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -148,7 +161,7 @@ func runContainer(ctx context.Context, args []string) error {
 		// container is normal.
 		_ = exec.CommandContext(cleanupCtx, "docker", "rm", "--force", name).Run()
 	}
-	return err
+	return started, err
 }
 
 func run(args []string) (runErr error) {
@@ -176,6 +189,43 @@ func run(args []string) (runErr error) {
 	for _, server := range servers {
 		cfg.mcpNames = append(cfg.mcpNames, server.Name)
 	}
+	store, err := state.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, store.Close()) }()
+	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{
+		Workspace:   cfg.workspace,
+		Owner:       "uid:" + strconv.Itoa(os.Getuid()),
+		Backend:     "codex",
+		StateVolume: "pact-codex-state",
+		NixVolume:   "pact-codex-state-nix",
+		Settings:    state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Prompted: cfg.prompt != "", DinD: cfg.dind},
+	})
+	if err != nil {
+		return err
+	}
+	cfg.workspace = launch.Workspace
+	cfg.environment = launch.Environment
+	fmt.Fprintf(os.Stderr, "Pact session %d\n", launch.SessionID)
+	containerStarted := false
+	defer func() {
+		status := state.Succeeded
+		message := ""
+		if runErr != nil {
+			message = runErr.Error()
+			status = state.StartupFailed
+			if containerStarted {
+				status = state.Failed
+			}
+		}
+		if signalCtx.Err() != nil {
+			status = state.Interrupted
+		}
+		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer finishCancel()
+		runErr = errors.Join(runErr, store.FinishExecution(finishCtx, launch.ExecutionID, status, exitCode(runErr), message))
+	}()
 	broker, err := gitbroker.New(cfg.config, cfg.workspace)
 	if err != nil {
 		return fmt.Errorf("start Git broker: %w", err)
@@ -208,10 +258,23 @@ func run(args []string) (runErr error) {
 		defer cleanup()
 		runtimeOptions = []string{"--volume", name + ":" + dind.SocketDir, "--env", "DOCKER_HOST=" + dind.Socket}
 	}
-	if err := runContainer(ctx, dockerArgs(cfg, image, home, os.Getuid(), os.Getgid(), runtimeOptions...)); err != nil {
+	containerStarted, err = runContainer(ctx, dockerArgs(cfg, image, home, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {
+		return store.StartExecution(ctx, launch.ExecutionID)
+	})
+	if err != nil {
 		return errors.Join(err, context.Cause(ctx))
 	}
 	return context.Cause(ctx)
+}
+
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() > 0 {
+		return exitErr.ExitCode()
+	}
+	return 1
 }
 
 func main() {
@@ -220,10 +283,6 @@ func main() {
 			return
 		}
 		fmt.Fprintln(os.Stderr, "Error:", err)
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() > 0 {
-			os.Exit(exitErr.ExitCode())
-		}
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
