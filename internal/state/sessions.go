@@ -5,10 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -19,6 +16,7 @@ type LaunchSettings struct {
 	Effort   string `json:"effort,omitempty"`
 	Prompted bool   `json:"prompted"`
 	DinD     bool   `json:"dind"`
+	HostNet  bool   `json:"hostNet,omitempty"`
 }
 
 type Environment struct {
@@ -54,31 +52,9 @@ const (
 
 // CreateLaunch registers the workspace and allocates the launch records together.
 func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch, error) {
-	workspace, err := filepath.Abs(options.Workspace)
+	workspace, err := s.resolveWorkspace(options.Workspace)
 	if err != nil {
 		return Launch{}, err
-	}
-	workspace, err = filepath.EvalSymlinks(workspace)
-	if err != nil {
-		return Launch{}, fmt.Errorf("resolve workspace: %w", err)
-	}
-	info, err := os.Stat(workspace)
-	if err != nil {
-		return Launch{}, err
-	}
-	if !info.IsDir() {
-		return Launch{}, errors.New("workspace must be a directory")
-	}
-	path, err := filepath.EvalSymlinks(s.path)
-	if err != nil {
-		return Launch{}, fmt.Errorf("resolve catalogue: %w", err)
-	}
-	rel, err := filepath.Rel(workspace, path)
-	if err != nil {
-		return Launch{}, err
-	}
-	if rel == "." || filepath.IsLocal(rel) {
-		return Launch{}, errors.New("catalogue must be outside the mounted workspace")
 	}
 	settings, err := json.Marshal(options.Settings)
 	if err != nil {
@@ -146,10 +122,10 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 }
 
 // StartExecution records the foreground runtime process, not a model turn.
-func (s *Store) StartExecution(ctx context.Context, id int64) error {
+func (s *Store) StartExecution(ctx context.Context, id int64, threadID string) error {
 	result, err := s.db.ExecContext(ctx,
-		"UPDATE executions SET status = 'running', started_at = ? WHERE id = ?",
-		time.Now().UnixMilli(), id,
+		"UPDATE executions SET status = 'running', started_at = ?, thread_id = ? WHERE id = ?",
+		time.Now().UnixMilli(), threadID, id,
 	)
 	return executionUpdate(result, err)
 }

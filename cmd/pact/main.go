@@ -41,6 +41,10 @@ type agentConfig struct {
 	bridge      hostbridge.Bridge
 	mcpNames    []string
 	environment state.Environment
+	resumeID    int64
+	threadID    string
+	refreshAuth bool
+	hostAuth    bool
 }
 
 func parseArgs(args []string, output io.Writer) (agentConfig, error) {
@@ -62,6 +66,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID | threads SESSION_ID")
+		fmt.Fprintln(output, "       pact resume SESSION_ID:THREAD_UUID [--config PATH]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -111,11 +116,19 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 	args = append(args,
 		"--volume", cfg.workspace+":/home/pact/workspace",
 		"--volume", cfg.environment.StateVolume+":/home/pact/.codex",
-		"--volume", filepath.Join(home, ".codex", "auth.json")+":/opt/pact/host-auth.json:ro",
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
 	)
+	if cfg.hostAuth {
+		args = append(args, "--mount", readOnlyMount(filepath.Join(home, ".codex", "auth.json"), "/opt/pact/host-auth.json"))
+	}
 	args = append(args, environment.Mounts(cfg.environment)...)
+	if cfg.resumeID > 0 {
+		args = append(args, "--env", "PACT_RESUME_THREAD="+cfg.threadID)
+		if cfg.refreshAuth {
+			args = append(args, "--env", "PACT_REFRESH_AUTH=1")
+		}
+	}
 	if cfg.bridge != nil {
 		bridgeConfig := cfg.bridge.ContainerConfig()
 		for _, mount := range bridgeConfig.ReadOnlyMounts {
@@ -201,7 +214,13 @@ func run(args []string) (runErr error) {
 	if len(args) > 0 && args[0] == "sessions" {
 		return manageSessions(args[1:])
 	}
-	cfg, err := parseArgs(args, os.Stderr)
+	var cfg agentConfig
+	var err error
+	if len(args) > 0 && args[0] == "resume" {
+		cfg, err = parseResumeArgs(args[1:])
+	} else {
+		cfg, err = parseArgs(args, os.Stderr)
+	}
 	if err != nil {
 		return err
 	}
@@ -213,6 +232,14 @@ func run(args []string) (runErr error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
+	}
+	if info, err := os.Stat(filepath.Join(home, ".codex", "auth.json")); err == nil {
+		cfg.hostAuth = info.Mode().IsRegular()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read host Codex login: %w", err)
+	}
+	if cfg.refreshAuth && !cfg.hostAuth {
+		return errors.New("--refresh-auth requires a file-based host Codex login")
 	}
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -239,12 +266,20 @@ func run(args []string) (runErr error) {
 			unlock()
 		}
 	}()
-	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{
-		Workspace: cfg.workspace,
-		Owner:     "uid:" + strconv.Itoa(os.Getuid()),
-		Backend:   "codex",
-		Settings:  state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Prompted: cfg.prompt != "", DinD: cfg.dind},
-	})
+	var launch state.Launch
+	if cfg.resumeID > 0 {
+		var saved state.LaunchSettings
+		launch, saved, err = store.ResumeLaunch(ctx, cfg.resumeID)
+		cfg.model, cfg.effort, cfg.dind = saved.Model, saved.Effort, saved.DinD
+		cfg.hostNet = saved.HostNet
+	} else {
+		launch, err = store.CreateLaunch(ctx, state.LaunchOptions{
+			Workspace: cfg.workspace,
+			Owner:     "uid:" + strconv.Itoa(os.Getuid()),
+			Backend:   "codex",
+			Settings:  state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Prompted: cfg.prompt != "", DinD: cfg.dind, HostNet: cfg.hostNet},
+		})
+	}
 	if err != nil {
 		return err
 	}
@@ -296,6 +331,21 @@ func run(args []string) (runErr error) {
 	if err := environment.Prepare(ctx, store, cfg.environment); err != nil {
 		return fmt.Errorf("prepare environment for session %d: %w", launch.SessionID, err)
 	}
+	if cfg.resumeID > 0 {
+		if err := refreshSession(ctx, store, launch, image); err != nil {
+			return err
+		}
+		threads, err := store.Threads(ctx, launch.SessionID)
+		if err != nil {
+			return err
+		}
+		thread, err := exactThread(threads, cfg.threadID)
+		if err != nil {
+			return err
+		}
+		cfg.threadID = thread.ID
+		fmt.Fprintf(os.Stderr, "Resuming Pact thread %d:%s\n", launch.SessionID, thread.ID)
+	}
 	defer func() {
 		if !containerStarted {
 			return
@@ -322,7 +372,7 @@ func run(args []string) (runErr error) {
 		}
 	}
 	containerStarted, err = runContainer(ctx, dockerArgs(cfg, image, home, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {
-		return store.StartExecution(ctx, launch.ExecutionID)
+		return store.StartExecution(ctx, launch.ExecutionID, cfg.threadID)
 	}, consume)
 	if err != nil {
 		return errors.Join(err, context.Cause(ctx))

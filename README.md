@@ -16,6 +16,18 @@ inspect a session and `pact sessions threads 42` to list its native thread IDs.
 Each command accepts `--json`. Listings show saved metadata; resume refreshes it
 automatically before choosing a conversation.
 
+Resume a saved conversation with `pact resume 42:THREAD_ID`. Pact reuses the
+session's workspace, private state, and recorded launch settings, and opens the
+native Codex terminal UI. Git and MCP connections use the current host config;
+pass `--config PATH` to select another config. Saved authentication is retained;
+after renewing the host Codex login, use `--refresh-auth` to copy it into the
+resumed environment.
+
+Coordinate launches manually: stop the previous container before resuming, and
+avoid overlapping sessions in the same workspace. Automatic execution ownership
+and crash recovery are not implemented yet. History from the older global state
+volume is not imported automatically.
+
 See [storage and recovery](docs/nix-storage.md) for persistent Nix roots,
 `pact environments repair SESSION_ID`, and `pact environments gc`.
 
