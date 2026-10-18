@@ -13,11 +13,11 @@ import (
 	"time"
 )
 
-var validName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var validPath = regexp.MustCompile(`^/(mcp|harness)/[a-zA-Z0-9_-]+$`)
 
-// Server registers a named HTTP handler with the bridge.
+// Server registers an HTTP handler at an explicit bridge path.
 type Server struct {
-	Name    string
+	Path    string
 	Handler http.Handler
 }
 
@@ -70,16 +70,14 @@ func routes(servers []Server) (http.Handler, error) {
 	mux := http.NewServeMux()
 	seen := make(map[string]bool)
 	for _, server := range servers {
-		if !validName.MatchString(server.Name) {
-			return nil, fmt.Errorf("invalid HTTP handler name %q: use letters, digits, underscores, or hyphens", server.Name)
+		if !validPath.MatchString(server.Path) {
+			return nil, fmt.Errorf("invalid HTTP handler path %q: expected /mcp/<name> or /harness/<name>", server.Path)
 		}
-		if seen[server.Name] || server.Handler == nil {
-			return nil, fmt.Errorf("HTTP handler %q has a duplicate name or nil handler", server.Name)
+		if seen[server.Path] || server.Handler == nil {
+			return nil, fmt.Errorf("HTTP handler %q has a duplicate path or nil handler", server.Path)
 		}
-		seen[server.Name] = true
-		// Keep the historical prefix for compatibility, including non-MCP
-		// handlers such as the Git broker at /mcp/pact_git.
-		mux.Handle("/mcp/"+server.Name, server.Handler)
+		seen[server.Path] = true
+		mux.Handle(server.Path, server.Handler)
 	}
 	mux.HandleFunc("GET /_pact/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

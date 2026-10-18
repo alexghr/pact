@@ -26,7 +26,7 @@ func mcpServers(settings map[string]config.MCPServer) ([]hostbridge.Server, erro
 		if err != nil {
 			return nil, fmt.Errorf("mcp.%s: %w", name, err)
 		}
-		servers = append(servers, hostbridge.Server{Name: name, Handler: proxy})
+		servers = append(servers, hostbridge.Server{Path: "/mcp/" + name, Handler: proxy})
 	}
 	return servers, nil
 }

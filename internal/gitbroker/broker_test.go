@@ -246,7 +246,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	}
 
 	// Exercise the production bridge and the container's Unix-to-HTTP relay.
-	bridge, err := hostbridge.Start([]hostbridge.Server{{Name: ServerName, Handler: b}}, workspace)
+	bridge, err := hostbridge.Start([]hostbridge.Server{{Path: HandlerPath, Handler: b}}, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	env := []string{"PATH=" + bin + ":" + os.Getenv("PATH"), "HOME=" + workspace,
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
 		"PACT_GIT_NAME=" + cfg.Name, "PACT_GIT_EMAIL=" + cfg.Email,
-		"PACT_GIT_URL=" + endpoint + "/mcp/" + ServerName}
+		"PACT_GIT_URL=" + endpoint + HandlerPath}
 	// The entrypoint runs once. Later verification must refresh keys through the
 	// helper itself, without re-sourcing the initialization script.
 	settings := filepath.Join(bin, "git-settings.sh")

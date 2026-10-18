@@ -24,7 +24,7 @@ import (
 	"github.com/alexghr/pact/internal/config"
 )
 
-const ServerName = "pact_git"
+const HandlerPath = "/harness/git"
 
 type remote struct {
 	url              string

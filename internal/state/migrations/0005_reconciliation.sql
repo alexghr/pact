@@ -1,0 +1,2 @@
+ALTER TABLE sessions ADD COLUMN reconciled_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN reconciliation_error TEXT NOT NULL DEFAULT '';

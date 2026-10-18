@@ -148,10 +148,10 @@ Do not mount your home directory as the workspace.
 
 ## Boundary and lifecycle
 
-The broker is registered on the existing private host bridge as `/mcp/pact_git`,
-but speaks a small internal HTTP protocol, not MCP. `pact_git` is reserved when
-Git brokering is enabled. It is not advertised as an agent MCP server. Configured
-MCP servers keep their current registrations, tools, and forwarding behavior.
+The broker is registered on the existing private host bridge as `/harness/git`
+and speaks a small internal HTTP protocol. It is not advertised as an agent MCP
+server. Configured MCP servers keep their current registrations, tools, and
+forwarding behavior.
 This does not restrict what an independently configured MCP server can do.
 
 Linux uses the existing private Unix socket and container loopback relay. macOS

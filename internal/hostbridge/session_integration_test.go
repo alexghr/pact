@@ -40,7 +40,7 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bridge, err := startUnix([]Server{{Name: "example", Handler: proxy}}, t.TempDir())
+	bridge, err := startUnix([]Server{{Path: "/mcp/example", Handler: proxy}}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -127,7 +127,8 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 	args = append(args,
 		"--env", "PACT_GIT_NAME="+cfg.git.Name,
 		"--env", "PACT_GIT_EMAIL="+cfg.git.Email,
-		"--env", "PACT_GIT_URL="+cfg.bridge.AgentURL()+"/mcp/"+gitbroker.ServerName,
+		"--env", "PACT_GIT_URL="+cfg.bridge.AgentURL()+gitbroker.HandlerPath,
+		"--env", "PACT_EVENTS_URL="+cfg.bridge.AgentURL()+"/harness/events",
 	)
 	args = append(args, runtimeOptions...)
 	args = append(args, image, cfg.prompt, cfg.model, cfg.effort)
@@ -218,7 +219,7 @@ func run(args []string) (runErr error) {
 		return err
 	}
 	for _, server := range servers {
-		cfg.mcpNames = append(cfg.mcpNames, server.Name)
+		cfg.mcpNames = append(cfg.mcpNames, strings.TrimPrefix(server.Path, "/mcp/"))
 	}
 	store, err := state.Open(ctx)
 	if err != nil {
@@ -269,7 +270,8 @@ func run(args []string) (runErr error) {
 		return fmt.Errorf("start Git broker: %w", err)
 	}
 	defer func() { runErr = errors.Join(runErr, broker.Close()) }()
-	servers = append(servers, hostbridge.Server{Name: gitbroker.ServerName, Handler: broker})
+	servers = append(servers, hostbridge.Server{Path: gitbroker.HandlerPath, Handler: broker})
+	servers = append(servers, hostbridge.Server{Path: "/harness/events", Handler: sessionEvents(store, launch.SessionID)})
 	bridge, err := hostbridge.Start(servers, cfg.workspace)
 	if err != nil {
 		return err
@@ -290,6 +292,14 @@ func run(args []string) (runErr error) {
 	if err := environment.Prepare(ctx, store, cfg.environment); err != nil {
 		return fmt.Errorf("prepare environment for session %d: %w", launch.SessionID, err)
 	}
+	defer func() {
+		if !containerStarted {
+			return
+		}
+		refreshCtx, refreshCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer refreshCancel()
+		runErr = errors.Join(runErr, refreshSession(refreshCtx, store, launch, image))
+	}()
 	unlock()
 	unlock = nil
 	var runtimeOptions []string

@@ -24,10 +24,14 @@ if [[ "$(id -u)" == "0" ]]; then
   chown pact:"$pact_group" /home/pact
   chown -R pact:"$pact_group" "$CODEX_HOME"
 
-  if [[ -f /opt/pact/host-auth.json && ! -f "$CODEX_HOME/auth.json" ]]; then
+  if [[ "${PACT_REFRESH_AUTH:-}" == "1" && ! -f /opt/pact/host-auth.json ]]; then
+    echo "Error: --refresh-auth requires a file-based host Codex login." >&2
+    exit 1
+  fi
+  if [[ -f /opt/pact/host-auth.json && ( ! -f "$CODEX_HOME/auth.json" || "${PACT_REFRESH_AUTH:-}" == "1" ) ]]; then
     install --owner=pact --group="$pact_group" --mode=0600 \
       /opt/pact/host-auth.json "$CODEX_HOME/auth.json"
-    echo "==> Initialized session authentication from the host Codex login." >&2
+    echo "==> Loaded session authentication from the host Codex login." >&2
   fi
 
   exec gosu pact "$0" "$@"
@@ -71,23 +75,18 @@ if [[ -n "${PACT_GIT_NAME:-}${PACT_GIT_EMAIL:-}${PACT_GIT_URL:-}" ]]; then
   source /opt/pact/git-identity.sh
 fi
 
-codex_args=(--ask-for-approval never)
-if [[ -n "$prompt" ]]; then
-  codex_args+=(exec --json --skip-git-repo-check --ignore-user-config)
-fi
-
-codex_args+=(
-  --model "$model" \
-  --sandbox danger-full-access \
-  --config "developer_instructions='''$(< /opt/pact/agent-instructions.md)'''" \
-  --cd /home/pact/workspace
+shared_args=(
+  --config 'approval_policy="never"'
+  --config "model=\"$model\""
+  --config 'sandbox_mode="danger-full-access"'
+  --config "developer_instructions='''$(< /opt/pact/agent-instructions.md)'''"
 )
 if [[ -n "$effort" ]]; then
-  codex_args+=(--config "model_reasoning_effort=\"$effort\"")
+  shared_args+=(--config "model_reasoning_effort=\"$effort\"")
 fi
-codex_args+=("$@")
+shared_args+=("$@")
+cd /home/pact/workspace
 if [[ -n "$prompt" ]]; then
-  codex_args+=("$prompt")
+  exec codex "${shared_args[@]}" exec --json --skip-git-repo-check --ignore-user-config "$prompt"
 fi
-
-exec codex "${codex_args[@]}"
+exec pact-agent run "${shared_args[@]}" --

@@ -35,7 +35,7 @@ filtering. Omit an entry to disable it.
 ## HTTP infrastructure
 
 `internal/hostbridge` owns the private host/container HTTP listener, access
-control, named handler routing, and cleanup. Register handlers with
+control, path routing, and cleanup. Register handlers with
 `hostbridge.Server`. `internal/httpproxy` provides `NewHTTP` to forward requests
 to a fixed upstream endpoint and apply host-held credentials. Neither package
 interprets MCP.
@@ -43,12 +43,15 @@ interprets MCP.
 advertises only configured MCP servers to Codex. The Git broker uses the same
 bridge as an ordinary HTTP handler.
 
-For compatibility, handler routes retain the `/mcp/<name>` prefix, including
-`/mcp/pact_git`. The container socket path `/opt/pact/mcp.sock`, the
-`PACT_MCP_SOCKET` and `PACT_GIT_URL` environment variables, and the health route
-`/_pact/health` are unchanged. These historical MCP names also serve generic
-HTTP traffic. The internal relay script is now `host-relay.sh`; the launcher
-builds it into the image together with its updated entrypoint.
+Configured MCP servers use `/mcp/<name>`. Container helpers use `/harness/git`
+for Git brokering and `/harness/events` for saved-thread metadata. The wrapper
+publishes these events automatically; they are not agent MCP tools. Both route
+namespaces share the same listener, authentication, and lifetime.
+
+The container socket path `/opt/pact/mcp.sock` and `PACT_MCP_SOCKET` retain their
+historical names but carry all bridge HTTP traffic. `PACT_GIT_URL` and
+`PACT_EVENTS_URL` supply the helper endpoints; `/_pact/health` remains the health
+route. The internal relay script is `host-relay.sh`.
 
 ## Transport and lifetime
 
