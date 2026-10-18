@@ -66,7 +66,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID | threads SESSION_ID")
-		fmt.Fprintln(output, "       pact resume SESSION_ID:THREAD_UUID [--config PATH]")
+		fmt.Fprintln(output, "       pact resume SESSION_ID[:THREAD_UUID] [--config PATH] [--refresh-auth]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -339,12 +339,21 @@ func run(args []string) (runErr error) {
 		if err != nil {
 			return err
 		}
-		thread, err := exactThread(threads, cfg.threadID)
+		var thread state.Thread
+		if cfg.threadID == "" {
+			thread, err = state.LastThread(threads)
+		} else {
+			thread, err = exactThread(threads, cfg.threadID)
+		}
 		if err != nil {
 			return err
 		}
 		cfg.threadID = thread.ID
-		fmt.Fprintf(os.Stderr, "Resuming Pact thread %d:%s\n", launch.SessionID, thread.ID)
+		if thread.ID == "" {
+			fmt.Fprintf(os.Stderr, "Starting the first saved conversation in Pact session %d\n", launch.SessionID)
+		} else {
+			fmt.Fprintf(os.Stderr, "Resuming Pact thread %d:%s\n", launch.SessionID, thread.ID)
+		}
 	}
 	defer func() {
 		if !containerStarted {

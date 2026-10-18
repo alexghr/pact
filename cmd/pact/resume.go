@@ -13,12 +13,12 @@ import (
 func parseResumeArgs(args []string) (agentConfig, error) {
 	var cfg agentConfig
 	if len(args) == 0 {
-		return cfg, fmt.Errorf("usage: pact resume SESSION_ID:THREAD_ID [--config PATH]")
+		return cfg, fmt.Errorf("usage: pact resume SESSION_ID[:THREAD_ID] [--config PATH] [--refresh-auth]")
 	}
 	sessionID, threadID, combined := strings.Cut(args[0], ":")
 	cfg.resumeID, _ = strconv.ParseInt(sessionID, 10, 64)
-	if cfg.resumeID <= 0 || !combined || threadID == "" {
-		return cfg, fmt.Errorf("resume requires a positive session ID and native thread ID: SESSION_ID:THREAD_ID")
+	if cfg.resumeID <= 0 || (combined && threadID == "") {
+		return cfg, fmt.Errorf("resume requires a positive session ID, optionally followed by :THREAD_ID")
 	}
 	cfg.threadID = threadID
 	flags := flag.NewFlagSet("pact resume", flag.ContinueOnError)

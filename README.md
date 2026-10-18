@@ -13,15 +13,25 @@ state; sessions share a managed Nix daemon and read-only package store.
 Find saved sessions with `pact sessions list` in the workspace directory, or
 `pact sessions list --all` across workspaces. Use `pact sessions show 42` to
 inspect a session and `pact sessions threads 42` to list its native thread IDs.
-Each command accepts `--json`. Listings show saved metadata; resume refreshes it
-automatically before choosing a conversation.
+Each command accepts `--json`. Listings show saved metadata, updated during
+interactive use and after execution. Resume refreshes it automatically before
+choosing a conversation.
 
-Resume a saved conversation with `pact resume 42:THREAD_ID`. Pact reuses the
+Resume the last used saved conversation with `pact resume 42`, or select one
+explicitly with `pact resume 42:THREAD_ID`. Pact reuses the
 session's workspace, private state, and recorded launch settings, and opens the
 native Codex terminal UI. Git and MCP connections use the current host config;
 pass `--config PATH` to select another config. Saved authentication is retained;
 after renewing the host Codex login, use `--refresh-auth` to copy it into the
 resumed environment.
+
+Pact selects the conversation with the newest saved last-use timestamp in Codex.
+Opening an older conversation can update this without sending a message;
+switching back to an already-loaded thread may leave the timestamp unchanged.
+An empty `/new` is
+saved only after its first message, so leaving it keeps the previous saved
+conversation as the target. Missing, archived, or unreadable saved state produces
+an error rather than starting a different conversation.
 
 Coordinate launches manually: stop the previous container before resuming, and
 avoid overlapping sessions in the same workspace. Automatic execution ownership

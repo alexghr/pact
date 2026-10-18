@@ -14,10 +14,24 @@ app-server switch is an optional next slice if more control proves necessary.
 
 The initial design supports workspaces containing multiple repositories and
 independent sessions running in separate containers. Different workspaces may
-run concurrently; allow one active writer per workspace.
+run concurrently. The first CLI release relies on the operator to stop a
+previous container before resume and avoid overlapping writers in a workspace;
+automatic execution ownership and recovery remain deferred to #8.
 
-Status: proposed, 7 October 2026. Commands beginning with `pact sessions`,
-`pact resume`, `pact send`, or `pact serve` below are proposed interfaces.
+Status: initial CLI implemented, 18 October 2026. `pact sessions list`, `show`,
+and `threads` expose the host catalogue; `pact resume ID[:THREAD_ID]` continues
+saved native conversations. The picker, `pact send`, `pact serve`, archive
+management, and legacy import remain proposed interfaces below.
+
+The native adapter and its version constraints are documented in
+[Codex discovery](codex-discovery.md). Resuming asks the bundled app-server for
+saved metadata before selecting a thread. A passive observer refreshes the
+catalogue during native TUI use; refreshes also run at startup and after
+execution, including handled interruption. Listings use the host cache
+without starting model work or warning about routine refreshes. Saved settings include
+model, effort, DinD, and host networking. Resume uses the current host Git/MCP
+configuration, preserves session authentication by default, and supports an
+explicit `--refresh-auth` from a renewed host login.
 
 Implemented foundation, 16 October 2026: the host SQLite catalogue now records
 workspaces, environments, sessions, and executions. Each validated launch prints
@@ -34,11 +48,10 @@ startup exit codes become `startupFailed`; other container failures become
 `interrupted`. Final bookkeeping has its own bounded context after resource
 cleanup. A hard crash can leave an unfinished record; recovery is a later slice.
 
-## Why prompted sessions disappear from the picker
+## Original prompted-session discovery investigation
 
-The current implementation points to a discovery problem rather than deliberate
-deletion. Passing a prompt is a supported Pact workflow; it does not mean the
-user did something wrong.
+The original investigation pointed to a discovery problem rather than deliberate
+deletion. Passing a prompt is a supported Pact workflow.
 
 Before managed storage, [the launcher](../cmd/pact/main.go) mounted
 `pact-codex-state` at `/home/pact/.codex` and `pact-codex-state-nix` at `/nix`.
@@ -47,7 +60,7 @@ Docker's `--rm` removes the container, but these named volumes survive. In
 `codex exec --skip-git-repo-check --ignore-user-config`; an empty prompt selects
 the interactive interface. Pact never passes `--ephemeral`.
 
-The installed `codex-cli 0.160.0` distinguishes discovery by source:
+The then-installed `codex-cli 0.160.0` distinguished discovery by source:
 
 | Codex option | Effect |
 | --- | --- |
@@ -71,11 +84,10 @@ codex resume --include-non-interactive
 codex resume --include-non-interactive --all
 ```
 
-These are Codex shell commands, not `/resume` arguments or flags accepted by
-Pact today. Running them against the host's ordinary `~/.codex` searches a
-different store. Pact's parser currently has neither a resume command nor general
-Codex argument forwarding. Adding an explicit Pact resume operation is the
-smallest useful product fix.
+These are Codex shell commands, not `/resume` arguments. Running them against
+the host's ordinary `~/.codex` searches a different store. Pact now provides
+`pact resume ID[:THREAD_ID]` for conversations in its managed private stores;
+it does not forward arbitrary Codex arguments.
 
 This explains the reported symptom, but does not establish that every missing
 conversation still exists: no particular historical session was recovered in
@@ -99,8 +111,8 @@ own history. Use separate identities for these concepts:
 | --- | --- |
 | Workspace | Integer ID, owner, canonical host directory, optional metadata for repositories beneath it |
 | Environment | Opaque ID used for resource ownership and Nix roots, workspace ID, private agent-state volume, shared Nix store reference, container mount path, configuration profile |
-| Session | Incrementing integer ID, environment ID, title, owner, backend, creation and activity times, cached last active thread ID, archive state |
-| Thread | Session ID, native Codex thread UUID, title, optional parent thread ID, creation and last activity order, archive state |
+| Session | Incrementing integer ID, environment ID, title, owner, backend, creation and last-use times, cached last used thread ID, archive state |
+| Thread | Session ID, native Codex thread UUID, title, optional parent thread ID, creation and last-use timestamps, archive state |
 | Turn | One accepted input and its outcome; Pact ID, session and thread IDs, backend turn ID when available, actor, request key, timestamps, error |
 | Runtime | A live execution instance; environment ID, container ID, image digest, Codex version, owner lease, heartbeat |
 | Binding | External conversation identity mapped to a particular Pact session and Codex thread, such as a Slack workspace, channel, and thread |
@@ -121,7 +133,8 @@ separate.
 Allocate session IDs as increasing positive integers, starting at `1`, within
 the Pact catalogue. Allocate them transactionally in SQLite and never reuse a
 previously issued ID after deletion; gaps are acceptable. IDs are local to the
-catalogue, not globally unique. Preserve Codex's native UUIDs for thread IDs.
+catalogue, not globally unique. Preserve native thread IDs as opaque strings;
+Codex currently uses UUIDs.
 
 Use `session-ID:thread-ID` to identify a particular conversation, where the
 session component is an integer and the thread component is the Codex UUID.
@@ -129,37 +142,36 @@ Validate that the thread belongs to the specified Pact session. Do not assume
 a Codex thread ID, a backend session-tree
 ID, a Docker container name, and a Pact session ID are interchangeable.
 
-Inside the TUI, `/new` adds a thread to the current Pact session, `/fork` adds a
-thread with a parent link, and `/resume` lets the operator move between its
+Inside the TUI, `/new` adds a saved thread after its first input, `/fork` adds a
+saved conversation, and `/resume` lets the operator move between its
 threads. Pact retains the same session identity throughout. These operations
 change conversation context; they do not snapshot or restore workspace files.
 
 ### Selecting a thread to resume
 
 `pact resume 42:0199a213-81c0-7800-8aa1-bbab2a035a53` resumes that exact thread.
-`pact resume 42` resumes the thread in session `42` with the most recent activity,
+`pact resume 42` resumes the last used saved thread in session `42`,
 regardless of whether it originated in interactive or prompted mode. The UUID
 here is illustrative; use the thread ID reported by Codex. Default selection
 considers the operator's conversations, including forks; internal subagent threads remain
 associated with their parent and do not take over the default resume target.
 
-Activity means thread creation or forking, accepted user input, or persisted
-agent work such as a response or tool result. Merely listing history or focusing
-a thread without doing work does not change its activity order. For example,
-after working in thread B, viewing thread A and exiting still makes B the
-default resume target.
+Use Codex's saved recency, including view-only opens when Codex persists them.
+Reopening A in a fresh process after working in B makes A the default target.
+Switching back to an already-loaded thread may not update native recency; this
+slice accepts that native limitation rather than tracking every TUI switch.
+An empty unsaved `/new` leaves the previous saved conversation as the target.
 
-Reconcile the session's persisted thread metadata before choosing the default.
-Use backend activity metadata and event order, not filesystem modification time
-or the order in which an import happens to encounter threads. Record a stable
-thread-ID tie-break for equal activity timestamps. The session's last active
-thread field is a cache of this result, not an independent source of truth.
+Refresh the session's metadata before choosing the default. Use Codex's native
+protocol `updatedAt` in seconds, with descending thread-ID order for equal timestamps. Pact
+does not classify transcript events, infer meaningful activity, or maintain a
+separate activity-certainty flag. Native metadata is the source of truth;
+an unpersisted native update can be lost in a crash.
 
 If a newly created session has no threads, start its first thread. If the
 selected thread is missing, archived, or unreadable, report that condition;
-never silently substitute an older thread or a new conversation. Likewise,
-uncertain activity metadata after a crash must be reconciled or reported rather
-than guessed. An explicit combined ID remains available to select a known thread.
+never silently substitute an older thread or a new conversation. An explicit
+combined ID remains available to select a known thread.
 
 ## Module and runtime boundaries
 
@@ -204,13 +216,19 @@ readable terminal view. Resume by the resolved thread ID. JSON output also
 exposes turn outcomes; capture stderr separately from protocol output.
 [Official JSON output documentation](https://learn.chatgpt.com/docs/non-interactive-mode#make-output-machine-readable)
 
-For the shared service, prefer `codex app-server`: it provides thread creation,
-resume, read/list, turn start/interrupt, events, and interactive requests. Its
-default thread listing includes interactive sources only. Explicitly include
-`cli`, `vscode`, `exec`, and `appServer` when discovering top-level conversations;
-subagents should appear under their parent. The installed generated protocol
-schema confirms the source filter and these core methods.
-[Official App Server documentation](https://learn.chatgpt.com/docs/app-server)
+Interactive runs use an owned `codex app-server`, the native TUI connected with
+`--remote`, and a passive Pact observer over a local WebSocket Unix socket.
+Global metadata notifications trigger saved-thread listing; startup and shutdown
+also refresh the catalogue. An unsaved `thread/started` is only a hint, and
+resuming an already-loaded thread need not emit a selection notification.
+The observer does not subscribe to threads or keep them loaded.
+
+List active and archived conversations across `cli`, `vscode`, `exec`, and
+`appServer` sources and all model providers. Internal subagents are excluded
+from this initial catalogue. Forward saved metadata as Pact `threads` snapshots,
+leaving backend payloads inside the adapter. App-server also provides turn and
+interactive-request APIs for the proposed shared service.
+[Official App Server documentation](https://developers.openai.com/codex/app-server)
 
 Keep the adapter small and pin the Codex version with the image. Generate and
 review its protocol schema when upgrading. Normalize a small set of Pact events
@@ -228,17 +246,13 @@ records focused on coordination and presentation.
 
 Native CLI access has two implementation paths:
 
-- Initially, stop or quiesce the managed backend and launch native
-  `codex resume <thread-id>` against the recorded environment under an exclusive
-  environment and workspace lease. Block other writers to that workspace until
-  it exits, then reconcile thread metadata. Other workspaces remain available.
-  For a new interactive session, launch the native TUI normally. Reconcile
-  thread IDs and activity metadata from its persistent store after exit and
-  before the next resume, including after an interrupted launcher. Register
-  threads created through `/new` or `/fork` within the existing Pact session,
-  and update activity for every thread used. Do not scrape terminal output or
-  infer the active thread from the newest file. Validate reliable discovery and
-  activity ordering against the pinned Codex version in the first increment.
+- Initially, stop the previous runtime and launch native
+  `codex resume <thread-id>` against the recorded environment. Until #8 adds
+  execution ownership, the operator coordinates writers manually. For a new
+  session, launch the native TUI normally. Refresh the saved thread index after
+  exit and before resume, including after an interrupted launcher. Discover
+  saved `/new` and `/fork` conversations within the same Pact session. Use native
+  last-use metadata; do not scrape the terminal or classify transcript events.
 - Later, connect the native TUI to the supervised app-server. The installed
   CLI supports `--remote`, including on `resume`, and the official docs describe
   remote TUI connections. App-server and its WebSocket transport are experimental;
@@ -248,7 +262,7 @@ Native CLI access has two implementation paths:
 For remote TUI mode, Pact must still control the writer lease. An unrestricted
 raw connection would bypass its scheduler. The initial implementation can give
 the TUI exclusive control of the environment and its workspace while other
-clients observe and queue work. Pact must reconcile events/history before
+clients observe and queue work. Pact must refresh thread metadata before
 releasing that control. Use a private connection, and never expose the raw
 backend as the public web API.
 The fallback remains native resume after an orderly handoff.
@@ -264,9 +278,10 @@ clients can reconnect with a cursor. Large output can use referenced files with
 the same access and retention rules.
 
 Keep Codex storage in Docker volumes. Do not edit Codex's database or rewrite
-rollouts to change their source classification. Prefer supported backend reads
-for discovery; keep any necessary legacy format reader read-only, versioned, and
-separate from the normal path. The catalogue is authoritative for Pact IDs and
+rollouts to change their source classification. Discovery uses native protocol
+reads, including an isolated helper against the stopped store. Codex may repair
+its own metadata there; Pact does not copy or query native database files.
+The catalogue is authoritative for Pact IDs and
 bindings; Codex remains authoritative for conversational context. Back up both.
 Losing either must produce a visible recovery state, not an empty replacement
 conversation presented as a successful resume.
@@ -330,7 +345,7 @@ of the same key returns the same accepted turn; reuse with different content is
 an error. Slack event IDs and HTTP idempotency keys can supply this value. Persist
 acceptance and a dispatch record together before starting the backend.
 
-Resolve a session-only input target to its last active thread once, at
+Resolve a session-only input target to its last used thread once, at
 acceptance, and store the resolved thread ID with the turn. A queued input or
 retry must not move to another thread because the operator subsequently used
 the TUI. Include session and thread IDs on turn events, output, and pending
@@ -378,7 +393,7 @@ pact sessions list --workspace ./project
 pact sessions list --all
 pact sessions show 42
 pact sessions threads 42
-pact resume 42                      # Most recently active thread in session 42
+pact resume 42                      # Last used saved thread in session 42
 pact resume 42:0199a213-81c0-7800-8aa1-bbab2a035a53
 pact resume --workspace ./project    # Pact picker, all launch sources
 pact send 42 -p 'Apply the proposed fix'
@@ -392,7 +407,7 @@ The Pact picker is the authoritative cross-client list. Codex's own `/resume`
 remains useful within an attached environment, but its filters are not Pact's
 catalogue. A Pact `--last` option, if added, must be scoped to an authorized
 workspace when selecting a Pact session. Session-only resume selects the last
-active thread within that session. Never use Codex's globally newest thread as
+used saved thread within that session. Never use Codex's globally newest thread as
 a routing mechanism across Pact sessions.
 
 Start with the module embedded in the foreground launcher. When `pact serve`
@@ -406,8 +421,8 @@ For a future HTTP API, expose a small versioned surface:
 | --- | --- |
 | `POST /v1/sessions` | Create in a registered, authorized workspace |
 | `GET /v1/sessions` | Paginated list scoped to the caller |
-| `GET /v1/sessions/{id}` | Metadata, last active thread ID, and current execution state |
-| `GET /v1/sessions/{id}/threads` | List the session's threads and their activity |
+| `GET /v1/sessions/{id}` | Metadata, last used thread ID, and current execution state |
+| `GET /v1/sessions/{id}/threads` | List the session's threads and their last use |
 | `POST /v1/sessions/{id}/turns` | Accept input with an optional thread ID and idempotency key; return the resolved thread and turn IDs |
 | `GET /v1/sessions/{id}/events` | SSE stream supporting cursor-based reconnection |
 | `POST /v1/sessions/{id}/interrupt` | Request cancellation of the active turn |
@@ -448,7 +463,7 @@ the broader milestones; service queues and remote clients are later increments.
    and capture prompted runs through JSON events. Preserve existing state.
 2. **Introduce the catalogue and independent environments.** Register arbitrary
    workspace directories, including roots containing several repositories. Add
-   session/thread/turn records, activity tracking, private agent state, archive,
+   session/thread/turn records, native recency metadata, private agent state, archive,
    and recovery. Support exact combined IDs and session-only resume. Enforce
    exclusive workspace ownership during execution and run independent workspaces
    concurrently. Import old sessions.
@@ -504,8 +519,8 @@ failure boundaries, with a small set of integration scenarios:
   direction. This also checks the pinned Codex storage/protocol compatibility.
 - Create and fork threads in the TUI, move between them, and exit. Verify one
   Pact session with multiple threads, exact combined-ID resume, and session-only
-  resume of the last active thread after normal exit and interrupted execution.
-  Cover activity ties, viewing without activity, and unavailable selected threads.
+  resume of the last used thread after normal exit and interrupted execution.
+  Cover recency ties, view-only resume, and unavailable selected threads.
 - Queue input for a resolved thread, change TUI threads, and retry the request:
   the queued input and any external conversation binding must retain their target.
 - Register two host workspaces with the same container path and show that
