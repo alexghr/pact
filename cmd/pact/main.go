@@ -61,6 +61,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
+		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID | threads SESSION_ID")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -196,6 +197,9 @@ func runContainer(ctx context.Context, args []string, onStart func() error, cons
 func run(args []string) (runErr error) {
 	if len(args) > 0 && args[0] == "environments" {
 		return manageEnvironments(args[1:])
+	}
+	if len(args) > 0 && args[0] == "sessions" {
+		return manageSessions(args[1:])
 	}
 	cfg, err := parseArgs(args, os.Stderr)
 	if err != nil {

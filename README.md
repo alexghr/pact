@@ -10,6 +10,12 @@ catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
 `~/.local/state/pact/sessions.db`. Each new session has private persistent agent
 state; sessions share a managed Nix daemon and read-only package store.
 
+Find saved sessions with `pact sessions list` in the workspace directory, or
+`pact sessions list --all` across workspaces. Use `pact sessions show 42` to
+inspect a session and `pact sessions threads 42` to list its native thread IDs.
+Each command accepts `--json`. Listings show saved metadata; resume refreshes it
+automatically before choosing a conversation.
+
 See [storage and recovery](docs/nix-storage.md) for persistent Nix roots,
 `pact environments repair SESSION_ID`, and `pact environments gc`.
 
