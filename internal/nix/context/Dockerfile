@@ -1,5 +1,5 @@
 # Build from the repository root:
-#   ./shell p-git-client
+#   ./shell p-harness-build
 #   docker build --tag pact-codex internal/nix/context
 FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
@@ -19,6 +19,7 @@ RUN mkdir -p /etc/codex && \
 # Both commands use cmd/git-client; argv[0] selects transport or signing.
 COPY --chmod=0755 bin/pact-git-client-linux-${TARGETARCH} /usr/local/bin/pact-git-sign
 RUN ln -s pact-git-sign /usr/local/bin/pact-git-ssh
+COPY --chmod=0755 bin/pact-agent-linux-${TARGETARCH} /usr/local/bin/pact-agent
 COPY nix.conf /etc/nix/nix.conf
 COPY entrypoint.sh /opt/pact/entrypoint.sh
 COPY git-identity.sh /opt/pact/git-identity.sh

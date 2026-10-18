@@ -69,6 +69,12 @@ func TestSharedStorage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Query through the actual bundled harness, including first-use ownership
+	// setup. An empty store must not start a conversation or an inference turn.
+	threads, err := Threads(ctx, environments[0], image)
+	if err != nil || len(threads) != 0 {
+		t.Fatalf("empty conversation discovery: %+v, %v", threads, err)
+	}
 	client := func(env state.Environment, script string) (string, error) {
 		args := append([]string{"run", "--rm"}, Mounts(env)...)
 		args = append(args, "--volume", env.StateVolume+":/home/pact/.codex", "--env", "HOME=/home/pact",

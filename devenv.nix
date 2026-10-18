@@ -94,11 +94,34 @@
       done
     '';
 
-    p-build.exec = ''
+    p-agent.exec = ''
+      set -euo pipefail
+
+      for arch in amd64 arm64; do
+        CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+          -o "internal/nix/context/bin/pact-agent-linux-$arch" ./cmd/pact-agent
+      done
+    '';
+
+    p-harness-build.exec = ''
       set -euo pipefail
 
       p-git-client
+      p-agent
+    '';
+
+    # The launcher embeds the prepared container inputs, including its helpers.
+    p-host-build.exec = ''
+      set -euo pipefail
+
       go build ./cmd/pact
+    '';
+
+    p-build.exec = ''
+      set -euo pipefail
+
+      p-harness-build
+      p-host-build
     '';
 
     p-test = {

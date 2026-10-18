@@ -43,6 +43,10 @@ mkdir -p "$PACT_NIX_ROOTS/profiles" "$HOME/.local/state/nix"
 ln -sfn "$PACT_NIX_ROOTS/profiles" "$HOME/.local/state/nix/profiles"
 ln -sfn "$PACT_NIX_ROOTS/profiles/profile" "$HOME/.nix-profile"
 
+if [[ "${1:-}" == "--list-threads" ]]; then
+  exec pact-agent list
+fi
+
 if [[ $# -lt 3 ]]; then
   echo "Error: expected prompt, model, effort, and optional Codex arguments." >&2
   exit 1
