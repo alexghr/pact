@@ -69,7 +69,7 @@ fi
 
 codex_args=(--ask-for-approval never)
 if [[ -n "$prompt" ]]; then
-  codex_args+=(exec --skip-git-repo-check --ignore-user-config)
+  codex_args+=(exec --json --skip-git-repo-check --ignore-user-config)
 fi
 
 codex_args+=(

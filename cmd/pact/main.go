@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/dind"
 	"github.com/alexghr/pact/internal/environment"
@@ -139,7 +140,7 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 	return args
 }
 
-func runContainer(ctx context.Context, args []string, onStart func() error) (bool, error) {
+func runContainer(ctx context.Context, args []string, onStart func() error, consume func(io.Reader) error) (bool, error) {
 	// A unique name lets us remove our container if the attached Docker client
 	// is interrupted or fails before --rm has had a chance to clean it up.
 	name := "pact-" + strings.ToLower(rand.Text())
@@ -148,11 +149,31 @@ func runContainer(ctx context.Context, args []string, onStart func() error) (boo
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = 5 * time.Second
+	var events, writer *os.File
+	if consume != nil {
+		var err error
+		events, writer, err = os.Pipe()
+		if err != nil {
+			return false, err
+		}
+		defer events.Close()
+		defer writer.Close()
+		cmd.Stdout = writer
+	}
 	err := cmd.Start()
+	if writer != nil {
+		// Start gives the child its own descriptor. Close our copy so the reader
+		// sees EOF when the child exits; leaving it open would block consumption.
+		_ = writer.Close()
+	}
 	started := err == nil
 	if started {
 		if err = onStart(); err != nil {
 			_ = cmd.Process.Kill()
+		} else if consume != nil {
+			if err = consume(events); err != nil {
+				_ = cmd.Process.Kill()
+			}
 		}
 		err = errors.Join(err, cmd.Wait())
 	}
@@ -280,9 +301,15 @@ func run(args []string) (runErr error) {
 		defer cleanup()
 		runtimeOptions = []string{"--volume", name + ":" + dind.SocketDir, "--env", "DOCKER_HOST=" + dind.Socket}
 	}
+	var consume func(io.Reader) error
+	if cfg.prompt != "" {
+		consume = func(input io.Reader) error {
+			return codex.ConsumeExec(ctx, input, store, launch, os.Stdout, os.Stderr)
+		}
+	}
 	containerStarted, err = runContainer(ctx, dockerArgs(cfg, image, home, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {
 		return store.StartExecution(ctx, launch.ExecutionID)
-	})
+	}, consume)
 	if err != nil {
 		return errors.Join(err, context.Cause(ctx))
 	}
