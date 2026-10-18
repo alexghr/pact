@@ -97,8 +97,8 @@ own history. Use separate identities for these concepts:
 
 | Record | Meaning and essential fields |
 | --- | --- |
-| Workspace | Opaque ID, owner, canonical host directory, optional metadata for repositories beneath it |
-| Environment | Workspace ID, private agent-state volume, shared Nix store reference, container mount path, configuration profile |
+| Workspace | Integer ID, owner, canonical host directory, optional metadata for repositories beneath it |
+| Environment | Opaque ID used for resource ownership and Nix roots, workspace ID, private agent-state volume, shared Nix store reference, container mount path, configuration profile |
 | Session | Incrementing integer ID, environment ID, title, owner, backend, creation and activity times, cached last active thread ID, archive state |
 | Thread | Session ID, native Codex thread UUID, title, optional parent thread ID, creation and last activity order, archive state |
 | Turn | One accepted input and its outcome; Pact ID, session and thread IDs, backend turn ID when available, actor, request key, timestamps, error |

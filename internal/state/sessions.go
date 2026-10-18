@@ -23,7 +23,7 @@ type LaunchSettings struct {
 
 type Environment struct {
 	ID          string
-	WorkspaceID string
+	WorkspaceID int64
 	StateVolume string
 	NixVolume   string
 	Provisioned bool
@@ -38,7 +38,7 @@ type LaunchOptions struct {
 
 type Launch struct {
 	SessionID   int64
-	ExecutionID string
+	ExecutionID int64
 	Workspace   string
 	Environment Environment
 }
@@ -91,14 +91,13 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 	defer tx.Rollback()
 	now := time.Now().UnixMilli()
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO workspaces(id, path, owner, created_at) VALUES(?, ?, ?, ?) ON CONFLICT(path) DO NOTHING",
-		rand.Text(), workspace, options.Owner, now,
+		"INSERT INTO workspaces(path, owner, created_at) VALUES(?, ?, ?) ON CONFLICT(path) DO NOTHING",
+		workspace, options.Owner, now,
 	); err != nil {
 		return Launch{}, fmt.Errorf("register workspace: %w", err)
 	}
 	launch := Launch{
 		Workspace:   workspace,
-		ExecutionID: rand.Text(),
 		Environment: Environment{ID: rand.Text()},
 	}
 	volume := "pact-nix-" + strings.ToLower(rand.Text())
@@ -129,11 +128,16 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 	if err != nil {
 		return Launch{}, fmt.Errorf("read session ID: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO executions(id, session_id, settings, status, created_at) VALUES(?, ?, ?, 'starting', ?)",
-		launch.ExecutionID, launch.SessionID, string(settings), now,
-	); err != nil {
+	result, err = tx.ExecContext(ctx,
+		"INSERT INTO executions(session_id, settings, status, created_at) VALUES(?, ?, 'starting', ?)",
+		launch.SessionID, string(settings), now,
+	)
+	if err != nil {
 		return Launch{}, fmt.Errorf("record execution: %w", err)
+	}
+	launch.ExecutionID, err = result.LastInsertId()
+	if err != nil {
+		return Launch{}, fmt.Errorf("read execution ID: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return Launch{}, fmt.Errorf("commit launch: %w", err)
@@ -142,7 +146,7 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 }
 
 // StartExecution records the foreground runtime process, not a model turn.
-func (s *Store) StartExecution(ctx context.Context, id string) error {
+func (s *Store) StartExecution(ctx context.Context, id int64) error {
 	result, err := s.db.ExecContext(ctx,
 		"UPDATE executions SET status = 'running', started_at = ? WHERE id = ?",
 		time.Now().UnixMilli(), id,
@@ -150,7 +154,7 @@ func (s *Store) StartExecution(ctx context.Context, id string) error {
 	return executionUpdate(result, err)
 }
 
-func (s *Store) FinishExecution(ctx context.Context, id string, status ExecutionStatus, exitCode int, message string) error {
+func (s *Store) FinishExecution(ctx context.Context, id int64, status ExecutionStatus, exitCode int, message string) error {
 	result, err := s.db.ExecContext(ctx,
 		"UPDATE executions SET status = ?, finished_at = ?, exit_code = ?, error = ? WHERE id = ?",
 		status, time.Now().UnixMilli(), exitCode, message, id,
