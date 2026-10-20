@@ -42,16 +42,16 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 || (args[0] != "list" && args[0] != "run") {
-		return fmt.Errorf("expected list or run [shared configuration] -- [native TUI arguments]")
+		return fmt.Errorf("expected list or run [server configuration] -- [native TUI arguments]")
 	}
 	mode, args := args[0], args[1:]
-	var common, native []string
+	var serverConfig, native []string
 	if mode == "run" {
 		separator := slices.Index(args, "--")
 		if separator < 0 {
 			return fmt.Errorf("run requires -- before native TUI arguments")
 		}
-		common, native = args[:separator], args[separator+1:]
+		serverConfig, native = args[:separator], args[separator+1:]
 	} else if len(args) != 0 {
 		return fmt.Errorf("list takes no arguments")
 	}
@@ -61,7 +61,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	defer os.RemoveAll(dir)
 	socket := filepath.Join(dir, "app-server.sock")
-	serverArgs := append(slices.Clone(common), "app-server", "--listen", "unix://"+socket)
+	serverArgs := append(slices.Clone(serverConfig), "app-server", "--listen", "unix://"+socket)
 	server := exec.Command("codex", serverArgs...)
 	server.Stdout, server.Stderr = os.Stderr, os.Stderr
 	// The server must not consume terminal input or receive the TUI's Ctrl-C.
@@ -110,7 +110,9 @@ func run(ctx context.Context, args []string) error {
 
 	tuiCtx, stopTUI := context.WithCancel(ctx)
 	defer stopTUI()
-	tuiArgs := append(slices.Clone(common), "--remote", "unix://"+socket)
+	// TUI arguments are separate from server configuration: new threads need
+	// launch settings, but remote resume rejects explicit permission overrides.
+	tuiArgs := []string{"--remote", "unix://" + socket}
 	tuiArgs = append(tuiArgs, native...)
 	tui := exec.CommandContext(tuiCtx, "codex", tuiArgs...)
 	tui.Stdin, tui.Stdout, tui.Stderr = os.Stdin, os.Stdout, os.Stderr

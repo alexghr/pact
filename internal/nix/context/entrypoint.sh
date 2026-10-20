@@ -92,4 +92,6 @@ fi
 if [[ -n "${PACT_RESUME_THREAD:-}" ]]; then
   exec pact-agent run "${shared_args[@]}" -- resume -- "$PACT_RESUME_THREAD"
 fi
-exec pact-agent run "${shared_args[@]}" --
+# New threads need explicit launch settings on the TUI too. Remote resume above
+# restores the saved thread settings and rejects permission overrides.
+exec pact-agent run "${shared_args[@]}" -- "${shared_args[@]}"
