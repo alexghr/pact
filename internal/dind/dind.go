@@ -18,10 +18,10 @@ const SocketDir = "/run/pact-docker"
 const dindImage = "docker:29.8.1-dind@sha256:3f3c01aaaebf7cce837356b688b7c059a4749f10bd7660dec7c58fc454a283f0"
 
 // Start launches a sidecar and returns its socket volume name and cleanup function.
-// It shares the workspace and agent authentication with the sidecar, but never
-// passes the host Docker socket to the agent.
+// It shares only the workspace with the sidecar. Agent state and credentials
+// are not needed by the daemon; the host Docker socket stays on the host.
 // The context controls startup; cleanup has an independent 10-second deadline.
-func Start(ctx context.Context, workspace, stateVolume string) (string, func(), error) {
+func Start(ctx context.Context, workspace string) (string, func(), error) {
 	var id [8]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", nil, err
@@ -39,14 +39,13 @@ func Start(ctx context.Context, workspace, stateVolume string) (string, func(), 
 			fmt.Fprintln(os.Stderr, "Remove DinD socket volume:", err)
 		}
 	}
-	// The volumes of the containers started in thesidecar are lost when the sidecar is closed.
+	// The volumes of the containers started in the sidecar are lost when the sidecar is closed.
 	// Mount a volume at /var/lib/docker to retain them but then make sure only one container
 	// uses the sidecar at a time
 	err := runDocker(ctx, "run", "--detach", "--name", name, "--privileged",
 		"--env", "DOCKER_TLS_CERTDIR=",
 		"--volume", name+":/run/pact-docker",
 		"--volume", workspace+":/home/pact/workspace",
-		"--volume", stateVolume+":/home/pact/.codex:ro",
 		dindImage, "dockerd", "--host="+Socket)
 	if err != nil {
 		cleanup()

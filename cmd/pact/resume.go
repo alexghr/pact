@@ -13,7 +13,7 @@ import (
 func parseResumeArgs(args []string) (agentConfig, error) {
 	var cfg agentConfig
 	if len(args) == 0 {
-		return cfg, fmt.Errorf("usage: pact resume SESSION_ID[:THREAD_ID] [--config PATH] [--refresh-auth]")
+		return cfg, fmt.Errorf("usage: pact resume SESSION_ID[:THREAD_ID] [--config PATH]")
 	}
 	sessionID, threadID, combined := strings.Cut(args[0], ":")
 	cfg.resumeID, _ = strconv.ParseInt(sessionID, 10, 64)
@@ -24,7 +24,6 @@ func parseResumeArgs(args []string) (agentConfig, error) {
 	flags := flag.NewFlagSet("pact resume", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	flags.StringVar(&cfg.config, "config", "", "Config file (default: current host Pact config)")
-	flags.BoolVar(&cfg.refreshAuth, "refresh-auth", false, "Replace saved authentication with the current host Codex login")
 	if err := flags.Parse(args[1:]); err != nil {
 		return cfg, err
 	}

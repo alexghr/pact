@@ -30,8 +30,7 @@ catalogue during native TUI use; refreshes also run at startup and after
 execution, including handled interruption. Listings use the host cache
 without starting model work or warning about routine refreshes. Saved settings include
 model, effort, DinD, and host networking. Resume uses the current host Git/MCP
-configuration, preserves session authentication by default, and supports an
-explicit `--refresh-auth` from a renewed host login.
+configuration and host ChatGPT login; see [authentication](#authentication).
 
 Implemented foundation, 16 October 2026: the host SQLite catalogue now records
 workspaces, environments, sessions, and executions. Each validated launch prints
@@ -47,6 +46,31 @@ startup exit codes become `startupFailed`; other container failures become
 `failed`. Normal exit becomes `succeeded`, and handled SIGINT/SIGTERM becomes
 `interrupted`. Final bookkeeping has its own bounded context after resource
 cleanup. A hard crash can leave an unfinished record; recovery is a later slice.
+
+## Authentication
+
+Each launch and resume requires a file-based host ChatGPT login at
+`~/.codex/auth.json`. Pact creates an owner-only temporary snapshot containing
+the access token, ID token, account ID, and original `last_refresh`. It supplies
+an empty `refresh_token` to satisfy the native Codex login parser. Unknown fields,
+refresh credentials, and API keys are excluded. Unsupported login modes fail
+before container startup, without falling back to saved credentials or API use.
+
+The snapshot is mounted read-only at `/home/pact/.codex/auth.json` and removed
+from the host after runtime cleanup. The original host login is never mounted.
+Access and ID tokens, including their identity claims, remain readable inside
+the agent container; this does not narrow their upstream permissions. Snapshot
+credentials are not copied into persistent agent state.
+
+The network-isolated history helper removes legacy saved `auth.json` copies
+before starting Codex. It runs before resume and after runtime exit, so old
+credentials are discarded when reopening saved history. The DinD sidecar mounts
+the workspace without Codex storage or credentials.
+
+Every invocation reads the current host login. Running containers cannot refresh
+or replace their snapshot; after access expires, renew the host login with
+Codex CLI and restart or resume the session. Pact does not refresh or write
+host credentials.
 
 ## Original prompted-session discovery investigation
 

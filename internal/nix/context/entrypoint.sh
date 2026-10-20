@@ -22,17 +22,14 @@ if [[ "$(id -u)" == "0" ]]; then
   pact_group="$(id --group --name pact)"
   mkdir -p "$CODEX_HOME"
   chown pact:"$pact_group" /home/pact
-  chown -R pact:"$pact_group" "$CODEX_HOME"
-
-  if [[ "${PACT_REFRESH_AUTH:-}" == "1" && ! -f /opt/pact/host-auth.json ]]; then
-    echo "Error: --refresh-auth requires a file-based host Codex login." >&2
-    exit 1
-  fi
-  if [[ -f /opt/pact/host-auth.json && ( ! -f "$CODEX_HOME/auth.json" || "${PACT_REFRESH_AUTH:-}" == "1" ) ]]; then
-    install --owner=pact --group="$pact_group" --mode=0600 \
-      /opt/pact/host-auth.json "$CODEX_HOME/auth.json"
-    echo "==> Loaded session authentication from the host Codex login." >&2
-  fi
+  # auth.json is a read-only snapshot, so adjust ownership only for saved state.
+  chown pact:"$pact_group" "$CODEX_HOME"
+  shopt -s dotglob nullglob
+  for entry in "$CODEX_HOME"/*; do
+    if [[ "$entry" != "$CODEX_HOME/auth.json" ]]; then
+      chown -R pact:"$pact_group" "$entry"
+    fi
+  done
 
   exec gosu pact "$0" "$@"
 fi
@@ -61,8 +58,8 @@ effort="$3"
 shift 3
 
 if ! codex login status >/dev/null 2>&1; then
-  echo "Error: This Pact session has no usable Codex login." >&2
-  echo "Create a file-based host login with Codex CLI, then retry." >&2
+  echo "Error: The host Codex login snapshot is unusable." >&2
+  echo "Renew the host's ChatGPT login with Codex CLI, then retry." >&2
   exit 1
 fi
 

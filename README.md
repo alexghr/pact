@@ -1,6 +1,6 @@
 # Pact
 
-Pact is an agent isolation solution.
+Pact is an agent isolation solution using your existing ChatGPT subscription. 
 
 ## Sessions
 
@@ -21,9 +21,7 @@ Resume the last used saved conversation with `pact resume 42`, or select one
 explicitly with `pact resume 42:THREAD_ID`. Pact reuses the
 session's workspace, private state, and recorded launch settings, and opens the
 native Codex terminal UI. Git and MCP connections use the current host config;
-pass `--config PATH` to select another config. Saved authentication is retained;
-after renewing the host Codex login, use `--refresh-auth` to copy it into the
-resumed environment.
+pass `--config PATH` to select another config.
 
 Pact selects the conversation with the newest saved last-use timestamp in Codex.
 Opening an older conversation can update this without sending a message;

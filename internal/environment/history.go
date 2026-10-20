@@ -19,7 +19,8 @@ import (
 
 // Threads asks the bundled harness to list saved conversations in its own store.
 // The previous writer must be stopped. Codex may repair its native metadata;
-// only catalogue metadata leaves the network-isolated helper.
+// only catalogue metadata leaves the network-isolated helper. The entrypoint
+// removes legacy saved authentication before opening native storage.
 func Threads(ctx context.Context, env state.Environment, image string) ([]harness.Thread, error) {
 	if err := owned(ctx, "volume", env.StateVolume, env.ID); err != nil {
 		return nil, fmt.Errorf("read session history: %w", err)

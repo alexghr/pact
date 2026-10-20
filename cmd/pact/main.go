@@ -43,8 +43,7 @@ type agentConfig struct {
 	environment state.Environment
 	resumeID    int64
 	threadID    string
-	refreshAuth bool
-	hostAuth    bool
+	authFile    string
 }
 
 func parseArgs(args []string, output io.Writer) (agentConfig, error) {
@@ -66,7 +65,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID | threads SESSION_ID")
-		fmt.Fprintln(output, "       pact resume SESSION_ID[:THREAD_UUID] [--config PATH] [--refresh-auth]")
+		fmt.Fprintln(output, "       pact resume SESSION_ID[:THREAD_UUID] [--config PATH]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -105,7 +104,7 @@ func readOnlyMount(source, target string) string {
 	return strings.TrimSuffix(mount.String(), "\n")
 }
 
-func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOptions ...string) []string {
+func dockerArgs(cfg agentConfig, image string, uid, gid int, runtimeOptions ...string) []string {
 	args := []string{"run", "--rm"}
 	if cfg.prompt == "" {
 		args = append(args, "-it")
@@ -119,15 +118,10 @@ func dockerArgs(cfg agentConfig, image, home string, uid, gid int, runtimeOption
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
 	)
-	if cfg.hostAuth {
-		args = append(args, "--mount", readOnlyMount(filepath.Join(home, ".codex", "auth.json"), "/opt/pact/host-auth.json"))
-	}
+	args = append(args, "--mount", readOnlyMount(cfg.authFile, "/home/pact/.codex/auth.json"))
 	args = append(args, environment.Mounts(cfg.environment)...)
 	if cfg.resumeID > 0 {
 		args = append(args, "--env", "PACT_RESUME_THREAD="+cfg.threadID)
-		if cfg.refreshAuth {
-			args = append(args, "--env", "PACT_REFRESH_AUTH=1")
-		}
 	}
 	if cfg.bridge != nil {
 		bridgeConfig := cfg.bridge.ContainerConfig()
@@ -233,14 +227,11 @@ func run(args []string) (runErr error) {
 	if err != nil {
 		return err
 	}
-	if info, err := os.Stat(filepath.Join(home, ".codex", "auth.json")); err == nil {
-		cfg.hostAuth = info.Mode().IsRegular()
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("read host Codex login: %w", err)
+	cfg.authFile, err = createAuthSnapshot(filepath.Join(home, ".codex", "auth.json"))
+	if err != nil {
+		return err
 	}
-	if cfg.refreshAuth && !cfg.hostAuth {
-		return errors.New("--refresh-auth requires a file-based host Codex login")
-	}
+	defer os.Remove(cfg.authFile)
 	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithCancelCause(signalCtx)
@@ -367,7 +358,7 @@ func run(args []string) (runErr error) {
 	unlock = nil
 	var runtimeOptions []string
 	if cfg.dind {
-		name, cleanup, err := dind.Start(ctx, cfg.workspace, cfg.environment.StateVolume)
+		name, cleanup, err := dind.Start(ctx, cfg.workspace)
 		if err != nil {
 			return err
 		}
@@ -380,7 +371,7 @@ func run(args []string) (runErr error) {
 			return codex.ConsumeExec(ctx, input, store, launch, os.Stdout, os.Stderr)
 		}
 	}
-	containerStarted, err = runContainer(ctx, dockerArgs(cfg, image, home, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {
+	containerStarted, err = runContainer(ctx, dockerArgs(cfg, image, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {
 		return store.StartExecution(ctx, launch.ExecutionID, cfg.threadID)
 	}, consume)
 	if err != nil {
