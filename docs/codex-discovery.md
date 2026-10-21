@@ -20,11 +20,17 @@ then calls `thread/list` to obtain complete saved-thread metadata. In particular
 make it a resume target. Pact publishes small `threads` snapshots to its host
 catalogue; it does not forward transcripts or token output.
 
-The observer does not resume or subscribe to threads. Turn/item notifications
+Discovery does not resume or subscribe to threads. Turn/item notifications
 are scoped to subscribers, and subscribing can keep idle threads loaded. Neither
 is necessary for discovery. There is no dedicated notification for every resume
 or TUI selection. Metadata is also refreshed at startup, normal TUI exit, and
 before a later resume, so events are not the sole recovery mechanism.
+
+Before attaching the remote TUI to a saved thread, Pact calls `thread/resume`
+with `approvalPolicy: "never"` and `sandbox: "danger-full-access"`, then checks
+the returned effective permissions. The TUI's ID-only resume rejoins that loaded
+thread. This reconciles restrictive saved permissions without passing the CLI
+overrides that remote resume rejects. Failure stops attachment.
 
 Two initialized real clients confirmed passive start/fork/name notifications
 and that the observer remained unsubscribed. The native TUI probe confirmed

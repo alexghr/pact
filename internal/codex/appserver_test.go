@@ -17,10 +17,6 @@ func TestAppServerObserver(t *testing.T) {
 	if os.Getenv("PACT_TEST_CODEX") != "1" {
 		t.Skip("set PACT_TEST_CODEX=1 to run the real Codex app-server")
 	}
-	binary := os.Getenv("PACT_CODEX_BINARY")
-	if binary == "" {
-		binary = "codex"
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	home := t.TempDir()
@@ -39,45 +35,10 @@ stream_max_retries = 0
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
+	command, observer := startAppServer(t, ctx, home)
 	socket := filepath.Join(home, "server.sock")
-	command := exec.CommandContext(ctx, binary, "app-server", "--listen", "unix://"+socket)
-	for _, item := range os.Environ() {
-		key, _, _ := strings.Cut(item, "=")
-		if key != "CODEX_HOME" && key != "CODEX_THREAD_ID" && key != "CODEX_SESSION_ID" && key != "OPENAI_API_KEY" && strings.ToUpper(key) != "NO_PROXY" {
-			command.Env = append(command.Env, item)
-		}
-	}
-	command.Env = append(command.Env, "CODEX_HOME="+home, "NO_PROXY=127.0.0.1")
-	var logs bytes.Buffer
-	command.Stdout, command.Stderr = &logs, &logs
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		command.Process.Kill()
-		command.Wait()
-		if t.Failed() {
-			t.Log(logs.String())
-		}
-	})
-
-	var observer *Client
-	// Retry the actual handshake until the child is listening, with a deadline.
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
-	for {
-		var err error
-		observer, err = Dial(ctx, socket)
-		if err == nil {
-			break
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			t.Fatalf("app-server startup: %v", err)
-		}
-	}
-	t.Cleanup(func() { observer.Close() })
 	actor, err := Dial(ctx, socket)
 	if err != nil {
 		t.Fatal(err)
@@ -87,9 +48,16 @@ stream_max_retries = 0
 		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
+		ApprovalPolicy string `json:"approvalPolicy"`
+		Sandbox        struct {
+			Type string `json:"type"`
+		} `json:"sandbox"`
 	}
-	if err := actor.call(ctx, "thread/start", map[string]any{"cwd": home, "approvalPolicy": "never"}, &started); err != nil {
+	if err := actor.call(ctx, "thread/start", map[string]any{"cwd": home, "approvalPolicy": "on-request", "sandbox": "read-only"}, &started); err != nil {
 		t.Fatal(err)
+	}
+	if started.ApprovalPolicy != "on-request" || started.Sandbox.Type != "readOnly" {
+		t.Fatalf("test thread was not restrictive: %+v", started)
 	}
 	select {
 	case <-observer.Changes():
@@ -161,4 +129,76 @@ stream_max_retries = 0
 	if observer.Err() == nil {
 		t.Fatal("transport loss has no error")
 	}
+	_ = command.Wait()
+	_, prepared := startAppServer(t, ctx, home)
+	if err := prepared.PrepareResume(ctx, started.Thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A second client performs the ID-only resume used by the remote TUI.
+	// Check effective server state, not the arguments sent by Pact.
+	tui, err := Dial(ctx, socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tui.Close()
+	var resumed struct {
+		ApprovalPolicy string `json:"approvalPolicy"`
+		Sandbox        struct {
+			Type string `json:"type"`
+		} `json:"sandbox"`
+	}
+	if err := tui.call(ctx, "thread/resume", map[string]any{"threadId": started.Thread.ID, "excludeTurns": true}, &resumed); err != nil {
+		t.Fatal(err)
+	}
+	if resumed.ApprovalPolicy != "never" || resumed.Sandbox.Type != "dangerFullAccess" {
+		t.Fatalf("remote resume restored restrictive permissions: %+v", resumed)
+	}
+}
+
+func startAppServer(t *testing.T, ctx context.Context, home string) (*exec.Cmd, *Client) {
+	t.Helper()
+	binary := os.Getenv("PACT_CODEX_BINARY")
+	if binary == "" {
+		binary = "codex"
+	}
+	socket := filepath.Join(home, "server.sock")
+	command := exec.CommandContext(ctx, binary, "app-server", "--listen", "unix://"+socket)
+	for _, item := range os.Environ() {
+		key, _, _ := strings.Cut(item, "=")
+		if key != "CODEX_HOME" && key != "CODEX_THREAD_ID" && key != "CODEX_SESSION_ID" && key != "OPENAI_API_KEY" && strings.ToUpper(key) != "NO_PROXY" {
+			command.Env = append(command.Env, item)
+		}
+	}
+	command.Env = append(command.Env, "CODEX_HOME="+home, "NO_PROXY=127.0.0.1")
+	var logs bytes.Buffer
+	command.Stdout, command.Stderr = &logs, &logs
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		command.Process.Kill()
+		command.Wait()
+		if t.Failed() {
+			t.Log(logs.String())
+		}
+	})
+
+	var observer *Client
+	// Retry the actual handshake until the child is listening, with a deadline.
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var err error
+		observer, err = Dial(ctx, socket)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("app-server startup: %v", err)
+		}
+	}
+	t.Cleanup(func() { observer.Close() })
+	return command, observer
 }

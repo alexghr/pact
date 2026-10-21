@@ -25,7 +25,7 @@ type rpcResponse struct {
 	} `json:"error"`
 }
 
-// Client observes a local Codex app-server without subscribing to threads.
+// Client connects to a local Codex app-server.
 // Call Close to release its connection and reader goroutine.
 type Client struct {
 	conn    *websocket.Conn
@@ -153,6 +153,27 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	case <-c.done:
 		return c.Err()
 	}
+}
+
+// PrepareResume loads the saved thread with Pact's container permissions before
+// the remote TUI rejoins it. Remote TUI resume rejects CLI permission overrides;
+// an ID-only resume of this already-loaded thread retains its effective policy.
+func (c *Client) PrepareResume(ctx context.Context, threadID string) error {
+	var result struct {
+		ApprovalPolicy string `json:"approvalPolicy"`
+		Sandbox        struct {
+			Type string `json:"type"`
+		} `json:"sandbox"`
+	}
+	if err := c.call(ctx, "thread/resume", map[string]any{
+		"threadId": threadID, "approvalPolicy": "never", "sandbox": "danger-full-access", "excludeTurns": true,
+	}, &result); err != nil {
+		return err
+	}
+	if result.ApprovalPolicy != "never" || result.Sandbox.Type != "dangerFullAccess" {
+		return fmt.Errorf("Codex refused Pact's resume permissions: approval policy %q, sandbox %q", result.ApprovalPolicy, result.Sandbox.Type)
+	}
+	return nil
 }
 
 // Threads queries both active and archived saved conversations. Native listing

@@ -107,11 +107,19 @@ func run(ctx context.Context, args []string) error {
 	if mode == "list" {
 		return nil
 	}
+	if threadID := os.Getenv("PACT_RESUME_THREAD"); threadID != "" {
+		resumeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := client.PrepareResume(resumeCtx, threadID)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("prepare resumed thread: %w", err)
+		}
+	}
 
 	tuiCtx, stopTUI := context.WithCancel(ctx)
 	defer stopTUI()
 	// TUI arguments are separate from server configuration: new threads need
-	// launch settings, but remote resume rejects explicit permission overrides.
+	// launch settings, but remote resume rejoins the thread prepared above.
 	tuiArgs := []string{"--remote", "unix://" + socket}
 	tuiArgs = append(tuiArgs, native...)
 	tui := exec.CommandContext(tuiCtx, "codex", tuiArgs...)
