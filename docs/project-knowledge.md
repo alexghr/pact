@@ -10,6 +10,11 @@ Status: proposed experiment, 10 October 2026. The commands, tables, and modules
 below do not exist yet. This document specifies a design, not a measured
 performance improvement.
 
+The [control center proposal](control-center.md) places this experiment within
+Pact's broader direction. Artifacts and memory remain private to Pact; reuse
+across independently provisioned session workspaces needs an explicit scope
+decision before extending the workspace identity model below.
+
 ## Purpose and scope
 
 Pact is a way to learn how useful coding agents are assembled and to improve one

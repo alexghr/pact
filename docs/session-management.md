@@ -1,5 +1,11 @@
 # Pact session management proposal
 
+The broader product direction is now described in the
+[control center proposal](control-center.md): sessions can begin with loose
+aims, span repositories and external systems, and retain private artifacts.
+That proposal guides new control-center work; the runtime and discovery details
+below remain the foundation and record which CLI capabilities already exist.
+
 Pact should make a conversation resumable regardless of whether it began in a
 terminal, with `--prompt`, in Slack, or through a web API. Introduce a host-side
 session module that records the conversation's identity, workspace, storage, and
