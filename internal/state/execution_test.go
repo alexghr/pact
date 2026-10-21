@@ -16,7 +16,7 @@ func TestExecutionOwnership(t *testing.T) {
 	if id := os.Getenv("PACT_TEST_OWNER_SESSION"); id != "" {
 		store := openStore(t)
 		sessionID, _ := strconv.ParseInt(id, 10, 64)
-		launch, _, err := store.ResumeLaunch(t.Context(), sessionID)
+		launch, _, err := store.ResumeLaunch(t.Context(), sessionID, false)
 		if err != nil {
 			t.Fatal(err)
 		}

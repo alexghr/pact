@@ -23,6 +23,11 @@ session's workspace, private state, and recorded launch settings, and opens the
 native Codex terminal UI. Git and MCP connections use the current host config;
 pass `--config PATH` to select another config.
 
+Use `pact resume 42 --prompt 'Continue the investigation'` for prompted
+continuation, or provide `42:THREAD_ID` to target an exact conversation. The
+prompt continues that saved conversation in the same environment; it requires
+an existing available thread. `-prompt` is accepted too.
+
 Pact selects the conversation with the newest saved last-use timestamp in Codex.
 Opening an older conversation can update this without sending a message;
 switching back to an already-loaded thread may leave the timestamp unchanged.

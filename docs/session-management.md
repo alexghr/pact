@@ -26,7 +26,8 @@ Docker resource recovery is described below.
 
 Status: initial CLI implemented, 18 October 2026. `pact sessions list`, `show`,
 and `threads` expose the host catalogue; `pact resume ID[:THREAD_ID]` continues
-saved native conversations. The picker, `pact send`, `pact serve`, archive
+saved native conversations, with `--prompt TEXT` for prompted continuation.
+The picker, `pact send`, `pact serve`, archive
 management, and legacy import remain proposed interfaces below.
 
 The native adapter and its version constraints are documented in
@@ -234,6 +235,15 @@ If a newly created session has no threads, start its first thread. If the
 selected thread is missing, archived, or unreadable, report that condition;
 never silently substitute an older thread or a new conversation. An explicit
 combined ID remains available to select a known thread.
+
+`pact resume ID[:THREAD_ID] --prompt TEXT` (also `-prompt`) resolves its target
+once after refreshing native metadata and invokes `codex exec resume` with that
+exact UUID. It retains the Pact session and environment, records prompted mode,
+and uses the same readable output and activity bookkeeping as a new prompted
+launch. Prompted resume requires a saved thread; empty sessions cannot silently
+start a replacement conversation. Pact's approval and sandbox configuration is
+also applied to native prompted continuation, and the event reader rejects a
+different UUID before recording any thread observation.
 
 ## Module and runtime boundaries
 

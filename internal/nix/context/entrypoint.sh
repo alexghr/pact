@@ -84,7 +84,10 @@ fi
 shared_args+=("$@")
 cd /home/pact/workspace
 if [[ -n "$prompt" ]]; then
-  exec codex "${shared_args[@]}" exec --json --skip-git-repo-check --ignore-user-config "$prompt"
+  if [[ -n "${PACT_RESUME_THREAD:-}" ]]; then
+    exec codex "${shared_args[@]}" exec resume --dangerously-bypass-approvals-and-sandbox --json --skip-git-repo-check --ignore-user-config -- "$PACT_RESUME_THREAD" "$prompt"
+  fi
+  exec codex "${shared_args[@]}" exec --json --skip-git-repo-check --ignore-user-config -- "$prompt"
 fi
 if [[ -n "${PACT_RESUME_THREAD:-}" ]]; then
   exec pact-agent run "${shared_args[@]}" -- resume -- "$PACT_RESUME_THREAD"

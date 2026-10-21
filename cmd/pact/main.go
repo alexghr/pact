@@ -65,7 +65,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID | threads SESSION_ID")
-		fmt.Fprintln(output, "       pact resume SESSION_ID[:THREAD_UUID] [--config PATH]")
+		fmt.Fprintln(output, "       pact resume SESSION_ID[:THREAD_UUID] [--prompt TEXT] [--config PATH]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -261,7 +261,7 @@ func run(args []string) (runErr error) {
 	var launch state.Launch
 	if cfg.resumeID > 0 {
 		var saved state.LaunchSettings
-		launch, saved, err = store.ResumeLaunch(ctx, cfg.resumeID)
+		launch, saved, err = store.ResumeLaunch(ctx, cfg.resumeID, cfg.prompt != "")
 		cfg.model, cfg.effort, cfg.dind = saved.Model, saved.Effort, saved.DinD
 		cfg.hostNet = saved.HostNet
 	} else {
@@ -362,6 +362,9 @@ func run(args []string) (runErr error) {
 		if err != nil {
 			return err
 		}
+		if thread.ID == "" && cfg.prompt != "" {
+			return fmt.Errorf("session %d has no saved conversation to continue", launch.SessionID)
+		}
 		cfg.threadID = thread.ID
 		if thread.ID == "" {
 			fmt.Fprintf(os.Stderr, "Starting the first saved conversation in Pact session %d\n", launch.SessionID)
@@ -390,7 +393,7 @@ func run(args []string) (runErr error) {
 	var consume func(io.Reader) error
 	if cfg.prompt != "" {
 		consume = func(input io.Reader) error {
-			return codex.ConsumeExec(ctx, input, store, launch, os.Stdout, os.Stderr)
+			return codex.ConsumeExec(ctx, input, store, launch, os.Stdout, os.Stderr, cfg.threadID)
 		}
 	}
 	containerStarted, err = runContainer(ctx, owner, image, dockerArgs(cfg, image, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {

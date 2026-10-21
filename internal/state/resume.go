@@ -12,7 +12,7 @@ import (
 
 // ResumeLaunch allocates only a new execution, retaining session and storage.
 // The caller validates native history before starting the agent.
-func (s *Store) ResumeLaunch(ctx context.Context, id int64) (Launch, LaunchSettings, error) {
+func (s *Store) ResumeLaunch(ctx context.Context, id int64, prompted bool) (Launch, LaunchSettings, error) {
 	session, err := s.Session(ctx, id)
 	if err != nil {
 		return Launch{}, LaunchSettings{}, err
@@ -28,7 +28,7 @@ func (s *Store) ResumeLaunch(ctx context.Context, id int64) (Launch, LaunchSetti
 		return Launch{}, LaunchSettings{}, errors.New("saved workspace now resolves to a different directory; restore its original location before resuming")
 	}
 	settings := session.Settings
-	settings.Prompted = false
+	settings.Prompted = prompted
 	encoded, err := json.Marshal(settings)
 	if err != nil {
 		return Launch{}, LaunchSettings{}, err

@@ -39,7 +39,7 @@ type execEvent struct {
 // ConsumeExec consumes the one prompted run's stdout. Diagnostics are a separate
 // process stream; only assistant messages are rendered to output. A captured
 // thread survives a later protocol error, process failure, or cancellation.
-func ConsumeExec(ctx context.Context, input io.Reader, store *state.Store, launch state.Launch, output, diagnostics io.Writer) error {
+func ConsumeExec(ctx context.Context, input io.Reader, store *state.Store, launch state.Launch, output, diagnostics io.Writer, expectedThread string) error {
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	threadID := ""
@@ -52,6 +52,9 @@ func ConsumeExec(ctx context.Context, input io.Reader, store *state.Store, launc
 		}
 		switch event.Type {
 		case "thread.started":
+			if expectedThread != "" && event.ThreadID != expectedThread {
+				return fmt.Errorf("Codex resumed thread %q instead of requested thread %q", event.ThreadID, expectedThread)
+			}
 			if threadID != "" {
 				if threadID != event.ThreadID {
 					return fmt.Errorf("Codex changed thread during a prompted run")

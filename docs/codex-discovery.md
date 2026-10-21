@@ -92,3 +92,12 @@ query the saved store through the isolated helper to cover missed notifications.
 Automated adapter checks use the real pinned app-server, not a fake executable.
 Historical Pact catalogue migrations retain their checksums for existing
 installations; obsolete activity-certainty and reconciliation columns are unused.
+
+`PACT_TEST_CODEX=1 ./shell go test ./internal/codex -count=1` checks restrictive
+saved permissions and prompted/interactive continuation using an unavailable
+loopback provider, without credentials or model work. For a live context and
+permission check, `PACT_TEST_CODEX_LIVE=1 ./shell go test ./cmd/pact -run
+TestLiveResumeContextAndPermissions -count=1` uses a sanitized host ChatGPT login
+in disposable native storage. It saves a restrictive conversation, then resumes
+with a prompt that writes a remembered token outside its temporary workspace.
+It uses the subscription and model service; it does not automate the terminal UI.

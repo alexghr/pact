@@ -58,7 +58,7 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 				cancel() // A UUID already received from the process must survive cancellation.
 			}
 			go func() {
-				err := ConsumeExec(ctx, input, store, launch, &output, &diagnostics)
+				err := ConsumeExec(ctx, input, store, launch, &output, &diagnostics, "01a14eba-7c54-7170-96ec-8d86bb280eec")
 				_ = input.Close()
 				done <- err
 				close(done)
@@ -109,8 +109,12 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 
 func TestExecWithoutThreadFails(t *testing.T) {
 	// No event can lead to a catalogue write, so nil is intentionally unused.
-	err := ConsumeExec(t.Context(), strings.NewReader("{\"type\":\"future.event\"}\n"), nil, state.Launch{}, io.Discard, io.Discard)
+	err := ConsumeExec(t.Context(), strings.NewReader("{\"type\":\"future.event\"}\n"), nil, state.Launch{}, io.Discard, io.Discard, "")
 	if err == nil || !strings.Contains(err.Error(), "without reporting a thread") {
 		t.Fatalf("missing thread = %v", err)
+	}
+	err = ConsumeExec(t.Context(), strings.NewReader(startedEvent), nil, state.Launch{}, io.Discard, io.Discard, "different-target")
+	if err == nil || !strings.Contains(err.Error(), "instead of requested thread") {
+		t.Fatalf("a mismatched native UUID was accepted: %v", err)
 	}
 }

@@ -48,7 +48,7 @@ func TestRecovery(t *testing.T) {
 	if _, err := docker(ctx, "start", r.Name); err != nil {
 		t.Fatal(err)
 	}
-	resumed, _, err := store.ResumeLaunch(ctx, launch.SessionID)
+	resumed, _, err := store.ResumeLaunch(ctx, launch.SessionID, false)
 	if err != nil {
 		t.Fatal(err)
 	}

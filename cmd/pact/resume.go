@@ -13,7 +13,7 @@ import (
 func parseResumeArgs(args []string) (agentConfig, error) {
 	var cfg agentConfig
 	if len(args) == 0 {
-		return cfg, fmt.Errorf("usage: pact resume SESSION_ID[:THREAD_ID] [--config PATH]")
+		return cfg, fmt.Errorf("usage: pact resume SESSION_ID[:THREAD_ID] [--prompt TEXT] [--config PATH]")
 	}
 	sessionID, threadID, combined := strings.Cut(args[0], ":")
 	cfg.resumeID, _ = strconv.ParseInt(sessionID, 10, 64)
@@ -24,11 +24,21 @@ func parseResumeArgs(args []string) (agentConfig, error) {
 	flags := flag.NewFlagSet("pact resume", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	flags.StringVar(&cfg.config, "config", "", "Config file (default: current host Pact config)")
+	flags.StringVar(&cfg.prompt, "prompt", "", "Continue the saved conversation with a prompt")
 	if err := flags.Parse(args[1:]); err != nil {
 		return cfg, err
 	}
 	if flags.NArg() != 0 {
 		return cfg, fmt.Errorf("unexpected argument: %s", flags.Arg(0))
+	}
+	promptFlagExists := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "prompt" {
+			promptFlagExists = true
+		}
+	})
+	if promptFlagExists && strings.TrimSpace(cfg.prompt) == "" {
+		return cfg, fmt.Errorf("--prompt requires nonempty text")
 	}
 	return cfg, nil
 }

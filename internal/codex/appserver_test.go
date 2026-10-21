@@ -1,8 +1,11 @@
 package codex
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,22 +22,7 @@ func TestAppServerObserver(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	home := t.TempDir()
-	// An unavailable loopback provider accepts the user's turn without
-	// credentials, model work, or an HTTP server impersonating a provider.
-	config := `model = "offline"
-model_provider = "offline"
-[model_providers.offline]
-name = "Offline"
-base_url = "http://127.0.0.1:0/v1"
-wire_api = "responses"
-requires_openai_auth = false
-request_max_retries = 0
-stream_max_retries = 0
-`
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
-		t.Fatal(err)
-	}
+	home := offlineCodexHome(t)
 	command, observer := startAppServer(t, ctx, home)
 	socket := filepath.Join(home, "server.sock")
 	ticker := time.NewTicker(20 * time.Millisecond)
@@ -201,4 +189,145 @@ func startAppServer(t *testing.T, ctx context.Context, home string) (*exec.Cmd, 
 	}
 	t.Cleanup(func() { observer.Close() })
 	return command, observer
+}
+
+func offlineCodexHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	// An unavailable loopback provider accepts the user's turn without
+	// credentials, model work, or an HTTP server impersonating a provider.
+	config := `model = "offline"
+model_provider = "offline"
+[model_providers.offline]
+name = "Offline"
+base_url = "http://127.0.0.1:0/v1"
+wire_api = "responses"
+requires_openai_auth = false
+request_max_retries = 0
+stream_max_retries = 0
+`
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// An unavailable provider still persists accepted user turns. Exercise native
+// exec resume and the subsequent remote-TUI handshake against that real store.
+func TestExecResumeRetainsContext(t *testing.T) {
+	if os.Getenv("PACT_TEST_CODEX") != "1" {
+		t.Skip("set PACT_TEST_CODEX=1 to run real Codex continuation")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	home := offlineCodexHome(t)
+	server, client := startAppServer(t, ctx, home)
+	var started struct {
+		Thread struct{ ID string } `json:"thread"`
+	}
+	if err := client.call(ctx, "thread/start", map[string]any{"cwd": home, "approvalPolicy": "on-request", "sandbox": "read-only"}, &started); err != nil {
+		t.Fatal(err)
+	}
+	const original = "The project codename is cobalt-otter."
+	const continuation = "Continue using the project codename from our conversation."
+	if err := client.call(ctx, "turn/start", map[string]any{
+		"threadId": started.Thread.ID,
+		"input":    []map[string]any{{"type": "text", "text": original}},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		threads, err := client.Threads(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(threads) == 1 {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal("initial conversation was not saved")
+		}
+	}
+	_ = server.Process.Kill()
+	_ = server.Wait()
+	binary := os.Getenv("PACT_CODEX_BINARY")
+	if binary == "" {
+		binary = "codex"
+	}
+	execCtx, stopExec := context.WithCancel(ctx)
+	defer stopExec()
+	command := exec.CommandContext(execCtx, binary,
+		"-c", `model="offline"`, "-c", `model_provider="offline"`,
+		"-c", `model_providers.offline={name="Offline",base_url="http://127.0.0.1:0/v1",wire_api="responses",requires_openai_auth=false,request_max_retries=0,stream_max_retries=0}`,
+		"-c", `approval_policy="never"`, "-c", `sandbox_mode="danger-full-access"`,
+		"exec", "resume", "--dangerously-bypass-approvals-and-sandbox", "--json", "--ignore-user-config", "--skip-git-repo-check", "--", started.Thread.ID, continuation)
+	command.Env = server.Env
+	command.Cancel = func() error { return command.Process.Signal(os.Interrupt) }
+	command.WaitDelay = 3 * time.Second
+	var output, diagnostics bytes.Buffer
+	command.Stderr = &diagnostics
+	events, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	found, accepted := false, false
+	scanner := bufio.NewScanner(events)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Fprintln(&output, line)
+		var event execEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			break
+		}
+		if event.Type == "thread.started" {
+			if event.ThreadID != started.Thread.ID {
+				break
+			}
+			found = true
+		}
+		if event.Type == "turn.started" {
+			accepted = true
+			break
+		}
+	}
+	// Interrupt after the real turn-acceptance event; no provider response is
+	// needed to check persistence and continuation into the interactive client.
+	stopExec()
+	_ = command.Wait()
+	if !found || !accepted {
+		t.Fatalf("native continuation did not resume: %s\n%s", output.String(), diagnostics.String())
+	}
+	_, resumed := startAppServer(t, ctx, home)
+	// Cold ID-only resume can lose native sandbox provenance. Interactive
+	// continuation uses Pact's permission preparation before rejoining.
+	if err := resumed.PrepareResume(ctx, started.Thread.ID); err != nil {
+		t.Fatal(err)
+	}
+	var history json.RawMessage
+	if err := resumed.call(ctx, "thread/turns/list", map[string]any{
+		"threadId": started.Thread.ID, "itemsView": "full", "limit": 100,
+	}, &history); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(history, []byte(original)) || !bytes.Contains(history, []byte(continuation)) {
+		t.Fatalf("interactive continuation lost saved context: %s", history)
+	}
+	threads, err := resumed.Threads(ctx)
+	if err != nil || len(threads) != 1 || threads[0].ID != started.Thread.ID {
+		t.Fatalf("continuation changed the saved conversation: %+v, %v", threads, err)
+	}
+	unavailable := exec.CommandContext(ctx, binary, command.Args[1:]...)
+	unavailable.Args[len(unavailable.Args)-2] = "0199a213-81c0-7800-8aa1-bbab2a035a53"
+	unavailable.Env = server.Env
+	result, err := unavailable.CombinedOutput()
+	if err == nil || bytes.Contains(result, []byte(`"type":"thread.started"`)) {
+		t.Fatalf("missing target started a replacement conversation: %s, %v", result, err)
+	}
 }
