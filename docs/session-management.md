@@ -20,9 +20,9 @@ app-server switch is an optional next slice if more control proves necessary.
 
 The initial design supports workspaces containing multiple repositories and
 independent sessions running in separate containers. Different workspaces may
-run concurrently. The first CLI release relies on the operator to stop a
-previous container before resume and avoid overlapping writers in a workspace;
-automatic execution ownership and recovery remain deferred to #8.
+run concurrently. Foreground launch and resume now retain OS ownership of the
+canonical workspace, environment, and private state volume through cleanup.
+Docker resource recovery is described below.
 
 Status: initial CLI implemented, 18 October 2026. `pact sessions list`, `show`,
 and `threads` expose the host catalogue; `pact resume ID[:THREAD_ID]` continues
@@ -51,7 +51,39 @@ not readiness of a model turn. Build/setup failures and Docker's reserved
 startup exit codes become `startupFailed`; other container failures become
 `failed`. Normal exit becomes `succeeded`, and handled SIGINT/SIGTERM becomes
 `interrupted`. Final bookkeeping has its own bounded context after resource
-cleanup. A hard crash can leave an unfinished record; recovery is a later slice.
+cleanup. A hard crash can leave an unfinished record; recovery inspects Docker
+before permitting a replacement.
+
+### Foreground ownership and recovery
+
+Execution lock files live beside the host catalogue, outside the mounted
+workspace. Busy errors identify the owning session, execution, and launcher PID.
+The PID is diagnostic; releasing a kernel lock does not prove a container stopped.
+Independent workspaces and private stores can execute concurrently. The existing
+storage lock still serializes provisioning and reclamation.
+
+`execution_resources` records each agent, history helper, DinD container, and
+DinD socket volume before creation. Resources carry environment, workspace,
+session, execution, and unique resource labels. Container creation and attachment
+are separate operations; Pact records the actual container ID and image digest
+before starting it. Shared Nix resources retain their existing storage ownership.
+
+After acquiring ownership, recovery inspects unfinished executions and resources
+whose cleanup failed. It removes only stopped resources with matching ownership
+and identity. Running, paused, restarting, changed, or uninspectable resources
+block replacement, with their names and an explicit operator recovery action.
+Uncertain executions remain visible; no prompt is replayed. Once resources are
+confirmed stopped and removed, the old execution becomes interrupted. Execution
+resources are recorded before creation, so an unfinished execution without
+resource records can be marked interrupted without querying Docker.
+
+Stop agent and DinD containers started by older Pact versions before upgrading.
+Recovery inspects recorded resources; it does not scan for containers started by
+versions that did not record their resource identities.
+
+Normal exit and cancellation stop the agent and sidecar before the final native
+history refresh. Cleanup failures are reported and retain durable resource
+records for the next recovery attempt; they do not count as proof of termination.
 
 ## Authentication
 
@@ -568,7 +600,8 @@ failure boundaries, with a small set of integration scenarios:
 - Import legacy history twice and retain one mapping per thread, including
   unresolved workspace associations, without changing the source store.
 
-Use a deterministic fake backend for dispatch and ownership failures; reserve
-live Codex checks for persistence, native TUI interoperability, and protocol
-upgrades. Follow the repository's `./shell p-ci` and `./shell p-build` workflows.
+Use real processes, locks, sockets, and disposable Docker resources for ownership
+and recovery checks. Use live Codex checks for persistence, native TUI
+interoperability, and protocol upgrades. Follow the repository's `./shell p-ci`
+and `./shell p-build` workflows.
 Avoid tests that merely repeat argument construction or JSON parsing.

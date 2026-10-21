@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
 )
@@ -32,12 +33,14 @@ func TestSharedStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	var environments []state.Environment
+	var launches []state.Launch
 	for range 2 {
 		launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Owner: "test", Backend: "codex"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		environments = append(environments, launch.Environment)
+		launches = append(launches, launch)
 	}
 	shared := environments[0].NixVolume
 	t.Cleanup(func() {
@@ -71,7 +74,13 @@ func TestSharedStorage(t *testing.T) {
 	}
 	// Query through the actual bundled harness, including first-use ownership
 	// setup. An empty store must not start a conversation or an inference turn.
-	threads, err := Threads(ctx, environments[0], image)
+	owner := &execution.Owner{Store: store, Launch: launches[0]}
+	t.Cleanup(func() {
+		if err := owner.Cleanup(); err != nil {
+			t.Error(err)
+		}
+	})
+	threads, err := Threads(ctx, environments[0], image, owner)
 	if err != nil || len(threads) != 0 {
 		t.Fatalf("empty conversation discovery: %+v, %v", threads, err)
 	}
@@ -271,8 +280,10 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	forget := func(env state.Environment) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, `
+			DELETE FROM execution_resources WHERE cleaned = 1 AND execution_id IN
+			    (SELECT x.id FROM executions x JOIN sessions s ON s.id = x.session_id WHERE s.environment_id = ?);
 			DELETE FROM executions WHERE session_id IN (SELECT id FROM sessions WHERE environment_id = ?);
-			DELETE FROM sessions WHERE environment_id = ?`, env.ID, env.ID); err != nil {
+			DELETE FROM sessions WHERE environment_id = ?`, env.ID, env.ID, env.ID); err != nil {
 			t.Fatal(err)
 		}
 	}

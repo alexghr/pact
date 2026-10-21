@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/csv"
 	"errors"
 	"flag"
@@ -21,6 +20,7 @@ import (
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/dind"
 	"github.com/alexghr/pact/internal/environment"
+	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/nix"
@@ -105,7 +105,7 @@ func readOnlyMount(source, target string) string {
 }
 
 func dockerArgs(cfg agentConfig, image string, uid, gid int, runtimeOptions ...string) []string {
-	args := []string{"run", "--rm"}
+	args := []string{"run"}
 	if cfg.prompt == "" {
 		args = append(args, "-it")
 	}
@@ -149,12 +149,21 @@ func dockerArgs(cfg agentConfig, image string, uid, gid int, runtimeOptions ...s
 	return args
 }
 
-func runContainer(ctx context.Context, args []string, onStart func() error, consume func(io.Reader) error) (bool, error) {
-	// A unique name lets us remove our container if the attached Docker client
-	// is interrupted or fails before --rm has had a chance to clean it up.
-	name := "pact-" + strings.ToLower(rand.Text())
-	args = append([]string{"run", "--name", name}, args[1:]...)
-	cmd := exec.CommandContext(ctx, "docker", args...)
+func runContainer(ctx context.Context, owner *execution.Owner, image string, args []string, onStart func() error, consume func(io.Reader) error) (started bool, runErr error) {
+	resource, err := owner.CreateContainer(ctx, "pact-agent-", image, args[1:])
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		runErr = errors.Join(runErr, owner.Remove(cleanupCtx, resource))
+	}()
+	startArgs := []string{"start", "--attach"}
+	if consume == nil {
+		startArgs = append(startArgs, "--interactive")
+	}
+	cmd := exec.CommandContext(ctx, "docker", append(startArgs, resource.ContainerID)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = 5 * time.Second
@@ -169,13 +178,13 @@ func runContainer(ctx context.Context, args []string, onStart func() error, cons
 		defer writer.Close()
 		cmd.Stdout = writer
 	}
-	err := cmd.Start()
+	err = cmd.Start()
 	if writer != nil {
 		// Start gives the child its own descriptor. Close our copy so the reader
 		// sees EOF when the child exits; leaving it open would block consumption.
 		_ = writer.Close()
 	}
-	started := err == nil
+	started = err == nil
 	if started {
 		if err = onStart(); err != nil {
 			_ = cmd.Process.Kill()
@@ -189,14 +198,6 @@ func runContainer(ctx context.Context, args []string, onStart func() error, cons
 	// Docker reserves these codes for failure to start the container command.
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() >= 125 && exitErr.ExitCode() <= 127 {
 		started = false
-	}
-	if cmd.Process != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		// Removal also runs after the client has exited, covering cancellation
-		// during creation or an interactive detach. An already removed/nonexistent
-		// container is normal.
-		_ = exec.CommandContext(cleanupCtx, "docker", "rm", "--force", name).Run()
 	}
 	return started, err
 }
@@ -278,7 +279,18 @@ func run(args []string) (runErr error) {
 	cfg.environment = launch.Environment
 	fmt.Fprintf(os.Stderr, "Pact session %d\n", launch.SessionID)
 	containerStarted := false
+	runtimeStopped := false
+	var owner *execution.Owner
+	var release func()
 	defer func() {
+		if release != nil {
+			defer release()
+		}
+		var cleanupErr error
+		if owner != nil {
+			cleanupErr = owner.Cleanup()
+			runErr = errors.Join(runErr, cleanupErr)
+		}
 		status := state.Succeeded
 		message := ""
 		if runErr != nil {
@@ -291,10 +303,21 @@ func run(args []string) (runErr error) {
 		if signalCtx.Err() != nil {
 			status = state.Interrupted
 		}
+		if cleanupErr != nil {
+			status = state.Uncertain
+		}
 		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer finishCancel()
 		runErr = errors.Join(runErr, store.FinishExecution(finishCtx, launch.ExecutionID, status, exitCode(runErr), message))
 	}()
+	release, err = store.LockExecution(launch)
+	if err != nil {
+		return err
+	}
+	owner = &execution.Owner{Store: store, Launch: launch}
+	if err := owner.Recover(ctx); err != nil {
+		return err
+	}
 	broker, err := gitbroker.New(cfg.config, cfg.workspace)
 	if err != nil {
 		return fmt.Errorf("start Git broker: %w", err)
@@ -323,7 +346,7 @@ func run(args []string) (runErr error) {
 		return fmt.Errorf("prepare environment for session %d: %w", launch.SessionID, err)
 	}
 	if cfg.resumeID > 0 {
-		if err := refreshSession(ctx, store, launch, image); err != nil {
+		if err := refreshSession(ctx, store, launch, image, owner); err != nil {
 			return err
 		}
 		threads, err := store.Threads(ctx, launch.SessionID)
@@ -347,22 +370,21 @@ func run(args []string) (runErr error) {
 		}
 	}
 	defer func() {
-		if !containerStarted {
+		if !containerStarted || !runtimeStopped {
 			return
 		}
 		refreshCtx, refreshCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer refreshCancel()
-		runErr = errors.Join(runErr, refreshSession(refreshCtx, store, launch, image))
+		runErr = errors.Join(runErr, refreshSession(refreshCtx, store, launch, image, owner))
 	}()
 	unlock()
 	unlock = nil
 	var runtimeOptions []string
 	if cfg.dind {
-		name, cleanup, err := dind.Start(ctx, cfg.workspace)
+		name, err := dind.Start(ctx, owner, cfg.workspace)
 		if err != nil {
 			return err
 		}
-		defer cleanup()
 		runtimeOptions = []string{"--volume", name + ":" + dind.SocketDir, "--env", "DOCKER_HOST=" + dind.Socket}
 	}
 	var consume func(io.Reader) error
@@ -371,9 +393,12 @@ func run(args []string) (runErr error) {
 			return codex.ConsumeExec(ctx, input, store, launch, os.Stdout, os.Stderr)
 		}
 	}
-	containerStarted, err = runContainer(ctx, dockerArgs(cfg, image, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {
+	containerStarted, err = runContainer(ctx, owner, image, dockerArgs(cfg, image, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {
 		return store.StartExecution(ctx, launch.ExecutionID, cfg.threadID)
 	}, consume)
+	cleanupErr := owner.Cleanup()
+	runtimeStopped = cleanupErr == nil
+	err = errors.Join(err, cleanupErr)
 	if err != nil {
 		return errors.Join(err, context.Cause(ctx))
 	}

@@ -63,9 +63,9 @@ user activity or promise to record every TUI selection.
 Each Pact environment has private native state, so identical container workspace
 paths do not mix sessions. Before resume and after execution, a network-isolated
 Docker helper starts the bundled adapter against that state and returns only
-metadata. Stop the previous writer first; automatic execution ownership remains
-deferred to #8. The native store is writable because Codex may repair its own
-metadata while listing. Pact does not edit native storage directly or transfer a
+metadata. The launcher retains execution ownership while recorded helpers run,
+after stopping the agent and sidecar. The native store is writable because Codex
+may repair its own metadata while listing. Pact does not edit native storage directly or transfer a
 tar snapshot to the host.
 
 Protocol errors are errors, not an empty catalogue. Previously known entries

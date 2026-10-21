@@ -31,10 +31,13 @@ saved only after its first message, so leaving it keeps the previous saved
 conversation as the target. Missing, archived, or unreadable saved state produces
 an error rather than starting a different conversation.
 
-Coordinate launches manually: stop the previous container before resuming, and
-avoid overlapping sessions in the same workspace. Automatic execution ownership
-and crash recovery are not implemented yet. History from the older global state
-volume is not imported automatically.
+Pact prevents concurrent writers in the same workspace or environment and holds
+ownership through cleanup. After a launcher crash, it inspects recorded Docker
+resources before allowing another launch. If a previous container may still be
+running, Pact reports its name and the explicit stop/remove action; retry only
+after stopping it. Interrupted prompts are never replayed automatically.
+Stop agent and DinD containers started by older Pact versions before upgrading.
+History from the older global state volume is not imported automatically.
 
 See [storage and recovery](docs/nix-storage.md) for persistent Nix roots,
 `pact environments repair SESSION_ID`, and `pact environments gc`.

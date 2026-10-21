@@ -7,14 +7,14 @@ import (
 	"net/http"
 
 	"github.com/alexghr/pact/internal/environment"
+	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/state"
 )
 
-// Refresh asks the harness after the previous writer stops. Execution ownership
-// remains deferred; the operator must coordinate launches for now.
-func refreshSession(ctx context.Context, store *state.Store, launch state.Launch, image string) error {
-	threads, err := environment.Threads(ctx, launch.Environment, image)
+// Refresh asks the harness while the caller retains execution ownership.
+func refreshSession(ctx context.Context, store *state.Store, launch state.Launch, image string, owner *execution.Owner) error {
+	threads, err := environment.Threads(ctx, launch.Environment, image, owner)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/state"
 )
 
 func TestAuthSnapshotExcludesRenewableAndUnrelatedCredentials(t *testing.T) {
@@ -70,6 +72,22 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := state.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Backend: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &execution.Owner{Store: store, Launch: launch}
+	defer func() {
+		if err := owner.Cleanup(); err != nil {
+			t.Error(err)
+		}
+	}()
 	label := "me.alexghr.pact.test=" + rand.Text()
 	containers := func(ctx context.Context) (string, error) {
 		output, err := exec.CommandContext(ctx, "docker", "container", "ls", "--all", "--filter", "label="+label, "--format", "{{.ID}}").CombinedOutput()
@@ -92,7 +110,7 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	}
 	finished := make(chan result, 1)
 	go func() {
-		started, err := runContainer(runCtx, []string{"run", "--rm", "--label", label,
+		started, err := runContainer(runCtx, owner, image, []string{"run", "--label", label,
 			"--network", "none", "--entrypoint", "/bin/bash", image,
 			"-euc", "printf 'ready\\n'; exec sleep infinity"}, func() error { return nil }, func(input io.Reader) error {
 			reader := bufio.NewReader(input)

@@ -3,7 +3,6 @@ package environment
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/state"
 )
@@ -21,26 +21,29 @@ import (
 // The previous writer must be stopped. Codex may repair its native metadata;
 // only catalogue metadata leaves the network-isolated helper. The entrypoint
 // removes legacy saved authentication before opening native storage.
-func Threads(ctx context.Context, env state.Environment, image string) ([]harness.Thread, error) {
+func Threads(ctx context.Context, env state.Environment, image string, owner *execution.Owner) (threads []harness.Thread, runErr error) {
 	if err := owned(ctx, "volume", env.StateVolume, env.ID); err != nil {
 		return nil, fmt.Errorf("read session history: %w", err)
 	}
 	if err := owned(ctx, "volume", env.NixVolume, env.NixVolume); err != nil {
 		return nil, fmt.Errorf("read session tools: %w", err)
 	}
-	name := "pact-history-" + strings.ToLower(rand.Text())
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = exec.CommandContext(cleanupCtx, "docker", "rm", "--force", name).Run()
-	}()
-	args := []string{"run", "--name", name, "--network", "none",
+	args := []string{"--network", "none",
 		"--mount", "type=volume,src=" + env.StateVolume + ",dst=/home/pact/.codex,volume-nocopy",
 		"--env", "HOST_UID=" + strconv.Itoa(os.Getuid()), "--env", "HOST_GID=" + strconv.Itoa(os.Getgid()),
 	}
 	args = append(args, Mounts(env)...)
 	args = append(args, image, "--list-threads")
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	resource, err := owner.CreateContainer(ctx, "pact-history-", image, args)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		runErr = errors.Join(runErr, owner.Remove(cleanupCtx, resource))
+	}()
+	cmd := exec.CommandContext(ctx, "docker", "start", "--attach", resource.ContainerID)
 	cmd.WaitDelay = 5 * time.Second
 	var output, diagnostics bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &diagnostics
