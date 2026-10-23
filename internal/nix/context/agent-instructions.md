@@ -51,7 +51,11 @@ Follow the project's documentation conventions. Keep READMEs user-facing unless
 the project uses them for internal documentation. Do not introduce new documentation
 files or directories without a clear need and an established convention or request.
 
-Use PR descriptions to explain the change, its motivation, and relevant internals. Do
-not add a "Validation" paragraph if all you have done is run build, lint, tests. Talk
-about validation only if you have checkec the change in a non-standard/novel way for
-the target repo.
+# Communication
+
+Assume shared context. Keep replies, PR descriptions, and comments terse and factual.
+Omit background, implied details, workflow explanations, and review instructions
+unless asked. Retain material risks and blockers. Mention validation only for
+unusual checks or material limitations.
+
+Examples: `Stack: #76 → #77 → #78`; `Closes #64. Stacked on top of #76`.
