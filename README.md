@@ -56,6 +56,11 @@ History from the older global state volume is not imported automatically.
 See [storage and recovery](docs/nix-storage.md) for persistent Nix roots,
 `pact environments repair SESSION_ID`, and `pact environments gc`.
 See [managed workspaces](docs/workspaces.md) for allocation and recovery.
+Preview permanent workspace removal with `pact workspaces remove SESSION_ID`,
+then repeat with `--yes` to delete its files after ownership and writer checks.
+Conversation history, private agent state, and shared Nix storage are retained.
+Removal prevents further resume into that workspace; operator-supplied paths
+are never eligible.
 
 ## System skills
 

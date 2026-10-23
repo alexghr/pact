@@ -7,19 +7,28 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"syscall"
 )
 
 // LockExecution owns both the canonical workspace and private agent store.
 // Lock files live outside the workspace and remain in place after release.
-func (s *Store) LockExecution(launch Launch) (func(), error) {
+func (s *Store) LockExecution(launches ...Launch) (func(), error) {
+	var keys []string
+	for _, launch := range launches {
+		for _, key := range []string{"workspace:" + launch.Workspace, "environment:" + launch.Environment.ID, "state:" + launch.Environment.StateVolume} {
+			if !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
+	}
 	var files []*os.File
 	unlock := func() {
 		for _, file := range files {
 			file.Close()
 		}
 	}
-	for _, key := range []string{"workspace:" + launch.Workspace, "environment:" + launch.Environment.ID, "state:" + launch.Environment.StateVolume} {
+	for _, key := range keys {
 		path := fmt.Sprintf("%s.execution-%x", s.path, sha256.Sum256([]byte(key)))
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 		if err != nil {
@@ -40,7 +49,7 @@ func (s *Store) LockExecution(launch Launch) (func(), error) {
 			unlock()
 			return nil, err
 		}
-		if _, err := fmt.Fprintf(file, "Pact session %d, execution %d, launcher PID %d", launch.SessionID, launch.ExecutionID, os.Getpid()); err != nil {
+		if _, err := fmt.Fprintf(file, "Pact session %d, execution %d, launcher PID %d", launches[0].SessionID, launches[0].ExecutionID, os.Getpid()); err != nil {
 			unlock()
 			return nil, err
 		}

@@ -139,3 +139,37 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 		t.Fatalf("inspection lost workspace: %s, %v", output.String(), err)
 	}
 }
+
+func TestWorkspaceRemovalRequiresExplicitRequest(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := state.Open(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	launch, err := store.CreateLaunch(t.Context(), state.LaunchOptions{Backend: "codex", Owner: fmt.Sprintf("uid:%d", os.Getuid())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(launch.Workspace, "unfinished-work")
+	if err := os.WriteFile(file, []byte("valuable"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	args := []string{"remove", fmt.Sprint(launch.SessionID)}
+	if err := manageWorkspaces(args, &output); err != nil || !strings.Contains(output.String(), launch.Workspace) {
+		t.Fatalf("workspace preview: %s, %v", output.String(), err)
+	}
+	if data, err := os.ReadFile(file); err != nil || string(data) != "valuable" {
+		t.Fatalf("preview removed data: %q, %v", data, err)
+	}
+	if err := manageWorkspaces(append(args, "--yes"), &output); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("explicit request did not remove workspace files: %v", err)
+	}
+	if session, err := store.Session(t.Context(), launch.SessionID); err != nil || session.WorkspaceStatus != "removed" {
+		t.Fatalf("explicit removal lost its retained record: %+v, %v", session, err)
+	}
+}

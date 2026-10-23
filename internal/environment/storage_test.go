@@ -1,8 +1,11 @@
 package environment
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +18,185 @@ import (
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
 )
+
+func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
+	if id := os.Getenv("PACT_TEST_CLEANUP_SESSION"); id != "" {
+		store, err := state.Open(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer store.Close()
+		sessionID, _ := strconv.ParseInt(id, 10, 64)
+		unlock, err := store.LockStorage(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		launch, _, err := store.ResumeLaunch(t.Context(), sessionID, false)
+		if err != nil {
+			unlock()
+			t.Fatal(err)
+		}
+		release, err := store.LockExecution(launch)
+		unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		fmt.Println("owned")
+		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+		return
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := state.Open(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	create := func(workspace string) state.Launch {
+		t.Helper()
+		launch, err := store.CreateLaunch(t.Context(), state.LaunchOptions{Workspace: workspace, Backend: "codex", Owner: fmt.Sprintf("uid:%d", os.Getuid())})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return launch
+	}
+	first, sibling, supplied := create(""), create(""), create(t.TempDir())
+	// Every session/environment at this path must be checked, including a
+	// different session's process that currently owns the workspace.
+	shared := create(first.Workspace)
+	if err := store.RecordThread(t.Context(), state.Thread{ID: "saved", SessionID: first.SessionID, Title: "Retained conversation"}); err != nil {
+		t.Fatal(err)
+	}
+	storage, err := store.SharedStorage(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, launch := range []state.Launch{first, sibling, supplied} {
+		if err := os.WriteFile(filepath.Join(launch.Workspace, "files"), []byte("retained"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(supplied.Workspace, filepath.Join(first.Workspace, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, binary, "-test.run=^TestWorkspaceRemovalBoundariesAndOwnership$")
+	child.Env = append(os.Environ(), fmt.Sprintf("PACT_TEST_CLEANUP_SESSION=%d", shared.SessionID))
+	input, err := child.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	output, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.Stderr = os.Stderr
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { child.Process.Kill(); child.Wait() })
+	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "owned\n" {
+		t.Fatalf("writer did not acquire ownership: %q, %v", line, err)
+	}
+	if err := RemoveWorkspace(ctx, store, first.SessionID); err == nil {
+		t.Fatal("cleanup removed another session's live workspace")
+	}
+	if err := child.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = child.Wait()
+	if err := RemoveWorkspace(ctx, store, first.SessionID); err != nil {
+		t.Fatalf("cleanup after writer exit: %v", err)
+	}
+	if err := RemoveWorkspace(ctx, store, first.SessionID); err != nil {
+		t.Fatalf("repeated cleanup: %v", err)
+	}
+	if _, err := os.Stat(first.Workspace); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("selected workspace remains: %v", err)
+	}
+	if err := RemoveWorkspace(ctx, store, supplied.SessionID); err == nil {
+		t.Fatal("operator-owned directory was eligible for removal")
+	}
+	nested := filepath.Join(sibling.Workspace, "nested")
+	if err := os.Mkdir(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	create(nested)
+	if err := RemoveWorkspace(ctx, store, sibling.SessionID); err == nil {
+		t.Fatal("cleanup ignored an overlapping workspace registration")
+	}
+	for _, launch := range []state.Launch{sibling, supplied} {
+		if data, err := os.ReadFile(filepath.Join(launch.Workspace, "files")); err != nil || string(data) != "retained" {
+			t.Fatalf("cleanup changed another directory: %q, %v", data, err)
+		}
+	}
+	for _, launch := range []state.Launch{first, shared} {
+		session, err := store.Session(ctx, launch.SessionID)
+		if err != nil || session.WorkspaceStatus != "removed" || session.Environment != launch.Environment {
+			t.Fatalf("cleanup lost history/environment or removal reason: %+v, %v", session, err)
+		}
+	}
+	if threads, err := store.Threads(ctx, first.SessionID); err != nil || len(threads) != 1 || threads[0].Title != "Retained conversation" {
+		t.Fatalf("cleanup lost saved conversation metadata: %+v, %v", threads, err)
+	}
+	if after, err := store.SharedStorage(ctx); err != nil || after != storage {
+		t.Fatalf("cleanup changed shared Nix storage: %+v, %v", after, err)
+	}
+}
+
+func TestWorkspaceRemovalWithSurvivingContainer(t *testing.T) {
+	if os.Getenv("PACT_TEST_DOCKER") != "1" {
+		t.Skip("set PACT_TEST_DOCKER=1 for a real surviving Docker writer")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, err := state.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Backend: "codex", Owner: fmt.Sprintf("uid:%d", os.Getuid())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &execution.Owner{Store: store, Launch: launch}
+	defer func() {
+		if err := owner.Cleanup(); err != nil {
+			t.Error(err)
+		}
+	}()
+	const image = "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
+	resource, err := owner.CreateContainer(ctx, "pact-cleanup-test-", image, []string{"--network", "none", image, "sleep", "infinity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := docker(ctx, "start", resource.ContainerID); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveWorkspace(ctx, store, launch.SessionID); err == nil || !strings.Contains(err.Error(), resource.Name) {
+		t.Fatalf("surviving writer allowed removal or was unidentified: %v", err)
+	}
+	if _, err := docker(ctx, "kill", resource.ContainerID); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("uncertain writer", func(t *testing.T) {
+		t.Setenv("DOCKER_CONTEXT", "")
+		t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
+		if err := RemoveWorkspace(ctx, store, launch.SessionID); err == nil {
+			t.Fatal("unreachable daemon allowed workspace removal")
+		}
+	})
+	if err := RemoveWorkspace(ctx, store, launch.SessionID); err != nil {
+		t.Fatalf("stopped writer blocked explicit removal: %v", err)
+	}
+}
 
 func TestSharedStorage(t *testing.T) {
 	if os.Getenv("PACT_TEST_DOCKER") != "1" {

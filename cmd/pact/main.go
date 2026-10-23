@@ -66,6 +66,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
+		fmt.Fprintln(output, "       pact workspaces remove SESSION_ID [--yes]")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID | threads SESSION_ID")
 		fmt.Fprintln(output, "       pact resume SESSION_ID[:THREAD_UUID] [--prompt TEXT] [--config PATH]")
 		flags.PrintDefaults()
@@ -214,6 +215,9 @@ func run(args []string) (runErr error) {
 	}
 	if len(args) > 0 && args[0] == "sessions" {
 		return manageSessions(args[1:], os.Stdout)
+	}
+	if len(args) > 0 && args[0] == "workspaces" {
+		return manageWorkspaces(args[1:], os.Stdout)
 	}
 	var cfg agentConfig
 	var err error
