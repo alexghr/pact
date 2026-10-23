@@ -27,6 +27,8 @@ import (
 	"github.com/alexghr/pact/internal/state"
 )
 
+const maxSessionTitleLength = 120
+
 // agentConfig holds the options passed to the container's agent entrypoint.
 // Pact's environment instructions are supplied by the container entrypoint.
 type agentConfig struct {
@@ -211,7 +213,7 @@ func run(args []string) (runErr error) {
 		return manageEnvironments(args[1:])
 	}
 	if len(args) > 0 && args[0] == "sessions" {
-		return manageSessions(args[1:])
+		return manageSessions(args[1:], os.Stdout)
 	}
 	var cfg agentConfig
 	var err error
@@ -271,6 +273,7 @@ func run(args []string) (runErr error) {
 	} else {
 		launch, err = store.CreateLaunch(ctx, state.LaunchOptions{
 			Workspace: cfg.workspace,
+			Title:     sessionTitle(cfg.prompt),
 			Owner:     "uid:" + strconv.Itoa(os.Getuid()),
 			Backend:   "codex",
 			Settings:  state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Prompted: cfg.prompt != "", DinD: cfg.dind, HostNet: cfg.hostNet},
@@ -420,6 +423,17 @@ func exitCode(err error) int {
 		return exitErr.ExitCode()
 	}
 	return 1
+}
+
+func sessionTitle(prompt string) string {
+	if prompt == "" {
+		return "Interactive session"
+	}
+	title := []rune(strings.Join(strings.Fields(prompt), " "))
+	if len(title) > maxSessionTitleLength {
+		return string(title[:maxSessionTitleLength]) + "…"
+	}
+	return string(title)
 }
 
 func main() {

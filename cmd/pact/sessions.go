@@ -6,16 +6,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/alexghr/pact/internal/state"
 )
 
-func manageSessions(args []string) (runErr error) {
+func manageSessions(args []string, output io.Writer) (runErr error) {
 	if len(args) == 0 {
 		return errors.New("usage: pact sessions list [--workspace PATH | --all] [--json] | show ID [--json] | threads ID [--json]")
 	}
@@ -40,8 +42,8 @@ func manageSessions(args []string) (runErr error) {
 	var workspace string
 	var all bool
 	if operation == "list" {
-		flags.StringVar(&workspace, "workspace", "", "Filter by host workspace (default: current directory)")
-		flags.BoolVar(&all, "all", false, "List sessions from all workspaces")
+		flags.StringVar(&workspace, "workspace", "", "Filter by host workspace (default: all workspaces)")
+		flags.BoolVar(&all, "all", false, "List sessions from all workspaces (the default)")
 	}
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -52,10 +54,7 @@ func manageSessions(args []string) (runErr error) {
 	if all && workspace != "" {
 		return errors.New("--workspace and --all cannot be combined")
 	}
-	if operation == "list" && !all {
-		if workspace == "" {
-			workspace = "."
-		}
+	if operation == "list" && workspace != "" {
 		var err error
 		workspace, err = filepath.Abs(workspace)
 		if err != nil {
@@ -78,12 +77,13 @@ func manageSessions(args []string) (runErr error) {
 			return err
 		}
 		if *jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(sessions)
+			return json.NewEncoder(output).Encode(sessions)
 		}
-		writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(writer, "SESSION\tSTATUS\tWORKSPACE")
+		writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(writer, "SESSION\tSTATUS\tUPDATED\tTITLE")
 		for _, session := range sessions {
-			fmt.Fprintf(writer, "%d\t%s\t%s\n", session.ID, session.Status, session.Workspace)
+			fmt.Fprintf(writer, "%d\t%s\t%s\t%s\n", session.ID, session.Status,
+				time.UnixMilli(session.UpdatedAt).UTC().Format(time.RFC3339), strings.Join(strings.Fields(session.Title), " "))
 		}
 		return writer.Flush()
 	}
@@ -97,21 +97,22 @@ func manageSessions(args []string) (runErr error) {
 	}
 	if *jsonOutput {
 		if operation == "threads" {
-			return json.NewEncoder(os.Stdout).Encode(threads)
+			return json.NewEncoder(output).Encode(threads)
 		}
-		return json.NewEncoder(os.Stdout).Encode(struct {
+		return json.NewEncoder(output).Encode(struct {
 			state.Session
 			Threads []state.Thread `json:"threads"`
 		}{session, threads})
 	}
 	if operation == "show" {
-		fmt.Fprintf(os.Stdout, "Session: %d\nWorkspace: %s\nBackend: %s\nStatus: %s\n", session.ID, session.Workspace, session.Backend, session.Status)
-		fmt.Fprintf(os.Stdout, "Workspace managed: %t\nWorkspace status: %s\n", session.WorkspaceManaged, session.WorkspaceStatus)
+		fmt.Fprintf(output, "Session: %d\nTitle: %s\nUpdated: %s\nWorkspace: %s\nBackend: %s\nStatus: %s\n",
+			session.ID, session.Title, time.UnixMilli(session.UpdatedAt).UTC().Format(time.RFC3339), session.Workspace, session.Backend, session.Status)
+		fmt.Fprintf(output, "Workspace managed: %t\nWorkspace status: %s\n", session.WorkspaceManaged, session.WorkspaceStatus)
 		if session.Error != "" {
-			fmt.Fprintln(os.Stdout, "Last error:", session.Error)
+			fmt.Fprintln(output, "Last error:", session.Error)
 		}
 	}
-	writer := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(writer, "THREAD\tLAST USED\tSTATE\tTITLE")
 	for _, thread := range threads {
 		status := "available"

@@ -16,17 +16,20 @@ catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
 `~/.local/state/pact/sessions.db`. Each new session has private persistent agent
 state; sessions share a managed Nix daemon and read-only package store.
 
-Find saved sessions with `pact sessions list` in the workspace directory, or
-`pact sessions list --all` across workspaces. Use `pact sessions show 42` to
-inspect a session and `pact sessions threads 42` to list its native thread IDs.
+Find saved sessions from any directory with `pact sessions list`. It lists all
+workspaces, newest use first, with session IDs, titles, execution status, and
+update times. Use `--workspace PATH` to filter; `--all` remains an alias for the
+default. Use `pact sessions show 42` to inspect the workspace path and session,
+and `pact sessions threads 42` to list its native thread IDs.
 Each command accepts `--json`. Listings show saved metadata, updated during
 interactive use and after execution. Resume refreshes it automatically before
 choosing a conversation.
 
 Resume the last used saved conversation with `pact resume 42`, or select one
 explicitly with `pact resume 42:THREAD_ID`. Pact reuses the
-session's workspace, private state, and recorded launch settings, and opens the
-native Codex terminal UI. Git and MCP connections use the current host config;
+session's workspace, private state, and recorded launch settings. Without
+`--prompt`, resume opens the native Codex terminal UI, including for sessions
+started with a prompt. Git and MCP connections use the current host config;
 pass `--config PATH` to select another config.
 
 Use `pact resume 42 --prompt 'Continue the investigation'` for prompted

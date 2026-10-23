@@ -30,6 +30,7 @@ type Environment struct {
 
 type LaunchOptions struct {
 	Workspace string
+	Title     string
 	Owner     string
 	Backend   string
 	Settings  LaunchSettings
@@ -119,8 +120,8 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 		return Launch{}, fmt.Errorf("record environment: %w", err)
 	}
 	result, err := tx.ExecContext(ctx,
-		"INSERT INTO sessions(environment_id, owner, backend, created_at) VALUES(?, ?, ?, ?)",
-		launch.Environment.ID, options.Owner, options.Backend, now,
+		"INSERT INTO sessions(environment_id, owner, backend, created_at, title) VALUES(?, ?, ?, ?, ?)",
+		launch.Environment.ID, options.Owner, options.Backend, now, options.Title,
 	)
 	if err != nil {
 		return Launch{}, fmt.Errorf("record session: %w", err)

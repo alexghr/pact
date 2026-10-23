@@ -1,6 +1,9 @@
 package state
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSessionListing(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -32,6 +35,21 @@ func TestSessionListing(t *testing.T) {
 	all, err := store.Sessions(t.Context(), "")
 	if err != nil || len(all) != 2 || all[0].ID != other.SessionID {
 		t.Fatalf("all-workspaces listing: %v, %v", all, err)
+	}
+	// Native recency promotes an older session; an internal subagent cannot
+	// replace its title or make it appear more recently used by the operator.
+	at := time.Now().Add(time.Hour)
+	for _, thread := range []Thread{
+		{ID: "user", SessionID: first.SessionID, Title: "Fix deployment", LastUsed: at.UnixNano()},
+		{ID: "internal", SessionID: other.SessionID, Title: "Internal work", Internal: true, LastUsed: at.Add(time.Hour).UnixNano()},
+	} {
+		if err := store.RecordThread(t.Context(), thread); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err = store.Sessions(t.Context(), "")
+	if err != nil || len(all) != 2 || all[0].ID != first.SessionID || all[0].Title != "Fix deployment" || all[0].UpdatedAt != at.UnixMilli() {
+		t.Fatalf("native title and recency: %+v, %v", all, err)
 	}
 	session, err := store.Session(t.Context(), first.SessionID)
 	if err != nil || session.Environment != first.Environment {
