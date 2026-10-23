@@ -25,6 +25,7 @@ func parseResumeArgs(args []string) (agentConfig, error) {
 	flags.SetOutput(os.Stderr)
 	flags.StringVar(&cfg.config, "config", "", "Config file (default: current host Pact config)")
 	flags.StringVar(&cfg.prompt, "prompt", "", "Continue the saved conversation with a prompt")
+	flags.StringVar(&cfg.prompt, "p", "", "Alias for --prompt")
 	if err := flags.Parse(args[1:]); err != nil {
 		return cfg, err
 	}
@@ -33,7 +34,7 @@ func parseResumeArgs(args []string) (agentConfig, error) {
 	}
 	promptFlagExists := false
 	flags.Visit(func(f *flag.Flag) {
-		if f.Name == "prompt" {
+		if f.Name == "prompt" || f.Name == "p" {
 			promptFlagExists = true
 		}
 	})

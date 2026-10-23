@@ -35,7 +35,7 @@ pass `--config PATH` to select another config.
 Use `pact resume 42 --prompt 'Continue the investigation'` for prompted
 continuation, or provide `42:THREAD_ID` to target an exact conversation. The
 prompt continues that saved conversation in the same environment; it requires
-an existing available thread. `-prompt` is accepted too.
+an existing available thread. `-p` and `-prompt` are accepted too.
 
 Pact selects the conversation with the newest saved last-use timestamp in Codex.
 Opening an older conversation can update this without sending a message;
