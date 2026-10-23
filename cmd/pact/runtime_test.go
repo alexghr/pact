@@ -62,6 +62,49 @@ func TestAuthSnapshotExcludesRenewableAndUnrelatedCredentials(t *testing.T) {
 	}
 }
 
+func TestManagedLaunchFailureCanResume(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	loginHome := t.TempDir()
+	t.Setenv("HOME", loginHome)
+	if err := os.Mkdir(filepath.Join(loginHome, ".codex"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(loginHome, ".codex", "auth.json"), []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"test","access_token":"test","account_id":"test"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A real unreachable endpoint fails startup before any agent can run.
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
+	if err := run([]string{"-p", "Investigate deployment errors"}); err == nil {
+		t.Fatal("launch succeeded without Docker")
+	}
+	store, err := state.Open(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	sessions, err := store.Sessions(t.Context(), "")
+	if err != nil || len(sessions) != 1 || sessions[0].Status != "startupFailed" || !sessions[0].WorkspaceManaged {
+		t.Fatalf("failed managed launch lost its session: %+v, %v", sessions, err)
+	}
+	session := sessions[0]
+	file := filepath.Join(session.Workspace, "unfinished")
+	if err := os.WriteFile(file, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"resume", fmt.Sprint(session.ID)}); err == nil {
+		t.Fatal("resume succeeded without Docker")
+	}
+	after, err := store.Session(t.Context(), session.ID)
+	if err != nil || after.Environment != session.Environment || after.Workspace != session.Workspace {
+		t.Fatalf("resume changed retained environment: %+v, %v", after, err)
+	}
+	if data, err := os.ReadFile(file); err != nil || string(data) != "keep" {
+		t.Fatalf("failed resume changed workspace files: %q, %v", data, err)
+	}
+}
+
 func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	if os.Getenv("PACT_TEST_DOCKER") != "1" {
 		t.Skip("set PACT_TEST_DOCKER=1 for real Docker checks")

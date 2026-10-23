@@ -20,12 +20,12 @@ func (s *Store) ResumeLaunch(ctx context.Context, id int64, prompted bool) (Laun
 	if session.Backend != "codex" {
 		return Launch{}, LaunchSettings{}, fmt.Errorf("unsupported session backend %q", session.Backend)
 	}
-	workspace, err := s.resolveWorkspace(session.Workspace)
+	w, err := s.Workspace(ctx, session.Environment.WorkspaceID)
 	if err != nil {
 		return Launch{}, LaunchSettings{}, err
 	}
-	if workspace != session.Workspace {
-		return Launch{}, LaunchSettings{}, errors.New("saved workspace now resolves to a different directory; restore its original location before resuming")
+	if err := s.checkWorkspace(w); err != nil {
+		return Launch{}, LaunchSettings{}, err
 	}
 	settings := session.Settings
 	settings.Prompted = prompted
@@ -39,7 +39,7 @@ func (s *Store) ResumeLaunch(ctx context.Context, id int64, prompted bool) (Laun
 		return Launch{}, LaunchSettings{}, err
 	}
 	executionID, err := result.LastInsertId()
-	return Launch{SessionID: id, ExecutionID: executionID, Workspace: workspace, Environment: session.Environment}, settings, err
+	return Launch{SessionID: id, ExecutionID: executionID, Workspace: w.Path, Environment: session.Environment}, settings, err
 }
 
 func (s *Store) resolveWorkspace(workspace string) (string, error) {

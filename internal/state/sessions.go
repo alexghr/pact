@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -52,8 +53,17 @@ const (
 )
 
 // CreateLaunch registers the workspace and allocates the launch records together.
+// An empty Workspace requests a fresh managed directory. Callers hold LockStorage
+// through execution locking and provisioning, as for ResumeLaunch.
 func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch, error) {
-	workspace, err := s.resolveWorkspace(options.Workspace)
+	managed := options.Workspace == ""
+	var workspace string
+	var err error
+	if managed {
+		workspace, err = s.newWorkspacePath()
+	} else {
+		workspace, err = s.resolveWorkspace(options.Workspace)
+	}
 	if err != nil {
 		return Launch{}, err
 	}
@@ -67,9 +77,13 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 	}
 	defer tx.Rollback()
 	now := time.Now().UnixMilli()
+	status := "ready"
+	if managed {
+		status = "allocating"
+	}
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO workspaces(path, owner, created_at) VALUES(?, ?, ?) ON CONFLICT(path) DO NOTHING",
-		workspace, options.Owner, now,
+		"INSERT INTO workspaces(path, owner, created_at, managed, status) VALUES(?, ?, ?, ?, ?) ON CONFLICT(path) DO NOTHING",
+		workspace, options.Owner, now, managed, status,
 	); err != nil {
 		return Launch{}, fmt.Errorf("register workspace: %w", err)
 	}
@@ -87,6 +101,16 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 	launch.Environment.StateVolume = "pact-state-" + strings.ToLower(launch.Environment.ID)
 	if err := tx.QueryRowContext(ctx, "SELECT id FROM workspaces WHERE path = ?", workspace).Scan(&launch.Environment.WorkspaceID); err != nil {
 		return Launch{}, fmt.Errorf("find workspace: %w", err)
+	}
+	if !managed {
+		var w Workspace
+		if err := tx.QueryRowContext(ctx, "SELECT path, managed, status, identity FROM workspaces WHERE id = ?", launch.Environment.WorkspaceID).
+			Scan(&w.Path, &w.Managed, &w.Status, &w.Identity); err != nil {
+			return Launch{}, err
+		}
+		if err := s.checkWorkspace(w); err != nil {
+			return Launch{}, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		"INSERT INTO environments(id, workspace_id, state_volume, nix_volume, created_at) VALUES(?, ?, ?, ?, ?)",
@@ -118,6 +142,14 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 	}
 	if err := tx.Commit(); err != nil {
 		return Launch{}, fmt.Errorf("commit launch: %w", err)
+	}
+	if managed {
+		if err := s.allocateWorkspace(ctx, launch); err != nil {
+			message := fmt.Sprintf("session %d workspace allocation at %s needs recovery: %v", launch.SessionID, workspace, err)
+			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			return Launch{}, errors.Join(errors.New(message), s.FinishExecution(finishCtx, launch.ExecutionID, StartupFailed, 1, message))
+		}
 	}
 	return launch, nil
 }

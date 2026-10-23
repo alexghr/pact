@@ -4,6 +4,12 @@ Pact is an agent isolation solution using your existing ChatGPT subscription.
 
 ## Sessions
 
+Run `pact` for an interactive session in a fresh, empty managed workspace, or
+`pact -p 'Investigate deployment errors'` to start with a prompt. The agent can
+clone authorized repositories inside it. Use `pact -w PATH` to supply an existing
+directory instead. Pact retains workspace files after exit or startup failure;
+resume uses the original directory and private agent state.
+
 Each validated launch prints a Pact session ID to stderr and records the workspace,
 launch settings, and outcome on the host, including when startup fails. The
 catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
@@ -46,6 +52,7 @@ History from the older global state volume is not imported automatically.
 
 See [storage and recovery](docs/nix-storage.md) for persistent Nix roots,
 `pact environments repair SESSION_ID`, and `pact environments gc`.
+See [managed workspaces](docs/workspaces.md) for allocation and recovery.
 
 ## System skills
 

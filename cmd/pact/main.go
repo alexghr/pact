@@ -52,7 +52,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	flags.SetOutput(output)
 	flags.BoolVar(&cfg.dind, "dind", false, "Give the agent a dedicated Docker-in-Docker daemon")
 	flags.BoolVar(&cfg.hostNet, "hostnet", false, "Run the container on the host's network")
-	flags.StringVar(&cfg.workspace, "workspace", "", "Workspace directory to mount (required)")
+	flags.StringVar(&cfg.workspace, "workspace", "", "Use an existing workspace directory (default: a fresh managed workspace)")
 	flags.StringVar(&cfg.workspace, "w", "", "Alias for --workspace")
 	flags.StringVar(&cfg.prompt, "prompt", "", "Prompt to run (omit for an interactive session)")
 	flags.StringVar(&cfg.prompt, "p", "", "Alias for --prompt")
@@ -62,7 +62,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	flags.StringVar(&cfg.effort, "e", cfg.effort, "Alias for --effort")
 	flags.StringVar(&cfg.config, "config", "", "Config file (default: $XDG_CONFIG_HOME/pact/config.json or ~/.config/pact/config.json)")
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pact --workspace PATH [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
+		fmt.Fprintln(output, "Usage: pact [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID | threads SESSION_ID")
 		fmt.Fprintln(output, "       pact resume SESSION_ID[:THREAD_UUID] [--prompt TEXT] [--config PATH]")
@@ -75,7 +75,7 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 		return cfg, fmt.Errorf("unexpected argument: %s", flags.Arg(0))
 	}
 	if cfg.workspace == "" {
-		return cfg, errors.New("--workspace is required")
+		return cfg, nil
 	}
 	workspace, err := filepath.Abs(cfg.workspace)
 	if err != nil {
@@ -95,11 +95,15 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	return cfg, nil
 }
 
-func readOnlyMount(source, target string) string {
+func bindMount(source, target string, readonly bool) string {
 	// Docker's --mount uses CSV, so quote paths that contain commas.
 	var mount strings.Builder
 	writer := csv.NewWriter(&mount)
-	_ = writer.Write([]string{"type=bind", "source=" + source, "target=" + target, "readonly"})
+	fields := []string{"type=bind", "source=" + source, "target=" + target}
+	if readonly {
+		fields = append(fields, "readonly")
+	}
+	_ = writer.Write(fields)
 	writer.Flush()
 	return strings.TrimSuffix(mount.String(), "\n")
 }
@@ -113,12 +117,12 @@ func dockerArgs(cfg agentConfig, image string, uid, gid int, runtimeOptions ...s
 		args = append(args, "--network", "host")
 	}
 	args = append(args,
-		"--volume", cfg.workspace+":/home/pact/workspace",
+		"--mount", bindMount(cfg.workspace, "/home/pact/workspace", false),
 		"--volume", cfg.environment.StateVolume+":/home/pact/.codex",
 		"--env", "HOST_UID="+strconv.Itoa(uid),
 		"--env", "HOST_GID="+strconv.Itoa(gid),
 	)
-	args = append(args, "--mount", readOnlyMount(cfg.authFile, "/home/pact/.codex/auth.json"))
+	args = append(args, "--mount", bindMount(cfg.authFile, "/home/pact/.codex/auth.json", true))
 	args = append(args, environment.Mounts(cfg.environment)...)
 	if cfg.resumeID > 0 {
 		args = append(args, "--env", "PACT_RESUME_THREAD="+cfg.threadID)
@@ -126,7 +130,7 @@ func dockerArgs(cfg agentConfig, image string, uid, gid int, runtimeOptions ...s
 	if cfg.bridge != nil {
 		bridgeConfig := cfg.bridge.ContainerConfig()
 		for _, mount := range bridgeConfig.ReadOnlyMounts {
-			args = append(args, "--mount", readOnlyMount(mount.Source, mount.Target))
+			args = append(args, "--mount", bindMount(mount.Source, mount.Target, true))
 		}
 		for _, env := range bridgeConfig.Env {
 			args = append(args, "--env", env)

@@ -106,6 +106,7 @@ func manageSessions(args []string) (runErr error) {
 	}
 	if operation == "show" {
 		fmt.Fprintf(os.Stdout, "Session: %d\nWorkspace: %s\nBackend: %s\nStatus: %s\n", session.ID, session.Workspace, session.Backend, session.Status)
+		fmt.Fprintf(os.Stdout, "Workspace managed: %t\nWorkspace status: %s\n", session.WorkspaceManaged, session.WorkspaceStatus)
 		if session.Error != "" {
 			fmt.Fprintln(os.Stdout, "Last error:", session.Error)
 		}

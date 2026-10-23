@@ -1,8 +1,11 @@
 package state
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -132,5 +135,117 @@ func TestLaunchAllocationRollsBack(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("failed launch left %d records in %s", count, table)
 		}
+	}
+}
+
+func TestManagedWorkspaceLifecycle(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store, other := openStore(t), openStore(t)
+	results := make(chan Launch, 2)
+	for _, connection := range []*Store{store, other} {
+		go func() {
+			launch, err := connection.CreateLaunch(t.Context(), LaunchOptions{Backend: "codex"})
+			if err != nil {
+				t.Error(err)
+			}
+			results <- launch
+		}()
+	}
+	a, b := <-results, <-results
+	if t.Failed() {
+		t.FailNow()
+	}
+	if a.Workspace == b.Workspace || a.Environment.StateVolume == b.Environment.StateVolume {
+		t.Fatal("independent launches share workspace or agent state")
+	}
+	for _, launch := range []Launch{a, b} {
+		entries, err := os.ReadDir(launch.Workspace)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("workspace was not initially empty: %v, %v", entries, err)
+		}
+		info, err := os.Stat(launch.Workspace)
+		if err != nil || info.Mode().Perm() != 0700 {
+			t.Fatalf("workspace is not private: %v, %v", info, err)
+		}
+	}
+	repo := filepath.Join(a.Workspace, "project")
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "-C", repo}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return string(out)
+	}
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
+	git("init", "-b", "main")
+	for _, step := range []struct{ branch, text string }{{"main", "base"}, {"side", "side"}, {"main", "main"}} {
+		if step.branch == "side" {
+			git("checkout", "-b", "side")
+		} else if step.text != "base" {
+			git("checkout", "main")
+		}
+		if err := os.WriteFile(filepath.Join(repo, "file"), []byte(step.text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "file")
+		git("commit", "-m", step.text)
+	}
+	output, err := exec.CommandContext(t.Context(), "git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "-C", repo, "merge", "side").CombinedOutput()
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); !ok || exitErr.ExitCode() != 1 {
+		t.Fatalf("expected an unfinished conflicting merge: %v: %s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(a.Workspace, "build-output"), []byte("retained"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before := git("status", "--porcelain") + git("rev-parse", "HEAD", "MERGE_HEAD")
+	if err := store.FinishExecution(t.Context(), a.ExecutionID, StartupFailed, 1, "runtime unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	resumed, _, err := store.ResumeLaunch(t.Context(), a.SessionID, false)
+	if err != nil || resumed.Workspace != a.Workspace || resumed.Environment != a.Environment {
+		t.Fatalf("resume lost workspace or environment: %+v, %v", resumed, err)
+	}
+	if after := git("status", "--porcelain") + git("rev-parse", "HEAD", "MERGE_HEAD"); after != before {
+		t.Fatal("resume changed local commits or unfinished Git state")
+	}
+	if data, err := os.ReadFile(filepath.Join(resumed.Workspace, "build-output")); err != nil || string(data) != "retained" {
+		t.Fatalf("resume lost untracked build output: %q, %v", data, err)
+	}
+	if err := os.Rename(a.Workspace, a.Workspace+"-original"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.ResumeLaunch(t.Context(), a.SessionID, false); err == nil {
+		t.Fatal("resume replaced a missing retained directory")
+	}
+	if err := os.Mkdir(a.Workspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.ResumeLaunch(t.Context(), a.SessionID, false); err == nil {
+		t.Fatal("resume accepted a replacement directory")
+	}
+}
+
+func TestManagedAllocationFailureIsRetained(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	store := openStore(t)
+	root := filepath.Join(filepath.Dir(store.path), "workspaces")
+	if err := os.Mkdir(root, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(root, 0700) })
+	_, err := store.CreateLaunch(t.Context(), LaunchOptions{Backend: "codex"})
+	if err == nil || !strings.Contains(err.Error(), "needs recovery") {
+		t.Fatalf("allocation failure: %v", err)
+	}
+	sessions, err := store.Sessions(t.Context(), "")
+	if err != nil || len(sessions) != 1 || sessions[0].Status != "startupFailed" || !sessions[0].WorkspaceManaged || sessions[0].WorkspaceStatus != "allocating" {
+		t.Fatalf("failure lost allocation records: %+v, %v", sessions, err)
+	}
+	if _, _, err := store.ResumeLaunch(t.Context(), sessions[0].ID, false); err == nil {
+		t.Fatal("resume silently completed a failed allocation")
 	}
 }
