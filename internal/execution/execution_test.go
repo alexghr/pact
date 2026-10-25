@@ -3,10 +3,12 @@ package execution
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -40,12 +42,12 @@ func TestRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := append([]string{"create", "--name", r.Name}, labels...)
-	args = append(args, "--network", "none", image, "sleep", "infinity")
-	if _, err := docker(ctx, args...); err != nil {
+	if _, err := docker.CreateContainer(ctx, docker.ContainerConfig{
+		Name: r.Name, Labels: labels, Network: "none", Image: image, Command: []string{"sleep", "infinity"},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := docker(ctx, "start", r.Name); err != nil {
+	if err := docker.StartContainer(ctx, r.Name); err != nil {
 		t.Fatal(err)
 	}
 	resumed, _, err := store.ResumeLaunch(ctx, launch.SessionID, false)
@@ -74,7 +76,7 @@ func TestRecovery(t *testing.T) {
 	if session.Status != "starting" {
 		t.Fatalf("recovery changed the replacement execution: %+v", session)
 	}
-	if _, err := docker(ctx, "kill", r.Name); err != nil {
+	if err := exec.CommandContext(ctx, "docker", "kill", r.Name).Run(); err != nil {
 		t.Fatal(err)
 	}
 	t.Run("unreachable daemon", func(t *testing.T) {
@@ -90,7 +92,7 @@ func TestRecovery(t *testing.T) {
 	if resources, err := store.Resources(ctx, launch.ExecutionID); err != nil || len(resources) != 0 {
 		t.Fatalf("recovered resources retained: %+v, %v", resources, err)
 	}
-	created, err := replacement.CreateContainer(ctx, "pact-recovery-", image, []string{"--network", "none", image, "true"})
+	created, err := replacement.CreateContainer(ctx, "pact-recovery-", docker.ContainerConfig{Image: image, Network: "none", Command: []string{"true"}})
 	if err != nil || created.ContainerID == "" || created.ImageID == "" {
 		t.Fatalf("actual runtime identity not recorded: %+v, %v", created, err)
 	}

@@ -1,6 +1,7 @@
 package hostbridge
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/environment"
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
@@ -104,12 +106,12 @@ func TestTCPAuthenticationAndLifetime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		args := append([]string{"run", "--rm"}, environment.Mounts(env)...)
-		args = append(args, "--entrypoint", "/opt/pact/tools/bin/curl", image,
-			"--noproxy", "*", "--fail", "--silent", "--show-error", "--max-time", "10", bridge.AgentURL()+"/mcp/example")
-		cmd := exec.CommandContext(ctx, "docker", args...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("Docker Desktop bridge: %v: %s", err, strings.ReplaceAll(string(output), base.Path, "/<token>"))
+		config := docker.ContainerConfig{Image: image, Remove: true, Entrypoint: "/opt/pact/tools/bin/curl",
+			Command: []string{"--noproxy", "*", "--fail", "--silent", "--show-error", "--max-time", "10", bridge.AgentURL() + "/mcp/example"}}
+		environment.ConfigureContainer(env, &config)
+		var output bytes.Buffer
+		if err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &output}); err != nil {
+			t.Fatalf("Docker Desktop bridge: %v: %s", err, strings.ReplaceAll(output.String(), base.Path, "/<token>"))
 		}
 	}
 	if err := bridge.Close(); err != nil {

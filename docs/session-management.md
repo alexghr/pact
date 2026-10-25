@@ -271,12 +271,12 @@ events. Codex owns its transcript and continuation format. A runtime supervisor
 owns containers, bridges, sidecars, and their cleanup. Client adapters translate
 input and present results; none should implement a second session scheduler.
 
-Extract runtime setup from `cmd/pact/main.go` into `internal/runtime`. Keep
-`internal/hostbridge`, `internal/gitbroker`, and `internal/dind` as dependencies.
-Currently their lifetime follows the launcher process. For detached work their
-lifetime must follow the supervisor, including Git signing and MCP access after
-the initiating CLI disconnects. DinD now receives the environment's selected
-private agent-state volume.
+Container, volume, and image operations go through
+[`internal/docker`](../internal/docker/docker.go), including mount encoding and
+attached I/O. Execution ownership and recovery remain in `internal/execution`;
+storage policy remains in `internal/environment`. Bridge, broker, and private
+DinD lifetimes follow the launcher and must follow future supervision. DinD
+shares workspace and socket storage, without agent state or credentials.
 
 ### Codex integration
 

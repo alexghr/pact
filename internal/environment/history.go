@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/state"
@@ -28,13 +28,13 @@ func Threads(ctx context.Context, env state.Environment, image string, owner *ex
 	if err := owned(ctx, "volume", env.NixVolume, env.NixVolume); err != nil {
 		return nil, fmt.Errorf("read session tools: %w", err)
 	}
-	args := []string{"--network", "none",
-		"--mount", "type=volume,src=" + env.StateVolume + ",dst=/home/pact/.codex,volume-nocopy",
-		"--env", "HOST_UID=" + strconv.Itoa(os.Getuid()), "--env", "HOST_GID=" + strconv.Itoa(os.Getgid()),
+	config := docker.ContainerConfig{Image: image, Network: "none",
+		Mounts:  []docker.Mount{{Type: "volume", Source: env.StateVolume, Target: "/home/pact/.codex", NoCopy: true}},
+		Env:     []string{"HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid())},
+		Command: []string{"--list-threads"},
 	}
-	args = append(args, Mounts(env)...)
-	args = append(args, image, "--list-threads")
-	resource, err := owner.CreateContainer(ctx, "pact-history-", image, args)
+	ConfigureContainer(env, &config)
+	resource, err := owner.CreateContainer(ctx, "pact-history-", config)
 	if err != nil {
 		return nil, err
 	}
@@ -43,11 +43,8 @@ func Threads(ctx context.Context, env state.Environment, image string, owner *ex
 		defer cancel()
 		runErr = errors.Join(runErr, owner.Remove(cleanupCtx, resource))
 	}()
-	cmd := exec.CommandContext(ctx, "docker", "start", "--attach", resource.ContainerID)
-	cmd.WaitDelay = 5 * time.Second
 	var output, diagnostics bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &output, &diagnostics
-	if err := cmd.Run(); err != nil {
+	if _, err := docker.Attach(ctx, resource.ContainerID, docker.AttachOptions{Streams: docker.Streams{Stdout: &output, Stderr: &diagnostics}}); err != nil {
 		return nil, fmt.Errorf("query saved conversations: %w: %s", err, strings.TrimSpace(diagnostics.String()))
 	}
 	var event harness.Event

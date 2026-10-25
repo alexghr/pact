@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"time"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/execution"
 )
 
@@ -25,13 +25,16 @@ func Start(ctx context.Context, owner *execution.Owner, workspace string) (strin
 	if err != nil {
 		return "", err
 	}
-	sidecar, err := owner.CreateContainer(ctx, "pact-dind-", dindImage, []string{"--privileged",
-		"--env", "DOCKER_TLS_CERTDIR=",
-		"--volume", volume.Name + ":/run/pact-docker",
-		"--volume", workspace + ":/home/pact/workspace",
-		dindImage, "dockerd", "--host=" + Socket})
+	sidecar, err := owner.CreateContainer(ctx, "pact-dind-", docker.ContainerConfig{
+		Image: dindImage, Privileged: true, Env: []string{"DOCKER_TLS_CERTDIR="},
+		Mounts: []docker.Mount{
+			{Type: "volume", Source: volume.Name, Target: SocketDir},
+			{Type: "bind", Source: workspace, Target: "/home/pact/workspace"},
+		},
+		Command: []string{"dockerd", "--host=" + Socket},
+	})
 	if err == nil {
-		err = runDocker(ctx, "start", sidecar.ContainerID)
+		err = docker.StartContainer(ctx, sidecar.ContainerID)
 	}
 	if err != nil {
 		return "", fmt.Errorf("start DinD sidecar: %w", errors.Join(err, context.Cause(ctx)))
@@ -40,11 +43,10 @@ func Start(ctx context.Context, owner *execution.Owner, workspace string) (strin
 	readyCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	for readyCtx.Err() == nil {
-		cmd := exec.CommandContext(readyCtx, "docker", "exec", name, "docker", "--host", Socket, "info")
-		if cmd.Run() == nil {
+		if docker.Exec(readyCtx, name, []string{"docker", "--host", Socket, "info"}, docker.Streams{}) == nil {
 			// The socket is in a private per-session volume. Permit the remapped
 			// agent UID to use it without relying on a host docker group ID.
-			if err := runDocker(readyCtx, "exec", name, "chmod", "0666", "/run/pact-docker/docker.sock"); err != nil {
+			if err := docker.Exec(readyCtx, name, []string{"chmod", "0666", "/run/pact-docker/docker.sock"}, docker.Streams{Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 				return "", errors.Join(err, context.Cause(readyCtx))
 			}
 			return volume.Name, nil
@@ -60,13 +62,7 @@ func Start(ctx context.Context, owner *execution.Owner, workspace string) (strin
 		return "", fmt.Errorf("start DinD sidecar: %w", context.Cause(ctx))
 	}
 	logsCtx, cancelLogs := context.WithTimeout(ctx, 5*time.Second)
-	_ = runDocker(logsCtx, "logs", name)
+	_ = docker.Logs(logsCtx, name, 0, docker.Streams{Stdout: os.Stdout, Stderr: os.Stderr})
 	cancelLogs()
 	return "", fmt.Errorf("DinD sidecar did not become ready within 60 seconds: %w", context.Cause(readyCtx))
-}
-
-func runDocker(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	return cmd.Run()
 }

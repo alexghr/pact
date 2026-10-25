@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/nix"
 )
 
@@ -26,18 +26,17 @@ func realiseTools(ctx context.Context, daemon string) error {
 	if err := os.CopyFS(dir, files); err != nil {
 		return fmt.Errorf("extract toolset flake: %w", err)
 	}
-	if _, err := docker(ctx, "cp", dir+"/.", daemon+":/opt/pact/toolset"); err != nil {
+	if err := docker.CopyTo(ctx, dir+"/.", daemon, "/opt/pact/toolset"); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "docker", "exec", daemon, "nix", "--store", "daemon", "build",
-		"/opt/pact/toolset#pact-tools", "--no-update-lock-file", "--no-link", "--profile", "/nix/var/nix/profiles/pact-tools")
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := docker.Exec(ctx, daemon, []string{"nix", "--store", "daemon", "build",
+		"/opt/pact/toolset#pact-tools", "--no-update-lock-file", "--no-link", "--profile", "/nix/var/nix/profiles/pact-tools"},
+		docker.Streams{Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 		return fmt.Errorf("realise Pact tools: %w", err)
 	}
 	// Keep the published directory stable: Codex watches skill directories, and
 	// switching an ancestor profile symlink alone does not invalidate its cache.
-	_, err = docker(ctx, "exec", daemon, "bash", "-euc", `
+	_, err = docker.ExecOutput(ctx, daemon, "bash", "-euc", `
 skills=/nix/var/nix/pact-skills
 profile=/nix/var/nix/profiles/pact-tools/share/pact/skills
 mkdir -p "$skills"

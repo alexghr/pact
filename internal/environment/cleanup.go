@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -30,7 +31,7 @@ func Collect(ctx context.Context, store *state.Store) ([]string, error) {
 		if err := owned(ctx, "container", storage.Volume, storage.Volume); err != nil {
 			return nil, fmt.Errorf("restore/start the recorded Nix daemon before cleanup: %w", err)
 		}
-		if _, err := docker(ctx, "exec", storage.Volume, "test", "-d", Roots); err != nil {
+		if _, err := docker.ExecOutput(ctx, storage.Volume, "test", "-d", Roots); err != nil {
 			return nil, err
 		}
 	}
@@ -48,21 +49,21 @@ func Collect(ctx context.Context, store *state.Store) ([]string, error) {
 				return removed, err
 			}
 			// Even an unrecorded/stopped Docker container can still need this state.
-			users, err := docker(ctx, "container", "ls", "--all", "--filter", "volume="+env.StateVolume, "--format", "{{.ID}}")
+			users, err := docker.ContainersUsingVolume(ctx, env.StateVolume)
 			if err != nil {
 				return removed, err
 			}
-			if users != "" {
+			if len(users) != 0 {
 				continue
 			}
-			if _, err := docker(ctx, "volume", "rm", env.StateVolume); err != nil {
+			if err := docker.RemoveVolume(ctx, env.StateVolume); err != nil {
 				return removed, err
 			}
 		}
 		// Provisioning creates environment roots only after shared provisioning is
 		// recorded. A partial setup before that point has no roots to remove.
 		if storage.Provisioned {
-			if _, err := docker(ctx, "exec", storage.Volume, "rm", "-rf", "--", Roots+env.ID); err != nil {
+			if _, err := docker.ExecOutput(ctx, storage.Volume, "rm", "-rf", "--", Roots+env.ID); err != nil {
 				return removed, err
 			}
 		}

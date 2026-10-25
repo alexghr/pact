@@ -3,15 +3,14 @@ package environment
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
 )
@@ -19,43 +18,17 @@ import (
 const ownershipLabel = "me.alexghr.pact.storage"
 const Roots = "/nix/var/nix/gcroots/environments/"
 
-func docker(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("docker %s: %w: %s", args[0], err, strings.TrimSpace(string(output)))
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
 func exists(ctx context.Context, kind, name string) (bool, error) {
-	args := []string{kind, "ls", "--filter", "name=" + name, "--format", "{{.Name}}"}
-	if kind == "container" {
-		args = []string{"container", "ls", "--all", "--filter", "name=" + name, "--format", "{{.Names}}"}
-	}
-	output, err := docker(ctx, args...)
-	for line := range strings.Lines(output) {
-		if strings.TrimSpace(line) == name {
-			return true, err
-		}
-	}
-	return false, err
+	info, err := docker.Inspect(ctx, kind, name)
+	return info != nil, err
 }
 
 func owned(ctx context.Context, kind, name, owner string) error {
-	field := ".Labels"
-	if kind == "container" {
-		field = ".Config.Labels"
-	}
-	output, err := docker(ctx, kind, "inspect", "--format", "{{json "+field+"}}", name)
+	info, err := docker.Inspect(ctx, kind, name)
 	if err != nil {
 		return err
 	}
-	var labels map[string]string
-	if err := json.Unmarshal([]byte(output), &labels); err != nil {
-		return err
-	}
-	if labels[ownershipLabel] != owner {
+	if info == nil || info.Labels[ownershipLabel] != owner {
 		return fmt.Errorf("refusing unowned Docker %s %s", kind, name)
 	}
 	return nil
@@ -70,7 +43,7 @@ func volume(ctx context.Context, name, owner string, provisioned bool) error {
 		if provisioned {
 			return fmt.Errorf("established volume %s is missing; restore it from backup before retrying", name)
 		}
-		if _, err := docker(ctx, "volume", "create", "--label", ownershipLabel+"="+owner, name); err != nil {
+		if err := docker.CreateVolume(ctx, name, map[string]string{ownershipLabel: owner}); err != nil {
 			return err
 		}
 	}
@@ -117,14 +90,14 @@ func Prepare(ctx context.Context, store *state.Store, env state.Environment) err
 		return err
 	}
 	if !found {
-		_, err = docker(ctx, "create", "--name", storage.Volume, "--restart", "unless-stopped",
-			"--label", ownershipLabel+"="+storage.Volume,
+		_, err = docker.CreateContainer(ctx, docker.ContainerConfig{
+			Name: storage.Volume, Image: daemonImage, Restart: "unless-stopped",
+			Labels: map[string]string{ownershipLabel: storage.Volume},
 			// Docker initializes an empty volume from upstream Nix's own store.
-			"--mount", "type=volume,src="+storage.Volume+",dst=/nix",
-			"--env", "PACT_STORAGE_ID="+storage.Volume,
-			"--env", "PACT_STORAGE_PROVISIONED="+strconv.FormatBool(storage.Provisioned),
-			"--env", "HOST_UID="+strconv.Itoa(os.Getuid()), "--env", "HOST_GID="+strconv.Itoa(os.Getgid()),
-			daemonImage)
+			Mounts: []docker.Mount{{Type: "volume", Source: storage.Volume, Target: "/nix"}},
+			Env: []string{"PACT_STORAGE_ID=" + storage.Volume, "PACT_STORAGE_PROVISIONED=" + strconv.FormatBool(storage.Provisioned),
+				"HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid())},
+		})
 		if err != nil {
 			return err
 		}
@@ -132,26 +105,30 @@ func Prepare(ctx context.Context, store *state.Store, env state.Environment) err
 	if err := owned(ctx, "container", storage.Volume, storage.Volume); err != nil {
 		return err
 	}
-	currentImage, err := docker(ctx, "inspect", "--format", "{{.Config.Image}}", storage.Volume)
+	info, err := docker.Inspect(ctx, "container", storage.Volume)
 	if err != nil {
 		return err
 	}
-	if currentImage != daemonImage {
-		return fmt.Errorf("incompatible Nix daemon %s: running image %s, this Pact requires %s; use the matching Pact version or stop all sessions and upgrade the daemon before retrying", storage.Volume, currentImage, daemonImage)
+	if info == nil {
+		return fmt.Errorf("Nix daemon %s disappeared before start", storage.Volume)
 	}
-	if _, err := docker(ctx, "start", storage.Volume); err != nil {
+	if info.Config.Image != daemonImage {
+		return fmt.Errorf("incompatible Nix daemon %s: running image %s, this Pact requires %s; use the matching Pact version or stop all sessions and upgrade the daemon before retrying", storage.Volume, info.Config.Image, daemonImage)
+	}
+	if err := docker.StartContainer(ctx, storage.Volume); err != nil {
 		return err
 	}
 	readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	for {
-		if _, err := docker(readyCtx, "exec", storage.Volume, "nix", "--store", "daemon", "store", "info"); err == nil {
+		if _, err := docker.ExecOutput(readyCtx, storage.Volume, "nix", "--store", "daemon", "store", "info"); err == nil {
 			break
 		}
-		running, err := docker(readyCtx, "inspect", "--format", "{{.State.Running}}", storage.Volume)
-		if err != nil || running != "true" {
-			logs, _ := docker(ctx, "logs", "--tail", "20", storage.Volume)
-			return errors.Join(fmt.Errorf("Nix daemon failed to start: %s", logs), err)
+		info, err := docker.Inspect(readyCtx, "container", storage.Volume)
+		if err != nil || info == nil || !info.State.Running {
+			var logs strings.Builder
+			_ = docker.Logs(ctx, storage.Volume, 20, docker.Streams{Stdout: &logs, Stderr: &logs})
+			return errors.Join(fmt.Errorf("Nix daemon failed to start: %s", logs.String()), err)
 		}
 		select {
 		case <-readyCtx.Done():
@@ -168,7 +145,7 @@ func Prepare(ctx context.Context, store *state.Store, env state.Environment) err
 	// A direct directory mount at the same absolute path in both namespaces
 	// makes environment roots resolvable even when its agent is stopped.
 	// Profile generations retain tool versions used before a live update.
-	if _, err := docker(ctx, "exec", storage.Volume, "sh", "-ec",
+	if _, err := docker.ExecOutput(ctx, storage.Volume, "sh", "-ec",
 		`mkdir -p "$1/toolsets"
 chown "$2:$3" "$1"
 tools=$(readlink -f /nix/var/nix/profiles/pact-tools)
@@ -178,11 +155,11 @@ ln -sfn "$tools" "$1/toolsets/${tools##*/}"`, "sh", Roots+env.ID, strconv.Itoa(o
 	return store.ProvisionEnvironment(ctx, env.ID)
 }
 
-// Mounts only grants writes to this environment's roots, never the store/DB.
-func Mounts(env state.Environment) []string {
-	return []string{
-		"--mount", "type=volume,src=" + env.NixVolume + ",dst=/nix,readonly,volume-nocopy",
-		"--mount", "type=volume,src=" + env.NixVolume + ",volume-subpath=var/nix/gcroots/environments/" + env.ID + ",dst=" + Roots + env.ID + ",volume-nocopy",
-		"--env", "NIX_REMOTE=daemon", "--env", "PACT_NIX_ROOTS=" + Roots + env.ID,
-	}
+// ConfigureContainer only grants writes to this environment's roots, never the store/DB.
+func ConfigureContainer(env state.Environment, config *docker.ContainerConfig) {
+	config.Mounts = append(config.Mounts,
+		docker.Mount{Type: "volume", Source: env.NixVolume, Target: "/nix", ReadOnly: true, NoCopy: true},
+		docker.Mount{Type: "volume", Source: env.NixVolume, Subpath: "var/nix/gcroots/environments/" + env.ID, Target: Roots + env.ID, NoCopy: true},
+	)
+	config.Env = append(config.Env, "NIX_REMOTE=daemon", "PACT_NIX_ROOTS="+Roots+env.ID)
 }

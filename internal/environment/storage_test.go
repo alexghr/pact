@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
@@ -173,17 +174,17 @@ func TestWorkspaceRemovalWithSurvivingContainer(t *testing.T) {
 		}
 	}()
 	const image = "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
-	resource, err := owner.CreateContainer(ctx, "pact-cleanup-test-", image, []string{"--network", "none", image, "sleep", "infinity"})
+	resource, err := owner.CreateContainer(ctx, "pact-cleanup-test-", docker.ContainerConfig{Image: image, Network: "none", Command: []string{"sleep", "infinity"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := docker(ctx, "start", resource.ContainerID); err != nil {
+	if _, err := dockerOutput(ctx, "start", resource.ContainerID); err != nil {
 		t.Fatal(err)
 	}
 	if err := RemoveWorkspace(ctx, store, launch.SessionID); err == nil || !strings.Contains(err.Error(), resource.Name) {
 		t.Fatalf("surviving writer allowed removal or was unidentified: %v", err)
 	}
-	if _, err := docker(ctx, "kill", resource.ContainerID); err != nil {
+	if _, err := dockerOutput(ctx, "kill", resource.ContainerID); err != nil {
 		t.Fatal(err)
 	}
 	t.Run("uncertain writer", func(t *testing.T) {
@@ -228,12 +229,12 @@ func TestSharedStorage(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
-		_, _ = docker(cleanupCtx, "rm", "--force", shared)
+		_, _ = dockerOutput(cleanupCtx, "rm", "--force", shared)
 		for _, env := range environments {
-			_, _ = docker(cleanupCtx, "volume", "rm", env.StateVolume)
+			_, _ = dockerOutput(cleanupCtx, "volume", "rm", env.StateVolume)
 		}
 		for _, name := range []string{shared, shared + "-unrelated"} {
-			_, _ = docker(cleanupCtx, "volume", "rm", name)
+			_, _ = dockerOutput(cleanupCtx, "volume", "rm", name)
 		}
 	})
 	prepare := func(env state.Environment) error {
@@ -267,29 +268,34 @@ func TestSharedStorage(t *testing.T) {
 		t.Fatalf("empty conversation discovery: %+v, %v", threads, err)
 	}
 	client := func(env state.Environment, script string) (string, error) {
-		args := append([]string{"run", "--rm"}, Mounts(env)...)
-		args = append(args, "--volume", env.StateVolume+":/home/pact/.codex", "--env", "HOME=/home/pact",
-			"--env", "HOST_UID="+strconv.Itoa(os.Getuid()), "--env", "HOST_GID="+strconv.Itoa(os.Getgid()),
-			"--entrypoint", "/bin/bash", image, "-euc",
-			`usermod --non-unique --uid "$HOST_UID" --gid "$HOST_GID" pact; chown -R pact /home/pact; exec gosu pact /bin/bash -euc "$1"`,
-			"test-client", `export PATH=/opt/pact/tools/bin:$PATH; `+script)
-		return docker(ctx, args...)
+		config := docker.ContainerConfig{Image: image, Remove: true, Entrypoint: "/bin/bash",
+			Mounts: []docker.Mount{{Type: "volume", Source: env.StateVolume, Target: "/home/pact/.codex"}},
+			Env:    []string{"HOME=/home/pact", "HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid())},
+			Command: []string{"-euc",
+				`usermod --non-unique --uid "$HOST_UID" --gid "$HOST_GID" pact; chown -R pact /home/pact; exec gosu pact /bin/bash -euc "$1"`,
+				"test-client", `export PATH=/opt/pact/tools/bin:$PATH; ` + script},
+		}
+		ConfigureContainer(env, &config)
+		var output strings.Builder
+		err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &output})
+		return strings.TrimSpace(output.String()), err
 	}
 	// An already-running container must see new tools through the stable profile.
 	live := shared + "-live"
-	liveArgs := append([]string{"run", "--detach", "--name", live}, Mounts(environments[0])...)
-	liveArgs = append(liveArgs, "--user", strconv.Itoa(os.Getuid())+":"+strconv.Itoa(os.Getgid()),
-		"--entrypoint", "/bin/bash", image, "-ec", "exec sleep infinity")
-	if _, err := docker(ctx, liveArgs...); err != nil {
+	liveConfig := docker.ContainerConfig{Name: live, Image: image, Detach: true,
+		User:       strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
+		Entrypoint: "/bin/bash", Command: []string{"-ec", "exec sleep infinity"}}
+	ConfigureContainer(environments[0], &liveConfig)
+	if err := docker.RunContainer(ctx, liveConfig, docker.Streams{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		cleanupCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stop()
-		_, _ = docker(cleanupCtx, "rm", "--force", live)
+		_, _ = dockerOutput(cleanupCtx, "rm", "--force", live)
 	})
 	liveCommand := func(script string) (string, error) {
-		return docker(ctx, "exec", live, "/bin/bash", "-ec", "export PATH=/opt/pact/tools/bin:$PATH; "+script)
+		return dockerOutput(ctx, "exec", live, "/bin/bash", "-ec", "export PATH=/opt/pact/tools/bin:$PATH; "+script)
 	}
 	if _, err := liveCommand("test -r /etc/codex/skills/graphene-stacked-prs/SKILL.md; ! command -v pact-live-tool"); err != nil {
 		t.Fatal(err)
@@ -316,7 +322,7 @@ builtins.derivation {
 	if output, err := liveCommand("pact-live-tool"); err != nil || output != "live" {
 		t.Fatalf("running agent did not see the new tool: %v: %s", err, output)
 	}
-	if _, err := docker(ctx, "exec", shared, "ln", "-s", "/nix/var/nix/pact-skills/graphene-stacked-prs", "/nix/var/nix/pact-skills/pact-stale"); err != nil {
+	if _, err := dockerOutput(ctx, "exec", shared, "ln", "-s", "/nix/var/nix/pact-skills/graphene-stacked-prs", "/nix/var/nix/pact-skills/pact-stale"); err != nil {
 		t.Fatal(err)
 	}
 	if err := prepare(environments[1]); err != nil {
@@ -325,7 +331,7 @@ builtins.derivation {
 	if _, err := liveCommand("! command -v pact-live-tool; test ! -e /etc/codex/skills/pact-stale; codex --version"); err != nil {
 		t.Fatalf("launch did not reconcile its pinned toolset: %v", err)
 	}
-	if _, err := docker(ctx, "rm", "--force", live); err != nil {
+	if _, err := dockerOutput(ctx, "rm", "--force", live); err != nil {
 		t.Fatal(err)
 	}
 	build := `
@@ -381,10 +387,10 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	if packagePath != path(second.output) || !strings.Contains(first.output, "shared\n") {
 		t.Fatalf("clients did not reuse and execute one package: %s\n%s", first.output, second.output)
 	}
-	if _, err := docker(ctx, "exec", shared, "nix-store", "--store", "daemon", "--gc"); err != nil {
+	if _, err := dockerOutput(ctx, "exec", shared, "nix-store", "--store", "daemon", "--gc"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := docker(ctx, "rm", "--force", shared); err != nil {
+	if _, err := dockerOutput(ctx, "rm", "--force", shared); err != nil {
 		t.Fatal(err)
 	}
 	for _, env := range environments {
@@ -398,36 +404,36 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	}
 	// A service revision mismatch must leave the existing daemon untouched.
 	oldImage := shared + "-old-daemon"
-	if _, err := docker(ctx, "commit", "--change", "ENV PACT_TEST_REVISION=old", shared, oldImage); err != nil {
+	if _, err := dockerOutput(ctx, "commit", "--change", "ENV PACT_TEST_REVISION=old", shared, oldImage); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		cleanupCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stop()
-		_, _ = docker(cleanupCtx, "rm", "--force", shared)
-		_, _ = docker(cleanupCtx, "image", "rm", oldImage)
+		_, _ = dockerOutput(cleanupCtx, "rm", "--force", shared)
+		_, _ = dockerOutput(cleanupCtx, "image", "rm", oldImage)
 	})
-	if _, err := docker(ctx, "rm", "--force", shared); err != nil {
+	if _, err := dockerOutput(ctx, "rm", "--force", shared); err != nil {
 		t.Fatal(err)
 	}
-	oldID, err := docker(ctx, "run", "--detach", "--name", shared, "--mount", "type=volume,src="+shared+",dst=/nix", oldImage)
+	oldID, err := dockerOutput(ctx, "run", "--detach", "--name", shared, "--mount", "type=volume,src="+shared+",dst=/nix", oldImage)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := prepare(environments[0]); err == nil || !strings.Contains(err.Error(), "incompatible Nix daemon") {
 		t.Fatalf("daemon mismatch was accepted: %v", err)
 	}
-	if id, err := docker(ctx, "inspect", "--format", "{{.Id}}", shared); err != nil || id != oldID {
+	if id, err := dockerOutput(ctx, "inspect", "--format", "{{.Id}}", shared); err != nil || id != oldID {
 		t.Fatalf("incompatible daemon was replaced: %s, %v", id, err)
 	}
-	if _, err := docker(ctx, "exec", shared, "nix", "--store", "daemon", "store", "info"); err != nil {
+	if _, err := dockerOutput(ctx, "exec", shared, "nix", "--store", "daemon", "store", "info"); err != nil {
 		t.Fatalf("incompatible daemon was interrupted: %v", err)
 	}
 	// Simulate an intentional Docker wipe: the catalogue and private state remain.
-	if _, err := docker(ctx, "rm", "--force", shared); err != nil {
+	if _, err := dockerOutput(ctx, "rm", "--force", shared); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := docker(ctx, "volume", "rm", shared); err != nil {
+	if _, err := dockerOutput(ctx, "volume", "rm", shared); err != nil {
 		t.Fatal(err)
 	}
 	for _, env := range environments {
@@ -442,7 +448,7 @@ readlink -f "$PACT_NIX_ROOTS/package"
 		}
 	}
 	// Established private state must never be replaced with an empty volume.
-	if _, err := docker(ctx, "volume", "rm", environments[0].StateVolume); err != nil {
+	if _, err := dockerOutput(ctx, "volume", "rm", environments[0].StateVolume); err != nil {
 		t.Fatal(err)
 	}
 	if err := Prepare(ctx, store, environments[0]); err == nil || !strings.Contains(err.Error(), "restore") {
@@ -474,19 +480,19 @@ readlink -f "$PACT_NIX_ROOTS/package"
 		if i == 1 {
 			// A stopped container retains storage too, even without catalogue refs.
 			name := env.StateVolume + "-client"
-			if _, err := docker(ctx, "create", "--name", name, "--volume", env.StateVolume+":/state", image); err != nil {
+			if _, err := dockerOutput(ctx, "create", "--name", name, "--volume", env.StateVolume+":/state", image); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
 				cleanupCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 				defer stop()
-				_, _ = docker(cleanupCtx, "rm", "--force", name)
+				_, _ = dockerOutput(cleanupCtx, "rm", "--force", name)
 			})
 			removed, err = Collect(ctx, store)
 			if err != nil || len(removed) != 0 {
 				t.Fatalf("GC ignored a Docker container reference: %v, %v", removed, err)
 			}
-			if _, err := docker(ctx, "rm", name); err != nil {
+			if _, err := dockerOutput(ctx, "rm", name); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -497,10 +503,10 @@ readlink -f "$PACT_NIX_ROOTS/package"
 		if found, err := exists(ctx, "volume", env.StateVolume); err != nil || found {
 			t.Fatalf("private volume survived GC: %v, %v", found, err)
 		}
-		if _, err := docker(ctx, "exec", shared, "test", "!", "-e", Roots+env.ID); err != nil {
+		if _, err := dockerOutput(ctx, "exec", shared, "test", "!", "-e", Roots+env.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := docker(ctx, "exec", shared, "nix-store", "--store", "daemon", "--gc"); err != nil {
+		if _, err := dockerOutput(ctx, "exec", shared, "nix-store", "--store", "daemon", "--gc"); err != nil {
 			t.Fatal(err)
 		}
 		if i == 0 {
@@ -509,7 +515,7 @@ readlink -f "$PACT_NIX_ROOTS/package"
 			}
 		}
 	}
-	if _, err := docker(ctx, "exec", shared, "test", "!", "-e", packagePath); err != nil {
+	if _, err := dockerOutput(ctx, "exec", shared, "test", "!", "-e", packagePath); err != nil {
 		t.Fatalf("dropping the last environment root did not release its package: %v", err)
 	}
 	if err := owned(ctx, "volume", shared, shared); err != nil {
@@ -524,7 +530,7 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	env := launch.Environment
 	environments = append(environments, env)
 	for _, name := range []string{env.StateVolume, shared + "-unrelated"} {
-		if _, err := docker(ctx, "volume", "create", name); err != nil {
+		if _, err := dockerOutput(ctx, "volume", "create", name); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -532,7 +538,7 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	if _, err := Collect(ctx, store); err == nil || !strings.Contains(err.Error(), "unowned") {
 		t.Fatalf("GC accepted an unowned volume: %v", err)
 	}
-	if _, err := docker(ctx, "volume", "rm", env.StateVolume); err != nil {
+	if _, err := dockerOutput(ctx, "volume", "rm", env.StateVolume); err != nil {
 		t.Fatal(err)
 	}
 	if err := volume(ctx, env.StateVolume, env.ID, false); err != nil {
@@ -544,4 +550,13 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	if found, err := exists(ctx, "volume", shared+"-unrelated"); err != nil || !found {
 		t.Fatalf("GC reclaimed unrelated storage: %v, %v", found, err)
 	}
+}
+
+// Fixture operations use the real CLI independently of Pact's resource policy.
+func dockerOutput(ctx context.Context, args ...string) (string, error) {
+	output, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker %s: %w: %s", args[0], err, strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output)), nil
 }

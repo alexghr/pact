@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
@@ -153,9 +154,10 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	}
 	finished := make(chan result, 1)
 	go func() {
-		started, err := runContainer(runCtx, owner, image, []string{"run", "--label", label,
-			"--network", "none", "--entrypoint", "/bin/bash", image,
-			"-euc", "printf 'ready\\n'; exec sleep infinity"}, func() error { return nil }, func(input io.Reader) error {
+		started, err := runContainer(runCtx, owner, docker.ContainerConfig{
+			Image: image, Labels: map[string]string{"me.alexghr.pact.test": strings.TrimPrefix(label, "me.alexghr.pact.test=")},
+			Network: "none", Entrypoint: "/bin/bash", Command: []string{"-euc", "printf 'ready\\n'; exec sleep infinity"},
+		}, func() error { return nil }, func(input io.Reader) error {
 			reader := bufio.NewReader(input)
 			line, err := reader.ReadString('\n')
 			if err != nil || line != "ready\n" {

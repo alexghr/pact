@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/csv"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/dind"
+	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/environment"
 	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/gitbroker"
@@ -98,66 +98,41 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	return cfg, nil
 }
 
-func bindMount(source, target string, readonly bool) string {
-	// Docker's --mount uses CSV, so quote paths that contain commas.
-	var mount strings.Builder
-	writer := csv.NewWriter(&mount)
-	fields := []string{"type=bind", "source=" + source, "target=" + target}
-	if readonly {
-		fields = append(fields, "readonly")
-	}
-	_ = writer.Write(fields)
-	writer.Flush()
-	return strings.TrimSuffix(mount.String(), "\n")
-}
-
-func dockerArgs(cfg agentConfig, image string, uid, gid int, runtimeOptions ...string) []string {
-	args := []string{"run"}
-	if cfg.prompt == "" {
-		args = append(args, "-it")
+func agentContainer(cfg agentConfig, image string, uid, gid int) docker.ContainerConfig {
+	config := docker.ContainerConfig{
+		Image: image, TTY: cfg.prompt == "", Interactive: cfg.prompt == "",
+		Mounts: []docker.Mount{
+			{Type: "bind", Source: cfg.workspace, Target: "/home/pact/workspace"},
+			{Type: "volume", Source: cfg.environment.StateVolume, Target: "/home/pact/.codex"},
+			{Type: "bind", Source: cfg.authFile, Target: "/home/pact/.codex/auth.json", ReadOnly: true},
+		},
+		Env: []string{"HOST_UID=" + strconv.Itoa(uid), "HOST_GID=" + strconv.Itoa(gid),
+			"PACT_GIT_NAME=" + cfg.git.Name, "PACT_GIT_EMAIL=" + cfg.git.Email,
+			"PACT_GIT_URL=" + cfg.bridge.AgentURL() + gitbroker.HandlerPath,
+			"PACT_EVENTS_URL=" + cfg.bridge.AgentURL() + "/harness/events"},
+		Command: []string{cfg.prompt, cfg.model, cfg.effort},
 	}
 	if cfg.hostNet {
-		args = append(args, "--network", "host")
+		config.Network = "host"
 	}
-	args = append(args,
-		"--mount", bindMount(cfg.workspace, "/home/pact/workspace", false),
-		"--volume", cfg.environment.StateVolume+":/home/pact/.codex",
-		"--env", "HOST_UID="+strconv.Itoa(uid),
-		"--env", "HOST_GID="+strconv.Itoa(gid),
-	)
-	args = append(args, "--mount", bindMount(cfg.authFile, "/home/pact/.codex/auth.json", true))
-	args = append(args, environment.Mounts(cfg.environment)...)
+	environment.ConfigureContainer(cfg.environment, &config)
 	if cfg.resumeID > 0 {
-		args = append(args, "--env", "PACT_RESUME_THREAD="+cfg.threadID)
+		config.Env = append(config.Env, "PACT_RESUME_THREAD="+cfg.threadID)
 	}
-	if cfg.bridge != nil {
-		bridgeConfig := cfg.bridge.ContainerConfig()
-		for _, mount := range bridgeConfig.ReadOnlyMounts {
-			args = append(args, "--mount", bindMount(mount.Source, mount.Target, true))
-		}
-		for _, env := range bridgeConfig.Env {
-			args = append(args, "--env", env)
-		}
+	bridgeConfig := cfg.bridge.ContainerConfig()
+	for _, mount := range bridgeConfig.ReadOnlyMounts {
+		config.Mounts = append(config.Mounts, docker.Mount{Type: "bind", Source: mount.Source, Target: mount.Target, ReadOnly: true})
 	}
-	args = append(args,
-		"--env", "PACT_GIT_NAME="+cfg.git.Name,
-		"--env", "PACT_GIT_EMAIL="+cfg.git.Email,
-		"--env", "PACT_GIT_URL="+cfg.bridge.AgentURL()+gitbroker.HandlerPath,
-		"--env", "PACT_EVENTS_URL="+cfg.bridge.AgentURL()+"/harness/events",
-	)
-	args = append(args, runtimeOptions...)
-	args = append(args, image, cfg.prompt, cfg.model, cfg.effort)
+	config.Env = append(config.Env, bridgeConfig.Env...)
 	for _, name := range cfg.mcpNames {
-		args = append(args, "--config", fmt.Sprintf(
-			`mcp_servers.%s={url="%s/mcp/%s"}`, name, cfg.bridge.AgentURL(), name,
-		))
+		config.Command = append(config.Command, "--config", fmt.Sprintf(
+			`mcp_servers.%s={url="%s/mcp/%s"}`, name, cfg.bridge.AgentURL(), name))
 	}
-
-	return args
+	return config
 }
 
-func runContainer(ctx context.Context, owner *execution.Owner, image string, args []string, onStart func() error, consume func(io.Reader) error) (started bool, runErr error) {
-	resource, err := owner.CreateContainer(ctx, "pact-agent-", image, args[1:])
+func runContainer(ctx context.Context, owner *execution.Owner, config docker.ContainerConfig, onStart func() error, consume func(io.Reader) error) (started bool, runErr error) {
+	resource, err := owner.CreateContainer(ctx, "pact-agent-", config)
 	if err != nil {
 		return false, err
 	}
@@ -166,47 +141,10 @@ func runContainer(ctx context.Context, owner *execution.Owner, image string, arg
 		defer cancel()
 		runErr = errors.Join(runErr, owner.Remove(cleanupCtx, resource))
 	}()
-	startArgs := []string{"start", "--attach"}
-	if consume == nil {
-		startArgs = append(startArgs, "--interactive")
-	}
-	cmd := exec.CommandContext(ctx, "docker", append(startArgs, resource.ContainerID)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
-	cmd.WaitDelay = 5 * time.Second
-	var events, writer *os.File
-	if consume != nil {
-		var err error
-		events, writer, err = os.Pipe()
-		if err != nil {
-			return false, err
-		}
-		defer events.Close()
-		defer writer.Close()
-		cmd.Stdout = writer
-	}
-	err = cmd.Start()
-	if writer != nil {
-		// Start gives the child its own descriptor. Close our copy so the reader
-		// sees EOF when the child exits; leaving it open would block consumption.
-		_ = writer.Close()
-	}
-	started = err == nil
-	if started {
-		if err = onStart(); err != nil {
-			_ = cmd.Process.Kill()
-		} else if consume != nil {
-			if err = consume(events); err != nil {
-				_ = cmd.Process.Kill()
-			}
-		}
-		err = errors.Join(err, cmd.Wait())
-	}
-	// Docker reserves these codes for failure to start the container command.
-	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() >= 125 && exitErr.ExitCode() <= 127 {
-		started = false
-	}
-	return started, err
+	return docker.Attach(ctx, resource.ContainerID, docker.AttachOptions{
+		Streams:     docker.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},
+		Interactive: consume == nil, Interrupt: true, OnStart: onStart, Consume: consume,
+	})
 }
 
 func run(args []string) (runErr error) {
@@ -393,13 +331,14 @@ func run(args []string) (runErr error) {
 	}()
 	unlock()
 	unlock = nil
-	var runtimeOptions []string
+	agent := agentContainer(cfg, image, os.Getuid(), os.Getgid())
 	if cfg.dind {
 		name, err := dind.Start(ctx, owner, cfg.workspace)
 		if err != nil {
 			return err
 		}
-		runtimeOptions = []string{"--volume", name + ":" + dind.SocketDir, "--env", "DOCKER_HOST=" + dind.Socket}
+		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "volume", Source: name, Target: dind.SocketDir})
+		agent.Env = append(agent.Env, "DOCKER_HOST="+dind.Socket)
 	}
 	var consume func(io.Reader) error
 	if cfg.prompt != "" {
@@ -407,7 +346,7 @@ func run(args []string) (runErr error) {
 			return codex.ConsumeExec(ctx, input, store, launch, os.Stdout, os.Stderr, cfg.threadID)
 		}
 	}
-	containerStarted, err = runContainer(ctx, owner, image, dockerArgs(cfg, image, os.Getuid(), os.Getgid(), runtimeOptions...), func() error {
+	containerStarted, err = runContainer(ctx, owner, agent, func() error {
 		return store.StartExecution(ctx, launch.ExecutionID, cfg.threadID)
 	}, consume)
 	cleanupErr := owner.Cleanup()
