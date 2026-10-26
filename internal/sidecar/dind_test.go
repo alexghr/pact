@@ -1,4 +1,4 @@
-package dind
+package sidecar
 
 import (
 	"bufio"
@@ -12,7 +12,7 @@ import (
 	"github.com/alexghr/pact/internal/state"
 )
 
-func TestStartCancellation(t *testing.T) {
+func TestDINDStartCancellation(t *testing.T) {
 	if os.Getenv("PACT_TEST_DOCKER") != "1" {
 		t.Skip("set PACT_TEST_DOCKER=1 for real DinD cancellation")
 	}
@@ -58,7 +58,7 @@ func TestStartCancellation(t *testing.T) {
 			stop()
 		}
 	}()
-	_, err = Start(startCtx, owner, launch.Workspace)
+	_, err = StartDINDSidecar(startCtx, owner, launch.Workspace)
 	if err == nil || startCtx.Err() == nil {
 		t.Fatalf("startup was not interrupted at resource creation: %v", err)
 	}

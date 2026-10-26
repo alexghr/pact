@@ -1,4 +1,4 @@
-// Package environment provisions catalogue-owned Docker storage and a Nix daemon.
+// Package environment provisions catalogue-owned Docker storage and Nix tools.
 package environment
 
 import (
@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/sidecar"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -85,56 +84,11 @@ func Prepare(ctx context.Context, store *state.Store, env state.Environment) err
 	if err := volume(ctx, storage.Volume, storage.Volume, false); err != nil {
 		return err
 	}
-	found, err := exists(ctx, "container", storage.Volume)
-	if err != nil {
+	if err := sidecar.StartNixSidecar(ctx, sidecar.NixConfig{
+		Volume: storage.Volume, Image: daemonImage, Provisioned: storage.Provisioned,
+		Labels: map[string]string{ownershipLabel: storage.Volume},
+	}); err != nil {
 		return err
-	}
-	if !found {
-		_, err = docker.CreateContainer(ctx, docker.ContainerConfig{
-			Name: storage.Volume, Image: daemonImage, Restart: "unless-stopped",
-			Labels: map[string]string{ownershipLabel: storage.Volume},
-			// Docker initializes an empty volume from upstream Nix's own store.
-			Mounts: []docker.Mount{{Type: "volume", Source: storage.Volume, Target: "/nix"}},
-			Env: []string{"PACT_STORAGE_ID=" + storage.Volume, "PACT_STORAGE_PROVISIONED=" + strconv.FormatBool(storage.Provisioned),
-				"HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid())},
-		})
-		if err != nil {
-			return err
-		}
-	}
-	if err := owned(ctx, "container", storage.Volume, storage.Volume); err != nil {
-		return err
-	}
-	info, err := docker.Inspect(ctx, "container", storage.Volume)
-	if err != nil {
-		return err
-	}
-	if info == nil {
-		return fmt.Errorf("Nix daemon %s disappeared before start", storage.Volume)
-	}
-	if info.Config.Image != daemonImage {
-		return fmt.Errorf("incompatible Nix daemon %s: running image %s, this Pact requires %s; use the matching Pact version or stop all sessions and upgrade the daemon before retrying", storage.Volume, info.Config.Image, daemonImage)
-	}
-	if err := docker.StartContainer(ctx, storage.Volume); err != nil {
-		return err
-	}
-	readyCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	for {
-		if _, err := docker.ExecOutput(readyCtx, storage.Volume, "nix", "--store", "daemon", "store", "info"); err == nil {
-			break
-		}
-		info, err := docker.Inspect(readyCtx, "container", storage.Volume)
-		if err != nil || info == nil || !info.State.Running {
-			var logs strings.Builder
-			_ = docker.Logs(ctx, storage.Volume, 20, docker.Streams{Stdout: &logs, Stderr: &logs})
-			return errors.Join(fmt.Errorf("Nix daemon failed to start: %s", logs.String()), err)
-		}
-		select {
-		case <-readyCtx.Done():
-			return context.Cause(readyCtx)
-		case <-time.After(100 * time.Millisecond):
-		}
 	}
 	if err := store.ProvisionStorage(ctx); err != nil {
 		return err

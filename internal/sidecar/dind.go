@@ -1,4 +1,4 @@
-package dind
+package sidecar
 
 import (
 	"context"
@@ -11,16 +11,17 @@ import (
 	"github.com/alexghr/pact/internal/execution"
 )
 
-// Socket is the daemon endpoint inside the agent container.
-const Socket = "unix:///run/pact-docker/docker.sock"
+// DINDSocket is the daemon endpoint inside the agent container.
+const DINDSocket = "unix:///run/pact-docker/docker.sock"
 
-// SocketDir is the mount point for the private socket volume.
-const SocketDir = "/run/pact-docker"
+// DINDSocketDir is the mount point for the private socket volume.
+const DINDSocketDir = "/run/pact-docker"
 const dindImage = "docker:29.8.1-dind@sha256:3f3c01aaaebf7cce837356b688b7c059a4749f10bd7660dec7c58fc454a283f0"
 
-// Start creates a private sidecar whose intent and cleanup belong to the caller's
-// execution owner. It shares only the workspace; host credentials stay outside.
-func Start(ctx context.Context, owner *execution.Owner, workspace string) (string, error) {
+// StartDINDSidecar creates a private sidecar and returns its socket volume.
+// Its intent and cleanup belong to the caller's execution owner, even on error.
+// It shares only the workspace; host credentials stay outside.
+func StartDINDSidecar(ctx context.Context, owner *execution.Owner, workspace string) (string, error) {
 	volume, err := owner.CreateVolume(ctx)
 	if err != nil {
 		return "", err
@@ -28,10 +29,10 @@ func Start(ctx context.Context, owner *execution.Owner, workspace string) (strin
 	sidecar, err := owner.CreateContainer(ctx, "pact-dind-", docker.ContainerConfig{
 		Image: dindImage, Privileged: true, Env: []string{"DOCKER_TLS_CERTDIR="},
 		Mounts: []docker.Mount{
-			{Type: "volume", Source: volume.Name, Target: SocketDir},
+			{Type: "volume", Source: volume.Name, Target: DINDSocketDir},
 			{Type: "bind", Source: workspace, Target: "/home/pact/workspace"},
 		},
-		Command: []string{"dockerd", "--host=" + Socket},
+		Command: []string{"dockerd", "--host=" + DINDSocket},
 	})
 	if err == nil {
 		err = docker.StartContainer(ctx, sidecar.ContainerID)
@@ -43,8 +44,8 @@ func Start(ctx context.Context, owner *execution.Owner, workspace string) (strin
 	readyCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	for readyCtx.Err() == nil {
-		if docker.Exec(readyCtx, name, []string{"docker", "--host", Socket, "info"}, docker.Streams{}) == nil {
-			// The socket is in a private per-session volume. Permit the remapped
+		if docker.Exec(readyCtx, name, []string{"docker", "--host", DINDSocket, "info"}, docker.Streams{}) == nil {
+			// The socket is in a private per-execution volume. Permit the remapped
 			// agent UID to use it without relying on a host docker group ID.
 			if err := docker.Exec(readyCtx, name, []string{"chmod", "0666", "/run/pact-docker/docker.sock"}, docker.Streams{Stdout: os.Stdout, Stderr: os.Stderr}); err != nil {
 				return "", errors.Join(err, context.Cause(readyCtx))

@@ -17,13 +17,13 @@ import (
 
 	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/config"
-	"github.com/alexghr/pact/internal/dind"
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/environment"
 	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/sidecar"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -333,12 +333,12 @@ func run(args []string) (runErr error) {
 	unlock = nil
 	agent := agentContainer(cfg, image, os.Getuid(), os.Getgid())
 	if cfg.dind {
-		name, err := dind.Start(ctx, owner, cfg.workspace)
+		name, err := sidecar.StartDINDSidecar(ctx, owner, cfg.workspace)
 		if err != nil {
 			return err
 		}
-		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "volume", Source: name, Target: dind.SocketDir})
-		agent.Env = append(agent.Env, "DOCKER_HOST="+dind.Socket)
+		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "volume", Source: name, Target: sidecar.DINDSocketDir})
+		agent.Env = append(agent.Env, "DOCKER_HOST="+sidecar.DINDSocket)
 	}
 	var consume func(io.Reader) error
 	if cfg.prompt != "" {
