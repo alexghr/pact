@@ -140,6 +140,7 @@ func TestUpgradeRetainsSessionBindingAndStorage(t *testing.T) {
 	}
 	workspace := t.TempDir()
 	_, err = db.Exec(`
+        INSERT INTO shared_storage(singleton,volume,provisioned) VALUES(1,'pact-nix-existing',1);
         INSERT INTO workspaces(id,path,owner,created_at) VALUES(1,?,'operator',1);
         INSERT INTO environments(id,workspace_id,state_volume,nix_volume,created_at,provisioned)
           VALUES('LegacyRoot',1,'pact-state-legacyroot','pact-nix-existing',1,1);
@@ -161,7 +162,7 @@ func TestUpgradeRetainsSessionBindingAndStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if saved.BackendRef != "original" || !saved.Settings.Capabilities.DIND || !saved.Settings.Capabilities.HostNetwork || saved.Workspace != workspace || saved.Storage.Key != "LegacyRoot" ||
-		saved.Storage.StateVolume != "pact-state-legacyroot" || saved.Storage.NixVolume != "pact-nix-existing" || !saved.Storage.Provisioned {
+		saved.Storage.StateVolume != "pact-state-legacyroot" || !saved.Storage.Provisioned {
 		t.Fatalf("upgrade changed session identity or storage: %+v", saved)
 	}
 	if err := store.BindBackendRef(t.Context(), 9, "another"); err != nil {

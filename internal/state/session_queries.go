@@ -30,7 +30,7 @@ const sessionQuery = `
            MAX(s.created_at, COALESCE(x.finished_at, x.started_at, x.created_at, 0)) AS updated_at,
 	       w.path, w.managed, w.status, s.backend, s.backend_ref, s.created_at,
 	       COALESCE(x.status, ''), COALESCE(x.error, ''), COALESCE(x.settings, '{}'),
-	       s.storage_key, s.workspace_id, s.state_volume, s.nix_volume, s.provisioned, COALESCE(x.id, 0)
+	       s.storage_key, s.workspace_id, s.state_volume, s.provisioned, COALESCE(x.id, 0)
 	FROM sessions s
 	JOIN workspaces w ON w.id = s.workspace_id
 	LEFT JOIN executions x ON x.id = (SELECT MAX(id) FROM executions WHERE session_id = s.id)`
@@ -41,7 +41,7 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	err := row.Scan(&session.ID, &session.Title, &session.UpdatedAt, &session.Workspace, &session.WorkspaceManaged, &session.WorkspaceStatus, &session.Backend, &session.BackendRef, &session.CreatedAt,
 		&session.Status, &session.Error, &settings,
 		&session.Storage.Key, &session.WorkspaceID, &session.Storage.StateVolume,
-		&session.Storage.NixVolume, &session.Storage.Provisioned, &session.ExecutionID)
+		&session.Storage.Provisioned, &session.ExecutionID)
 	if err != nil {
 		return session, err
 	}

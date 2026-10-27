@@ -8,9 +8,9 @@ conversation format and interprets the opaque `BackendRef`.
 ## Lifecycle
 
 `cmd/pact` parses flags before setup, opens the host catalogue, and calls
-`session.PrepareNix` to start or reuse shared Nix infrastructure. It then calls
-`session.New` or `session.Restore`, registers `Cleanup`, and calls `Start` with
-an optional prompt. Constructors allocate or restore persistent resources.
+`session.PrepareNix(ctx)` to start or reuse the fixed shared Nix service. It passes
+this runtime handle to `session.New` or `session.Restore`, registers `Cleanup`,
+and calls `Start` with an optional prompt. Constructors allocate or restore persistent resources.
 `Start` owns transient service startup and attached execution. `session.OpenStore`
 resolves the host catalogue location and creates its parent directory;
 `state.Open` accepts an explicit database path and applies migrations.
@@ -21,9 +21,10 @@ and `HostNetwork`. Restoring a session retains its saved settings; it uses curre
 host credentials and service endpoints.
 
 A new session allocates a managed directory when no workspace is supplied,
-records its private agent-state volume and Nix storage references, and prepares
-persistent roots. Restore reuses those identities and validates the recorded
-workspace. It does not search native history or choose another conversation.
+records its private agent-state volume and root key, and prepares persistent
+roots in the supplied Nix store. The shared container and volume names are not
+session data or catalogue entries. Restore reuses the private state and root key,
+and validates the recorded workspace. It does not search native history or choose another conversation.
 
 `Start` loads current host configuration, projects the native login, starts the
 Git broker and private HTTP bridge, starts DinD when requested, creates the agent
@@ -106,9 +107,10 @@ Managed workspace removal is explicit and preserves native state. See
 
 ## Migration and validation
 
-Migrations retain session IDs, workspace paths, physical volumes, ownership keys,
-and Nix roots. Existing sessions receive their earliest recorded native reference,
-falling back to the earliest non-internal cached thread when necessary. The old
+Migrations retain session IDs, workspace paths, private state volumes, and root
+keys. Shared Nix identities are removed from the catalogue; sessions use the
+runtime service supplied by the launcher. Existing sessions receive their earliest
+recorded native reference, falling back to the earliest non-internal cached thread when necessary. The old
 thread catalogue and environment table are removed. Stored Docker/network flags
 become `settings.capabilities.dind` and `settings.capabilities.hostNetwork`.
 The obsolete environment repair/GC commands have been removed; session startup

@@ -8,7 +8,7 @@ import (
 func createSession(t *testing.T, store *Store, path string) Session {
 	t.Helper()
 	record, err := store.CreateSession(t.Context(), Workspace{Path: path, Owner: "operator", Status: "ready"},
-		Session{Backend: "codex", Storage: Storage{Key: rand.Text(), StateVolume: "private", NixVolume: "shared"}})
+		Session{Backend: "codex", Storage: Storage{Key: rand.Text(), StateVolume: "private"}})
 	if err != nil {
 		t.Fatal(err)
 	}

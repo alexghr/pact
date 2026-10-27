@@ -30,10 +30,7 @@ func TestManagedLaunchFailureCanResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	nix, err := store.EnsureSharedStorage(t.Context(), "pact-nix-test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	nix := Nix{Container: "pact-test-nix", Volume: "pact-test-nix-volume"}
 	if _, err := New(t.Context(), store, nix, Options{Title: "Investigate deployment errors", Model: "saved", Capabilities: state.Capabilities{DIND: true, HostNetwork: true}}); err == nil {
 		t.Fatal("launch succeeded without Docker")
 	}

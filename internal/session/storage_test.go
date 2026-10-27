@@ -40,14 +40,10 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	shared := create(alias)
-	if shared.WorkspaceID != first.WorkspaceID || shared.Storage.StateVolume == first.Storage.StateVolume || shared.Storage.NixVolume != first.Storage.NixVolume {
-		t.Fatal("workspace alias lost its registration, private agent state, or shared Nix store")
+	if shared.WorkspaceID != first.WorkspaceID || shared.Storage.StateVolume == first.Storage.StateVolume {
+		t.Fatal("workspace alias lost its registration or private agent state")
 	}
 	if err := store.BindBackendRef(t.Context(), first.ID, "saved"); err != nil {
-		t.Fatal(err)
-	}
-	storage, err := store.SharedStorage(t.Context())
-	if err != nil {
 		t.Fatal(err)
 	}
 	for _, launch := range []state.Session{first, sibling, supplied} {
@@ -93,9 +89,6 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 	if saved, err := store.Session(ctx, first.ID); err != nil || saved.BackendRef != "saved" {
 		t.Fatalf("cleanup lost backend reference: %+v, %v", saved, err)
 	}
-	if after, err := store.SharedStorage(ctx); err != nil || after != storage {
-		t.Fatalf("cleanup changed shared Nix storage: %+v, %v", after, err)
-	}
 }
 
 func TestSharedStorage(t *testing.T) {
@@ -110,10 +103,8 @@ func TestSharedStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	// Keep this destructive integration check separate from the shared daemon.
-	if _, err := store.EnsureSharedStorage(ctx, "pact-test-nix-"+strings.ToLower(rand.Text())); err != nil {
-		t.Fatal(err)
-	}
+	// Use isolated real resources; never remove the operator's shared daemon.
+	nix := Nix{Container: "pact-test-nix-" + strings.ToLower(rand.Text()), Volume: "pact-test-store-" + strings.ToLower(rand.Text())}
 	image, err := container.BuildAgentImage(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +117,7 @@ func TestSharedStorage(t *testing.T) {
 		}
 		environments = append(environments, launch.Storage)
 	}
-	shared := environments[0].NixVolume
+	shared := nix.Container
 	t.Cleanup(func() {
 		cleanupCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
@@ -134,13 +125,10 @@ func TestSharedStorage(t *testing.T) {
 		for _, env := range environments {
 			_, _ = dockerOutput(cleanupCtx, "volume", "rm", env.StateVolume)
 		}
-		for _, name := range []string{shared, shared + "-unrelated"} {
-			_, _ = dockerOutput(cleanupCtx, "volume", "rm", name)
-		}
+		_, _ = dockerOutput(cleanupCtx, "volume", "rm", nix.Volume)
 	})
 	prepare := func(env state.Storage) error {
-		nix, err := PrepareNix(ctx, store)
-		if err != nil {
+		if err := nix.prepare(ctx); err != nil {
 			return err
 		}
 		return prepareStorage(ctx, store, env, nix)
@@ -158,7 +146,7 @@ func TestSharedStorage(t *testing.T) {
 				`usermod --non-unique --uid "$HOST_UID" --gid "$HOST_GID" pact; chown -R pact /home/pact; exec gosu pact /bin/bash -euc "$1"`,
 				"test-client", `export PATH=/opt/pact/tools/bin:$PATH; ` + script},
 		}
-		configureStorage(env, &config)
+		configureStorage(env, nix, &config)
 		var output strings.Builder
 		err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &output})
 		return strings.TrimSpace(output.String()), err
@@ -168,7 +156,7 @@ func TestSharedStorage(t *testing.T) {
 	liveConfig := docker.ContainerConfig{Name: live, Image: image, Detach: true,
 		User:       strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
 		Entrypoint: "/bin/bash", Command: []string{"-ec", "exec sleep infinity"}}
-	configureStorage(environments[0], &liveConfig)
+	configureStorage(environments[0], nix, &liveConfig)
 	if err := docker.RunContainer(ctx, liveConfig, docker.Streams{}); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +287,7 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	if _, err := dockerOutput(ctx, "rm", "--force", shared); err != nil {
 		t.Fatal(err)
 	}
-	oldID, err := dockerOutput(ctx, "run", "--detach", "--name", shared, "--mount", "type=volume,src="+shared+",dst=/nix", oldImage)
+	oldID, err := dockerOutput(ctx, "run", "--detach", "--name", shared, "--mount", "type=volume,src="+nix.Volume+",dst=/nix", oldImage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,9 +304,13 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	if _, err := dockerOutput(ctx, "rm", "--force", shared); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := dockerOutput(ctx, "volume", "rm", shared); err != nil {
+	if _, err := dockerOutput(ctx, "volume", "rm", nix.Volume); err != nil {
 		t.Fatal(err)
 	}
+	// Retained sessions can use a replacement service without catalogue edits.
+	nix.Container += "-replacement"
+	nix.Volume += "-replacement"
+	shared = nix.Container
 	for _, env := range environments {
 		if err := prepare(env); err != nil {
 			t.Fatalf("missing shared cache was not recreated: %v", err)

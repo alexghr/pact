@@ -23,7 +23,6 @@ type Settings struct {
 type Storage struct {
 	Key         string
 	StateVolume string
-	NixVolume   string
 	Provisioned bool
 }
 
@@ -59,8 +58,8 @@ func (s *Store) CreateSession(ctx context.Context, workspace Workspace, session 
 		return Session{}, fmt.Errorf("find workspace: %w", err)
 	}
 	result, err := tx.ExecContext(ctx,
-		"INSERT INTO sessions(workspace_id, storage_key, state_volume, nix_volume, owner, backend, created_at, title) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-		session.WorkspaceID, session.Storage.Key, session.Storage.StateVolume, session.Storage.NixVolume, workspace.Owner, session.Backend, now, session.Title)
+		"INSERT INTO sessions(workspace_id, storage_key, state_volume, owner, backend, created_at, title) VALUES(?, ?, ?, ?, ?, ?, ?)",
+		session.WorkspaceID, session.Storage.Key, session.Storage.StateVolume, workspace.Owner, session.Backend, now, session.Title)
 	if err != nil {
 		return Session{}, fmt.Errorf("record session: %w", err)
 	}

@@ -42,15 +42,11 @@ func createRecord(ctx context.Context, store *state.Store, options Options) (sta
 	if err != nil {
 		return state.Session{}, err
 	}
-	nix, err := store.EnsureSharedStorage(ctx, sharedNixName)
-	if err != nil {
-		return state.Session{}, err
-	}
 	key := rand.Text()
 	record, err := store.CreateSession(ctx, workspace, state.Session{
 		Title: options.Title, Backend: options.Backend,
 		Settings: state.Settings{Model: options.Model, Effort: options.Effort, Capabilities: options.Capabilities},
-		Storage:  state.Storage{Key: key, StateVolume: "pact-state-" + strings.ToLower(key), NixVolume: nix.Volume},
+		Storage:  state.Storage{Key: key, StateVolume: "pact-state-" + strings.ToLower(key)},
 	})
 	if err != nil {
 		return state.Session{}, err

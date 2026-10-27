@@ -9,18 +9,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexghr/pact/internal/nix"
-
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/state"
+	"github.com/alexghr/pact/internal/nix"
 )
 
-const sharedNixName = "pact-nix"
+// Nix is runtime access to the shared daemon and store, independent of the catalogue.
+type Nix struct {
+	Container string
+	Volume    string
+}
 
 // startNixDaemon reuses or creates the shared daemon on an existing volume.
 // The container remains after errors and shutdown.
-func startNixDaemon(ctx context.Context, storage state.SharedStorage, image string) error {
-	name := storage.Volume
+func startNixDaemon(ctx context.Context, nix Nix, image string) error {
+	name := nix.Container
 	info, err := docker.Inspect(ctx, "container", name)
 	if err != nil {
 		return err
@@ -29,9 +31,8 @@ func startNixDaemon(ctx context.Context, storage state.SharedStorage, image stri
 		_, err := docker.CreateContainer(ctx, docker.ContainerConfig{
 			Name: name, Image: image, Restart: "unless-stopped", Labels: map[string]string{ownershipLabel: name},
 			// Docker initializes an empty volume from upstream Nix's own store.
-			Mounts: []docker.Mount{{Type: "volume", Source: name, Target: "/nix"}},
-			Env: []string{"PACT_STORAGE_ID=" + name, "PACT_STORAGE_PROVISIONED=" + strconv.FormatBool(storage.Provisioned),
-				"HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid())},
+			Mounts: []docker.Mount{{Type: "volume", Source: nix.Volume, Target: "/nix"}},
+			Env:    []string{"HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid())},
 		})
 		if err != nil {
 			return err
@@ -73,39 +74,22 @@ func startNixDaemon(ctx context.Context, storage state.SharedStorage, image stri
 	}
 }
 
-// PrepareNix starts or reuses the shared service. Session cleanup retains it.
-func PrepareNix(ctx context.Context, store *state.Store) (state.SharedStorage, error) {
-	storage, err := store.EnsureSharedStorage(ctx, sharedNixName)
-	if err != nil {
-		return storage, err
-	}
+// PrepareNix starts or reuses the fixed shared service. Sessions retain it on exit.
+func PrepareNix(ctx context.Context) (Nix, error) {
+	nix := Nix{Container: "pact-nix", Volume: "pact-nix"}
+	return nix, nix.prepare(ctx)
+}
+
+func (n Nix) prepare(ctx context.Context) error {
 	image, err := container.BuildDaemonImage(ctx)
 	if err != nil {
-		return storage, err
+		return err
 	}
-	info, err := docker.Inspect(ctx, "volume", storage.Volume)
-	if err != nil {
-		return storage, err
+	if err := volume(ctx, n.Volume, n.Volume, false); err != nil {
+		return err
 	}
-	if info == nil && storage.Provisioned {
-		if err := store.ResetStorage(ctx); err != nil {
-			return storage, err
-		}
-		storage.Provisioned = false
-		fmt.Fprintln(os.Stderr, "Shared Nix volume is missing; recreating the package cache. Project dependencies will need rebuilding.")
+	if err := startNixDaemon(ctx, n, image); err != nil {
+		return err
 	}
-	if err := volume(ctx, storage.Volume, storage.Volume, false); err != nil {
-		return storage, err
-	}
-	if err := startNixDaemon(ctx, storage, image); err != nil {
-		return storage, err
-	}
-	if err := store.ProvisionStorage(ctx); err != nil {
-		return storage, err
-	}
-	if err := realiseTools(ctx, storage.Volume); err != nil {
-		return storage, err
-	}
-	storage.Provisioned = true
-	return storage, nil
+	return realiseTools(ctx, n.Container)
 }

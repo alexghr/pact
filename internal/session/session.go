@@ -38,6 +38,7 @@ type Options struct {
 type Session struct {
 	Record                       state.Session
 	store                        *state.Store
+	nix                          Nix
 	configPath                   string
 	bridge                       hostbridge.Bridge
 	broker                       *gitbroker.Broker
@@ -48,7 +49,7 @@ type Session struct {
 	runErr, cleanupErr           error
 }
 
-func New(ctx context.Context, store *state.Store, nix state.SharedStorage, options Options) (*Session, error) {
+func New(ctx context.Context, store *state.Store, nix Nix, options Options) (*Session, error) {
 	record, err := createRecord(ctx, store, options)
 	if err != nil {
 		return nil, err
@@ -56,7 +57,7 @@ func New(ctx context.Context, store *state.Store, nix state.SharedStorage, optio
 	return prepare(ctx, store, nix, record, options.ConfigPath)
 }
 
-func Restore(ctx context.Context, store *state.Store, nix state.SharedStorage, id int64, configPath string) (*Session, error) {
+func Restore(ctx context.Context, store *state.Store, nix Nix, id int64, configPath string) (*Session, error) {
 	record, err := restoreRecord(ctx, store, id)
 	if err != nil {
 		return nil, err
@@ -64,8 +65,8 @@ func Restore(ctx context.Context, store *state.Store, nix state.SharedStorage, i
 	return prepare(ctx, store, nix, record, configPath)
 }
 
-func prepare(ctx context.Context, store *state.Store, nix state.SharedStorage, record state.Session, configPath string) (*Session, error) {
-	s := &Session{store: store, Record: record, configPath: configPath}
+func prepare(ctx context.Context, store *state.Store, nix Nix, record state.Session, configPath string) (*Session, error) {
+	s := &Session{store: store, Record: record, nix: nix, configPath: configPath}
 	if err := prepareStorage(ctx, store, record.Storage, nix); err != nil {
 		s.runErr = err
 		return nil, fmt.Errorf("prepare session %d: %w", record.ID, errors.Join(err, s.Cleanup()))
@@ -134,7 +135,7 @@ func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
 			"PACT_GIT_URL=" + s.bridge.AgentURL() + gitbroker.HandlerPath,
 			"PACT_BINDING_URL=" + s.bridge.AgentURL() + "/harness/binding"},
 	}
-	configureStorage(s.Record.Storage, &agent)
+	configureStorage(s.Record.Storage, s.nix, &agent)
 	bridgeConfig := s.bridge.ContainerConfig()
 	for _, mount := range bridgeConfig.ReadOnlyMounts {
 		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "bind", Source: mount.Source, Target: mount.Target, ReadOnly: true})

@@ -1,20 +1,22 @@
 # Session Nix storage
 
-Each session has a private agent-state volume. All sessions share one
-catalogue-owned Docker volume and a persistent Nix daemon. Docker Engine and
+Each session has a private agent-state volume. All sessions use the Docker volume
+`pact-nix` and persistent daemon container `pact-nix` in the selected Docker
+context. Docker Engine and
 CLI 26 or newer are required for
 [volume subdirectory mounts](https://docs.docker.com/engine/release-notes/26.0/#new).
 
 ## Resource ownership and recovery
 
-The catalogue records the shared volume and each session's private agent
-state volume before Docker creates anything. Storage properties are recorded directly on the session. Pact does not serialize provisioning or cleanup across launcher
-processes; run these operations sequentially. Builds from different sessions
-can run concurrently through the daemon.
+The catalogue records each session's private state volume and root key before
+creating its resources. Shared Nix infrastructure has no catalogue entry or
+per-session reference. The launcher prepares it and passes runtime access to
+new and restored sessions.
 
-Fresh catalogues use `pact-nix` for the shared volume and daemon container;
-existing catalogues keep their recorded name. The daemon has an ownership label
-and Docker's `unless-stopped` restart policy. Session shutdown leaves it running.
+Pact does not serialize provisioning or cleanup across launcher processes; run
+these operations sequentially. Builds from different sessions can run
+concurrently through the daemon. The daemon has an ownership label and Docker's
+`unless-stopped` restart policy. Session shutdown leaves it running.
 Agents mount `/nix` read-only and use `NIX_REMOTE=daemon` over its Unix socket.
 On Docker Desktop for Mac, the socket and named volume stay inside Docker's Linux
 VM; neither is a macOS bind mount. Only the daemon container changes the store
@@ -45,20 +47,24 @@ those generations while running agents may still need them. A failed tool build
 leaves the existing profile available to other agents. No package archive or
 toolset closure is embedded in either Docker image.
 
-Provisioning flags distinguish an interrupted first setup from established
-storage. Retrying setup reuses the recorded names and verifies Docker ownership
-labels. Missing established private state volumes cause an error requesting
-restoration from backup. A missing shared Nix volume is recreated under its
-recorded identity, with a notice that cached dependencies were lost. The baseline
-tools are rebuilt and session root directories are recreated as needed;
-previous package outputs, profiles, and roots require rebuilding. This does not
-recover deleted conversation history. Keep the catalogue and private-volume
-backups together, and use the same Docker context when restarting a session.
+Private state provisioning flags distinguish interrupted setup from established
+session storage. Missing established private state volumes require restoration
+from backup. The shared Nix volume is a rebuildable cache: if it is absent,
+startup creates it, realises the baseline tools, and recreates session root
+directories. Previous package outputs, profiles, and roots need rebuilding.
+This does not replace private conversation history. Keep the catalogue and
+private-volume backups together, and use the same Docker context when restarting
+a session.
 
-Starting or restoring a session prepares its recorded resources. Missing
-established private state must be restored under its original name and storage
-label. The shared volume's label is its own name; a private volume's label is its
-session storage key.
+Docker ownership labels identify Pact resources. The shared volume's label is
+its name; a private volume's label is its session storage key.
+
+Upgrades remove the old shared-volume catalogue entry and per-session Nix volume
+references. Existing sessions keep their workspace, private agent state, and
+root key, and use `pact-nix` on their next launch. Randomly named shared Nix
+containers and volumes are not adopted or removed automatically; their cached
+packages need rebuilding in the fixed store. Retire old resources manually once
+the sessions using them have stopped.
 
 If the daemon container's image hash differs from this Pact's expected revision,
 launch stops with both image references and leaves the existing daemon alone.
@@ -71,28 +77,28 @@ do not require a daemon upgrade.
 
 ## Persistent Nix roots
 
-Every environment gets `/nix/var/nix/gcroots/environments/ENVIRONMENT_ID`.
+Each session gets `/nix/var/nix/gcroots/environments/STORAGE_KEY`.
 The agent mounts only its own directory writable, at exactly the same path seen
 by the daemon. `PACT_NIX_ROOTS` names that directory. The daemon can resolve these
 roots after the agent container exits, independently of client PID namespaces.
 
-Use persistent links there for dependencies that a retained environment needs:
+Use persistent links there for dependencies that a retained session needs:
 
 ```sh
 nix build .#my-package --out-link "$PACT_NIX_ROOTS/my-package"
 nix develop --profile "$PACT_NIX_ROOTS/development"
 ```
 
-The environment's initial tools are also rooted there. A result link solely inside
+The session's initial tools are also rooted there. A result link solely inside
 the workspace, or a temporary process root from `nix shell`, cannot preserve a
 package after the client exits: that path/process is outside the daemon's
 namespace. Project development wrappers must put their persistent profiles or
 roots under `PACT_NIX_ROOTS`; do not rely on the daemon scanning client `/proc`.
-Default user profiles are linked into the environment's roots directory by the
+Default user profiles are linked into the session's roots directory by the
 entrypoint, so profile installations remain rooted too.
 
 Nix owns collection within the running shared store, including space-pressure
-collection if configured. Pact does not schedule Nix GC. Removing an environment's
+collection if configured. Pact does not schedule Nix GC. Removing a session's
 roots makes its otherwise unreachable packages eligible for Nix collection.
 
 ## Cleanup and validation

@@ -104,10 +104,7 @@ func failedSession(t *testing.T, store *state.Store, title string) state.Session
 	// Fail against a real unreachable daemon after the workspace is recorded.
 	t.Setenv("DOCKER_CONTEXT", "")
 	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
-	nix, err := store.EnsureSharedStorage(t.Context(), "pact-nix-test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	nix := session.Nix{Container: "pact-test-nix", Volume: "pact-test-nix-volume"}
 	if _, err := session.New(t.Context(), store, nix, session.Options{Title: title}); err == nil {
 		t.Fatal("session unexpectedly started without Docker")
 	}

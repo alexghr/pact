@@ -99,7 +99,7 @@ func run(args []string) (runErr error) {
 		return err
 	}
 	defer func() { runErr = errors.Join(runErr, store.Close()) }()
-	nix, err := session.PrepareNix(ctx, store)
+	nix, err := session.PrepareNix(ctx)
 	if err != nil {
 		return err
 	}
