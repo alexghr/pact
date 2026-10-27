@@ -45,19 +45,20 @@ saved only after its first message, so leaving it keeps the previous saved
 conversation as the target. Missing, archived, or unreadable saved state produces
 an error rather than starting a different conversation.
 
-Pact prevents concurrent writers in the same workspace or environment and holds
-ownership through cleanup. After a launcher crash, it inspects recorded Docker
-resources before allowing another launch. If a previous container may still be
-running, Pact reports its name and the explicit stop/remove action; retry only
-after stopping it. Interrupted prompts are never replayed automatically.
-Stop agent and DinD containers started by older Pact versions before upgrading.
+Pact records execution outcomes and removes temporary containers and DinD socket
+volumes when the launcher exits normally or handles cancellation. A hard crash
+can leave containers, volumes, and unfinished execution records; remove stray
+resources manually with `docker rm -f` and `docker volume rm`. Pact does not
+recover previous executions or prevent concurrent writers. Stop previous
+containers before resuming or removing their workspace. Interrupted prompts are
+never replayed automatically.
 History from the older global state volume is not imported automatically.
 
 See [storage and recovery](docs/nix-storage.md) for persistent Nix roots,
 `pact environments repair SESSION_ID`, and `pact environments gc`.
 See [managed workspaces](docs/workspaces.md) for allocation and recovery.
 Preview permanent workspace removal with `pact workspaces remove SESSION_ID`,
-then repeat with `--yes` to delete its files after ownership and writer checks.
+then repeat with `--yes` to delete its files after ownership checks.
 Conversation history, private agent state, and shared Nix storage are retained.
 Removal prevents further resume into that workspace; operator-supplied paths
 are never eligible.

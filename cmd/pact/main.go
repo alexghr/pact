@@ -19,7 +19,6 @@ import (
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/environment"
-	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/nix"
@@ -131,20 +130,23 @@ func agentContainer(cfg agentConfig, image string, uid, gid int) docker.Containe
 	return config
 }
 
-func runContainer(ctx context.Context, owner *execution.Owner, config docker.ContainerConfig, onStart func() error, consume func(io.Reader) error) (started bool, runErr error) {
-	resource, err := owner.CreateContainer(ctx, "pact-agent-", config)
+func runContainer(ctx context.Context, config docker.ContainerConfig, onStart func() error, consume func(io.Reader) error) (started, stopped bool, runErr error) {
+	id, err := docker.CreateContainer(ctx, config)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		runErr = errors.Join(runErr, owner.Remove(cleanupCtx, resource))
+		err := docker.RemoveContainer(cleanupCtx, id, true, true)
+		stopped = err == nil
+		runErr = errors.Join(runErr, err)
 	}()
-	return docker.Attach(ctx, resource.ContainerID, docker.AttachOptions{
+	started, runErr = docker.Attach(ctx, id, docker.AttachOptions{
 		Streams:     docker.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},
 		Interactive: consume == nil, Interrupt: true, OnStart: onStart, Consume: consume,
 	})
+	return
 }
 
 func run(args []string) (runErr error) {
@@ -220,13 +222,7 @@ func run(args []string) (runErr error) {
 	fmt.Fprintf(os.Stderr, "Pact session %d\n", launch.SessionID)
 	containerStarted := false
 	runtimeStopped := false
-	var owner *execution.Owner
 	defer func() {
-		var cleanupErr error
-		if owner != nil {
-			cleanupErr = owner.Cleanup()
-			runErr = errors.Join(runErr, cleanupErr)
-		}
 		status := state.Succeeded
 		message := ""
 		if runErr != nil {
@@ -239,17 +235,10 @@ func run(args []string) (runErr error) {
 		if signalCtx.Err() != nil {
 			status = state.Interrupted
 		}
-		if cleanupErr != nil {
-			status = state.Uncertain
-		}
 		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer finishCancel()
 		runErr = errors.Join(runErr, store.FinishExecution(finishCtx, launch.ExecutionID, status, exitCode(runErr), message))
 	}()
-	owner = &execution.Owner{Store: store, Launch: launch}
-	if err := owner.Recover(ctx); err != nil {
-		return err
-	}
 	broker, err := gitbroker.New(cfg.config, cfg.workspace)
 	if err != nil {
 		return fmt.Errorf("start Git broker: %w", err)
@@ -278,7 +267,7 @@ func run(args []string) (runErr error) {
 		return fmt.Errorf("prepare environment for session %d: %w", launch.SessionID, err)
 	}
 	if cfg.resumeID > 0 {
-		if err := refreshSession(ctx, store, launch, image, owner); err != nil {
+		if err := refreshSession(ctx, store, launch, image); err != nil {
 			return err
 		}
 		threads, err := store.Threads(ctx, launch.SessionID)
@@ -310,14 +299,15 @@ func run(args []string) (runErr error) {
 		}
 		refreshCtx, refreshCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer refreshCancel()
-		runErr = errors.Join(runErr, refreshSession(refreshCtx, store, launch, image, owner))
+		runErr = errors.Join(runErr, refreshSession(refreshCtx, store, launch, image))
 	}()
 	agent := agentContainer(cfg, image, os.Getuid(), os.Getgid())
 	if cfg.dind {
-		name, err := sidecar.StartDINDSidecar(ctx, owner, cfg.workspace)
+		name, cleanup, err := sidecar.StartDINDSidecar(ctx, cfg.workspace)
 		if err != nil {
 			return err
 		}
+		defer func() { runErr = errors.Join(runErr, cleanup()) }()
 		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "volume", Source: name, Target: sidecar.DINDSocketDir})
 		agent.Env = append(agent.Env, "DOCKER_HOST="+sidecar.DINDSocket)
 	}
@@ -327,12 +317,9 @@ func run(args []string) (runErr error) {
 			return codex.ConsumeExec(ctx, input, store, launch, os.Stdout, os.Stderr, cfg.threadID)
 		}
 	}
-	containerStarted, err = runContainer(ctx, owner, agent, func() error {
+	containerStarted, runtimeStopped, err = runContainer(ctx, agent, func() error {
 		return store.StartExecution(ctx, launch.ExecutionID, cfg.threadID)
 	}, consume)
-	cleanupErr := owner.Cleanup()
-	runtimeStopped = cleanupErr == nil
-	err = errors.Join(err, cleanupErr)
 	if err != nil {
 		return errors.Join(err, context.Cause(ctx))
 	}

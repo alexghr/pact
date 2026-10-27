@@ -119,7 +119,7 @@ operator action and is not offered by this command.
 ## Validation
 
 `PACT_TEST_DOCKER=1 ./shell go test ./internal/environment -run TestSharedStorage -count=1`
-uses disposable real Docker volumes and the embedded image. It checks concurrent
+uses disposable real Docker volumes and the embedded image. It checks sequential
 provisioning, a project-source build through the daemon, package reuse and
 execution through read-only mounts, private persistent state, retained roots
 after explicit Nix collection, live tool updates and pinned-toolset reconciliation,

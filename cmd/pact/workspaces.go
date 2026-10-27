@@ -60,7 +60,7 @@ func manageWorkspaces(args []string, output io.Writer) (runErr error) {
 	if !*yes {
 		fmt.Fprintln(output, "Removal permanently deletes all workspace files, including untracked files, local commits, and build output.")
 		fmt.Fprintln(output, "All sessions using this directory will lose workspace access. Catalogue, conversation state, and shared Nix storage are retained.")
-		fmt.Fprintf(output, "To request removal after ownership and writer checks: pact workspaces remove %d --yes\n", id)
+		fmt.Fprintf(output, "To request removal after ownership checks: pact workspaces remove %d --yes\n", id)
 		return nil
 	}
 	if err := environment.RemoveWorkspace(ctx, store, id); err != nil {

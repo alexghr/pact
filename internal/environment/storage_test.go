@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
 )
@@ -92,54 +91,6 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRemovalWithSurvivingContainer(t *testing.T) {
-	if os.Getenv("PACT_TEST_DOCKER") != "1" {
-		t.Skip("set PACT_TEST_DOCKER=1 for a real surviving Docker writer")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := state.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Backend: "codex", Owner: fmt.Sprintf("uid:%d", os.Getuid())})
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner := &execution.Owner{Store: store, Launch: launch}
-	defer func() {
-		if err := owner.Cleanup(); err != nil {
-			t.Error(err)
-		}
-	}()
-	const image = "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
-	resource, err := owner.CreateContainer(ctx, "pact-cleanup-test-", docker.ContainerConfig{Image: image, Network: "none", Command: []string{"sleep", "infinity"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := dockerOutput(ctx, "start", resource.ContainerID); err != nil {
-		t.Fatal(err)
-	}
-	if err := RemoveWorkspace(ctx, store, launch.SessionID); err == nil || !strings.Contains(err.Error(), resource.Name) {
-		t.Fatalf("surviving writer allowed removal or was unidentified: %v", err)
-	}
-	if _, err := dockerOutput(ctx, "kill", resource.ContainerID); err != nil {
-		t.Fatal(err)
-	}
-	t.Run("uncertain writer", func(t *testing.T) {
-		t.Setenv("DOCKER_CONTEXT", "")
-		t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
-		if err := RemoveWorkspace(ctx, store, launch.SessionID); err == nil {
-			t.Fatal("unreachable daemon allowed workspace removal")
-		}
-	})
-	if err := RemoveWorkspace(ctx, store, launch.SessionID); err != nil {
-		t.Fatalf("stopped writer blocked explicit removal: %v", err)
-	}
-}
-
 func TestSharedStorage(t *testing.T) {
 	if os.Getenv("PACT_TEST_DOCKER") != "1" {
 		t.Skip("set PACT_TEST_DOCKER=1 for disposable real Docker/Nix storage checks")
@@ -157,14 +108,12 @@ func TestSharedStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	var environments []state.Environment
-	var launches []state.Launch
 	for range 2 {
 		launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Owner: "test", Backend: "codex"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		environments = append(environments, launch.Environment)
-		launches = append(launches, launch)
 	}
 	shared := environments[0].NixVolume
 	t.Cleanup(func() {
@@ -188,13 +137,7 @@ func TestSharedStorage(t *testing.T) {
 	}
 	// Query through the actual bundled harness, including first-use ownership
 	// setup. An empty store must not start a conversation or an inference turn.
-	owner := &execution.Owner{Store: store, Launch: launches[0]}
-	t.Cleanup(func() {
-		if err := owner.Cleanup(); err != nil {
-			t.Error(err)
-		}
-	})
-	threads, err := Threads(ctx, environments[0], image, owner)
+	threads, err := Threads(ctx, environments[0], image)
 	if err != nil || len(threads) != 0 {
 		t.Fatalf("empty conversation discovery: %+v, %v", threads, err)
 	}

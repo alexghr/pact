@@ -7,14 +7,13 @@ import (
 	"net/http"
 
 	"github.com/alexghr/pact/internal/environment"
-	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/state"
 )
 
 // Refresh asks the harness for saved conversation metadata.
-func refreshSession(ctx context.Context, store *state.Store, launch state.Launch, image string, owner *execution.Owner) error {
-	threads, err := environment.Threads(ctx, launch.Environment, image, owner)
+func refreshSession(ctx context.Context, store *state.Store, launch state.Launch, image string) error {
+	threads, err := environment.Threads(ctx, launch.Environment, image)
 	if err != nil {
 		return err
 	}

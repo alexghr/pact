@@ -20,9 +20,9 @@ app-server switch is an optional next slice if more control proves necessary.
 
 The initial design supports workspaces containing multiple repositories and
 independent sessions running in separate containers. Different workspaces may
-run concurrently. Foreground launch and resume now retain OS ownership of the
-canonical workspace, environment, and private state volume through cleanup.
-Docker resource recovery is described below.
+run concurrently. The foreground launcher records execution outcomes and
+removes its temporary Docker resources on exit. It does not coordinate writers
+or recover resources after a crash.
 
 Status: initial CLI implemented, 18 October 2026. `pact sessions list`, `show`,
 and `threads` expose the host catalogue; `pact resume ID[:THREAD_ID]` continues
@@ -52,37 +52,27 @@ not readiness of a model turn. Build/setup failures and Docker's reserved
 startup exit codes become `startupFailed`; other container failures become
 `failed`. Normal exit becomes `succeeded`, and handled SIGINT/SIGTERM becomes
 `interrupted`. Final bookkeeping has its own bounded context after resource
-cleanup. A hard crash can leave an unfinished record; recovery inspects Docker
-before permitting a replacement.
+cleanup. A hard crash can leave an unfinished record and stray Docker resources;
+the operator removes them manually before launching again.
 
-### Foreground ownership and recovery
+### Foreground resources
 
-Pact currently has no workspace, private-state, or storage locks. Avoid concurrent
-launches, provisioning, or reclamation against the same resources. Recovery
-checks recorded Docker resources but does not serialize launchers.
+The launcher creates the agent container directly and removes it after attached
+execution ends, including handled cancellation. History helpers remove their own
+containers. Private DinD startup returns a cleanup function that removes its
+container and socket volume; the launcher calls it on exit. Cleanup uses bounded
+contexts independent of execution cancellation and reports errors.
 
-`execution_resources` records each agent, history helper, DinD container, and
-DinD socket volume before creation. Resources carry environment, workspace,
-session, execution, and unique resource labels. Container creation and attachment
-are separate operations; Pact records the actual container ID and image digest
-before starting it. Shared Nix resources retain their existing storage ownership.
+There is no resource journal, automatic crash recovery, or workspace/private-state
+locking. A hard crash can leave running containers and volumes behind and an
+unfinished execution in the catalogue. Inspect Docker and remove stray resources
+with `docker rm -f` and `docker volume rm` before resuming or deleting a workspace.
+New launches do not inspect previous executions or reconcile their status.
+Provisioning and reclamation must also be coordinated by the operator.
 
-Recovery inspects unfinished executions and resources
-whose cleanup failed. It removes only stopped resources with matching ownership
-and identity. Running, paused, restarting, changed, or uninspectable resources
-block replacement, with their names and an explicit operator recovery action.
-Uncertain executions remain visible; no prompt is replayed. Once resources are
-confirmed stopped and removed, the old execution becomes interrupted. Execution
-resources are recorded before creation, so an unfinished execution without
-resource records can be marked interrupted without querying Docker.
-
-Stop agent and DinD containers started by older Pact versions before upgrading.
-Recovery inspects recorded resources; it does not scan for containers started by
-versions that did not record their resource identities.
-
-Normal exit and cancellation stop the agent and sidecar before the final native
-history refresh. Cleanup failures are reported and retain durable resource
-records for the next recovery attempt; they do not count as proof of termination.
+After the agent is removed, Pact refreshes native history. The launcher records
+its final outcome after cleanup. Persistent private agent state and the shared
+Nix daemon/store are retained.
 
 ## Authentication
 
@@ -273,8 +263,8 @@ Container, volume, and image operations go through
 [`internal/docker`](../internal/docker/docker.go), including mount encoding and
 attached I/O. [`internal/sidecar`](../internal/sidecar/nix.go) starts the shared
 Nix daemon and private DinD containers. Storage provisioning and retention remain
-in `internal/environment`; execution ownership and recovery remain in
-`internal/execution`. Bridge, broker, and private DinD lifetimes follow the
+in `internal/environment`; the launcher records completion and calls local
+cleanup functions. Bridge, broker, and private DinD lifetimes follow the
 launcher and must follow future supervision. DinD shares workspace and socket
 storage, without agent state or credentials.
 

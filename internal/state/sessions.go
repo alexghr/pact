@@ -50,7 +50,6 @@ const (
 	Failed        ExecutionStatus = "failed"
 	StartupFailed ExecutionStatus = "startupFailed"
 	Interrupted   ExecutionStatus = "interrupted"
-	Uncertain     ExecutionStatus = "uncertain"
 )
 
 // CreateLaunch registers the workspace and allocates the launch records together.

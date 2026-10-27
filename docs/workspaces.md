@@ -43,8 +43,9 @@ an empty host directory. A directory must not be moved or replaced while Pact
 owns it.
 
 Pact does not lock workspaces, private state, provisioning, or reclamation.
-Avoid concurrent launches or maintenance against the same resources. Recorded
-Docker resources still need reconciliation before a replacement starts.
+Avoid concurrent launches or maintenance against the same resources. After a
+launcher crash, manually stop/remove previous containers before resuming or
+removing their workspace; Pact does not recover them.
 
 ## Explicit workspace removal
 
@@ -64,14 +65,9 @@ unreferenced private environment resources.
 
 Only a completed managed allocation owned by the current operator is eligible.
 Pact checks the directory identity and location and refuses supplied paths,
-redirected/replaced directories, and overlapping workspace registrations. All
-sessions and environments referring to the directory participate in the same
-writer and recovery checks, including environments without a retained session.
-A surviving recorded container or uncertain Docker inspection blocks removal.
-Stop the reported writer explicitly and retry; cleanup never stops a surviving writer on your
-behalf.
-
-Removal does not serialize recovery and deletion against launches. Files are
+redirected/replaced directories, and overlapping workspace registrations.
+Removal does not check for running containers or serialize against launches.
+Stop containers using the directory before removing it. Files are
 removed through an open directory root so workspace symlinks cannot redirect
 deletion outside it. Catalogue intent becomes
 `cleanupPending` before removing files. Interrupted or failed deletion can leave

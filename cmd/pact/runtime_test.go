@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/execution"
 	"github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
 )
@@ -116,22 +115,6 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := state.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Backend: "codex"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner := &execution.Owner{Store: store, Launch: launch}
-	defer func() {
-		if err := owner.Cleanup(); err != nil {
-			t.Error(err)
-		}
-	}()
 	label := "me.alexghr.pact.test=" + rand.Text()
 	containers := func(ctx context.Context) (string, error) {
 		output, err := exec.CommandContext(ctx, "docker", "container", "ls", "--all", "--filter", "label="+label, "--format", "{{.ID}}").CombinedOutput()
@@ -150,11 +133,12 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	ready := make(chan struct{})
 	type result struct {
 		started bool
+		stopped bool
 		err     error
 	}
 	finished := make(chan result, 1)
 	go func() {
-		started, err := runContainer(runCtx, owner, docker.ContainerConfig{
+		started, stopped, err := runContainer(runCtx, docker.ContainerConfig{
 			Image: image, Labels: map[string]string{"me.alexghr.pact.test": strings.TrimPrefix(label, "me.alexghr.pact.test=")},
 			Network: "none", Entrypoint: "/bin/bash", Command: []string{"-euc", "printf 'ready\\n'; exec sleep infinity"},
 		}, func() error { return nil }, func(input io.Reader) error {
@@ -168,11 +152,11 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 			_, err = io.Copy(io.Discard, reader)
 			return err
 		})
-		finished <- result{started, err}
+		finished <- result{started, stopped, err}
 	}()
 	select {
 	case result := <-finished:
-		if !result.started || result.err == nil {
+		if !result.started || !result.stopped || result.err == nil {
 			t.Fatalf("interrupted runtime: started %v, %v", result.started, result.err)
 		}
 	case <-ctx.Done():

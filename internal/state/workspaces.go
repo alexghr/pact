@@ -99,58 +99,38 @@ func (s *Store) checkWorkspace(w Workspace) error {
 	return nil
 }
 
-// WorkspaceReferences includes environments with no retained sessions and every
-// session sharing an environment. Overlapping registrations require manual
-// recovery rather than authorizing deletion through a different session.
-func (s *Store) WorkspaceReferences(ctx context.Context, w Workspace) ([]Launch, error) {
+// checkWorkspaceOverlap refuses deletion through an overlapping registration.
+func (s *Store) checkWorkspaceOverlap(ctx context.Context, w Workspace) error {
 	rows, err := s.db.QueryContext(ctx, "SELECT path FROM workspaces WHERE id <> ?", w.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for rows.Next() {
 		var path string
 		if err := rows.Scan(&path); err != nil {
 			rows.Close()
-			return nil, err
+			return err
 		}
 		for _, pair := range [][2]string{{w.Path, path}, {path, w.Path}} {
 			rel, err := filepath.Rel(pair[0], pair[1])
 			if err != nil || rel == "." || filepath.IsLocal(rel) {
 				rows.Close()
-				return nil, fmt.Errorf("workspace %s overlaps another registration at %s; resolve its references before removal", w.Path, path)
+				return fmt.Errorf("workspace %s overlaps another registration at %s; resolve its references before removal", w.Path, path)
 			}
 		}
 	}
-	err = errors.Join(rows.Err(), rows.Close())
-	if err != nil {
-		return nil, err
-	}
-	rows, err = s.db.QueryContext(ctx, `SELECT COALESCE(s.id, 0), e.id, e.workspace_id, e.state_volume, e.nix_volume, e.provisioned
-		FROM environments e LEFT JOIN sessions s ON s.environment_id = e.id
-		WHERE e.workspace_id = ? ORDER BY e.id, s.id`, w.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var launches []Launch
-	for rows.Next() {
-		launch := Launch{Workspace: w.Path}
-		if err := rows.Scan(&launch.SessionID, &launch.Environment.ID, &launch.Environment.WorkspaceID,
-			&launch.Environment.StateVolume, &launch.Environment.NixVolume, &launch.Environment.Provisioned); err != nil {
-			return nil, err
-		}
-		launches = append(launches, launch)
-	}
-	return launches, rows.Err()
+	return errors.Join(rows.Err(), rows.Close())
 }
 
-// RemoveWorkspace only removes the recorded managed directory. The caller
-// has reconciled recorded writers.
+// RemoveWorkspace only removes the recorded managed directory.
 // cleanupPending is durable before deletion, so interruption never permits a
 // launch into a partially removed directory. Retrying finishes the same intent.
 func (s *Store) RemoveWorkspace(ctx context.Context, id int64) error {
 	w, err := s.Workspace(ctx, id)
 	if err != nil {
+		return err
+	}
+	if err := s.checkWorkspaceOverlap(ctx, w); err != nil {
 		return err
 	}
 	if !w.Managed || w.Owner != fmt.Sprintf("uid:%d", os.Getuid()) {

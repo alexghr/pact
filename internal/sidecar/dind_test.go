@@ -5,11 +5,11 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/alexghr/pact/internal/execution"
-	"github.com/alexghr/pact/internal/state"
+	"github.com/alexghr/pact/internal/docker"
 )
 
 func TestDINDStartCancellation(t *testing.T) {
@@ -18,27 +18,9 @@ func TestDINDStartCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := state.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Backend: "codex"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner := &execution.Owner{Store: store, Launch: launch}
-	defer func() {
-		if err := owner.Cleanup(); err != nil {
-			t.Error(err)
-		}
-	}()
-	// Docker's event history closes the subscription/startup race. Cancel at
-	// real container creation, including the pre-bookkeeping crash window.
+	// Docker's event history closes the subscription/startup race.
 	events := exec.CommandContext(ctx, "docker", "events", "--since", time.Now().UTC().Format(time.RFC3339Nano),
-		"--filter", "type=container", "--filter", "event=create",
-		"--filter", "label=me.alexghr.pact.environment="+launch.Environment.ID,
+		"--filter", "type=container", "--filter", "event=create", "--filter", "image="+dindImage,
 		"--format", "{{.Actor.ID}}")
 	events.Stderr = os.Stderr
 	output, err := events.StdoutPipe()
@@ -51,24 +33,34 @@ func TestDINDStartCancellation(t *testing.T) {
 	defer func() { events.Process.Kill(); events.Wait() }()
 	startCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	notified := make(chan struct{})
+	created := make(chan string, 1)
 	go func() {
-		defer close(notified)
-		if bufio.NewScanner(output).Scan() {
+		scanner := bufio.NewScanner(output)
+		if scanner.Scan() {
+			created <- scanner.Text()
 			stop()
 		}
 	}()
-	_, err = StartDINDSidecar(startCtx, owner, launch.Workspace)
-	if err == nil || startCtx.Err() == nil {
-		t.Fatalf("startup was not interrupted at resource creation: %v", err)
+	volume, cleanup, err := StartDINDSidecar(startCtx, t.TempDir())
+	if err == nil {
+		defer cleanup()
+		t.Fatal("startup was not interrupted at resource creation")
 	}
-	if err := owner.Cleanup(); err != nil {
-		t.Fatal(err)
+	if startCtx.Err() == nil {
+		t.Fatalf("startup failed before cancellation: %v", err)
 	}
-	_ = events.Process.Kill()
-	<-notified
-	resources, err := store.Resources(ctx, launch.ExecutionID)
-	if err != nil || len(resources) != 0 {
-		t.Fatalf("cancelled startup leaked resources: %+v, %v", resources, err)
+	var id string
+	select {
+	case id = <-created:
+	case <-ctx.Done():
+		t.Fatal("no container creation event")
+	}
+	// Inspect by listing because the container should already have been removed.
+	outputIDs, err := exec.CommandContext(ctx, "docker", "container", "ls", "--all", "--filter", "id="+id, "--format", "{{.ID}}").CombinedOutput()
+	if err != nil || strings.TrimSpace(string(outputIDs)) != "" {
+		t.Fatalf("cancelled startup leaked container: %s, %v", outputIDs, err)
+	}
+	if info, err := docker.Inspect(ctx, "volume", volume); err != nil || info != nil {
+		t.Fatalf("cancelled startup leaked socket volume: %+v, %v", info, err)
 	}
 }
