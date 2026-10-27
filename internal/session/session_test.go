@@ -30,7 +30,7 @@ func TestManagedLaunchFailureCanResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	nix, err := store.EnsureSharedStorage(t.Context())
+	nix, err := store.EnsureSharedStorage(t.Context(), "pact-nix-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,15 +74,11 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	launch, err := store.CreateLaunch(t.Context(), state.LaunchOptions{Workspace: t.TempDir(), Backend: "codex"})
+	launch, err := createRecord(t.Context(), store, Options{Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := store.Session(t.Context(), launch.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current := &Session{Record: record, store: store, launch: launch}
+	current := &Session{Record: launch, store: store}
 	label := "me.alexghr.pact.test=" + rand.Text()
 	containers := func(ctx context.Context) (string, error) {
 		output, err := exec.CommandContext(ctx, "docker", "container", "ls", "--all", "--filter", "label="+label, "--format", "{{.ID}}").CombinedOutput()

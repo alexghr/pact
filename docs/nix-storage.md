@@ -12,7 +12,8 @@ state volume before Docker creates anything. Storage properties are recorded dir
 processes; run these operations sequentially. Builds from different sessions
 can run concurrently through the daemon.
 
-The daemon container has the shared volume's recorded name, an ownership label,
+Fresh catalogues use `pact-nix` for the shared volume and daemon container;
+existing catalogues keep their recorded name. The daemon has an ownership label
 and Docker's `unless-stopped` restart policy. Session shutdown leaves it running.
 Agents mount `/nix` read-only and use `NIX_REMOTE=daemon` over its Unix socket.
 On Docker Desktop for Mac, the socket and named volume stay inside Docker's Linux

@@ -62,7 +62,7 @@ func manageWorkspaces(args []string, output io.Writer) (runErr error) {
 		fmt.Fprintf(output, "To request removal after ownership checks: pact workspaces remove %d --yes\n", id)
 		return nil
 	}
-	if err := session.RemoveWorkspace(ctx, store, record.Storage.WorkspaceID); err != nil {
+	if err := session.RemoveWorkspace(ctx, store, record.WorkspaceID); err != nil {
 		return err
 	}
 	fmt.Fprintln(output, "Workspace removed; retained session history is still available.")

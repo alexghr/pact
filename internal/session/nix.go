@@ -15,6 +15,8 @@ import (
 	"github.com/alexghr/pact/internal/state"
 )
 
+const sharedNixName = "pact-nix"
+
 // startNixDaemon reuses or creates the shared daemon on an existing volume.
 // The container remains after errors and shutdown.
 func startNixDaemon(ctx context.Context, storage state.SharedStorage, image string) error {
@@ -73,7 +75,7 @@ func startNixDaemon(ctx context.Context, storage state.SharedStorage, image stri
 
 // PrepareNix starts or reuses the shared service. Session cleanup retains it.
 func PrepareNix(ctx context.Context, store *state.Store) (state.SharedStorage, error) {
-	storage, err := store.EnsureSharedStorage(ctx)
+	storage, err := store.EnsureSharedStorage(ctx, sharedNixName)
 	if err != nil {
 		return storage, err
 	}

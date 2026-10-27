@@ -1,7 +1,6 @@
 package session
 
 import (
-	"github.com/alexghr/pact/internal/state"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,15 +14,15 @@ func TestSessionBindingOnlyChangesBoundSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	first, err := store.CreateLaunch(t.Context(), state.LaunchOptions{Workspace: t.TempDir(), Backend: "codex"})
+	first, err := createRecord(t.Context(), store, Options{Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := store.CreateLaunch(t.Context(), state.LaunchOptions{Workspace: t.TempDir(), Backend: "codex"})
+	other, err := createRecord(t.Context(), store, Options{Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(sessionBinding(store, first.SessionID))
+	server := httptest.NewServer(sessionBinding(store, first.ID))
 	defer server.Close()
 	for _, body := range []string{`{"backendRef":"initial"}`, `{"backendRef":"native-new"}`} {
 		response, err := server.Client().Post(server.URL, "application/json", strings.NewReader(body))
@@ -35,11 +34,11 @@ func TestSessionBindingOnlyChangesBoundSession(t *testing.T) {
 			t.Fatal(response.Status)
 		}
 	}
-	firstSaved, err := store.Session(t.Context(), first.SessionID)
+	firstSaved, err := store.Session(t.Context(), first.ID)
 	if err != nil || firstSaved.BackendRef != "initial" {
 		t.Fatalf("initial binding changed: %+v, %v", firstSaved, err)
 	}
-	otherSaved, err := store.Session(t.Context(), other.SessionID)
+	otherSaved, err := store.Session(t.Context(), other.ID)
 	if err != nil || otherSaved.BackendRef != "" {
 		t.Fatalf("another session changed: %+v, %v", otherSaved, err)
 	}

@@ -13,5 +13,5 @@ func (s *Store) BindBackendRef(ctx context.Context, sessionID int64, ref string)
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE sessions
         SET backend_ref = CASE WHEN backend_ref = '' THEN ? ELSE backend_ref END WHERE id = ?`, ref, sessionID)
-	return executionUpdate(result, err)
+	return recordUpdate(result, err)
 }

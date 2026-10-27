@@ -6,21 +6,23 @@ import (
 	"fmt"
 )
 
-// Session joins a retained environment with its most recent execution.
+// Session is a persisted session with its most recent execution.
 type Session struct {
-	ID               int64          `json:"id"`
-	Title            string         `json:"title"`
-	UpdatedAt        int64          `json:"updatedAt"`
-	Workspace        string         `json:"workspace"`
-	WorkspaceManaged bool           `json:"workspaceManaged"`
-	WorkspaceStatus  string         `json:"workspaceStatus"`
-	BackendRef       string         `json:"backendRef,omitempty"`
-	Backend          string         `json:"backend"`
-	CreatedAt        int64          `json:"createdAt"`
-	Status           string         `json:"status"`
-	Error            string         `json:"error,omitempty"`
-	Settings         LaunchSettings `json:"settings"`
-	Storage          Storage        `json:"-"`
+	ID               int64    `json:"id"`
+	Title            string   `json:"title"`
+	UpdatedAt        int64    `json:"updatedAt"`
+	Workspace        string   `json:"workspace"`
+	WorkspaceManaged bool     `json:"workspaceManaged"`
+	WorkspaceStatus  string   `json:"workspaceStatus"`
+	BackendRef       string   `json:"backendRef,omitempty"`
+	Backend          string   `json:"backend"`
+	CreatedAt        int64    `json:"createdAt"`
+	Status           string   `json:"status"`
+	Error            string   `json:"error,omitempty"`
+	Settings         Settings `json:"settings"`
+	ExecutionID      int64    `json:"-"`
+	WorkspaceID      int64    `json:"-"`
+	Storage          Storage  `json:"-"`
 }
 
 const sessionQuery = `
@@ -28,7 +30,7 @@ const sessionQuery = `
            MAX(s.created_at, COALESCE(x.finished_at, x.started_at, x.created_at, 0)) AS updated_at,
 	       w.path, w.managed, w.status, s.backend, s.backend_ref, s.created_at,
 	       COALESCE(x.status, ''), COALESCE(x.error, ''), COALESCE(x.settings, '{}'),
-	       s.storage_key, s.workspace_id, s.state_volume, s.nix_volume, s.provisioned
+	       s.storage_key, s.workspace_id, s.state_volume, s.nix_volume, s.provisioned, COALESCE(x.id, 0)
 	FROM sessions s
 	JOIN workspaces w ON w.id = s.workspace_id
 	LEFT JOIN executions x ON x.id = (SELECT MAX(id) FROM executions WHERE session_id = s.id)`
@@ -38,8 +40,8 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var settings string
 	err := row.Scan(&session.ID, &session.Title, &session.UpdatedAt, &session.Workspace, &session.WorkspaceManaged, &session.WorkspaceStatus, &session.Backend, &session.BackendRef, &session.CreatedAt,
 		&session.Status, &session.Error, &settings,
-		&session.Storage.Key, &session.Storage.WorkspaceID, &session.Storage.StateVolume,
-		&session.Storage.NixVolume, &session.Storage.Provisioned)
+		&session.Storage.Key, &session.WorkspaceID, &session.Storage.StateVolume,
+		&session.Storage.NixVolume, &session.Storage.Provisioned, &session.ExecutionID)
 	if err != nil {
 		return session, err
 	}

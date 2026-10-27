@@ -167,7 +167,11 @@ func TestUpgradeRetainsSessionBindingAndStorage(t *testing.T) {
 	if err := store.BindBackendRef(t.Context(), 9, "another"); err != nil {
 		t.Fatal(err)
 	}
-	resumed, _, err := store.ResumeLaunch(t.Context(), 9)
+	_, err = store.CreateExecution(t.Context(), 9, saved.Settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := store.Session(t.Context(), 9)
 	if err != nil || resumed.Storage != saved.Storage || resumed.Workspace != workspace {
 		t.Fatalf("upgrade lost resume resources: %+v, %v", resumed, err)
 	}

@@ -11,7 +11,9 @@ conversation format and interprets the opaque `BackendRef`.
 `session.PrepareNix` to start or reuse shared Nix infrastructure. It then calls
 `session.New` or `session.Restore`, registers `Cleanup`, and calls `Start` with
 an optional prompt. Constructors allocate or restore persistent resources.
-`Start` owns transient service startup and attached execution.
+`Start` owns transient service startup and attached execution. `session.OpenStore`
+resolves the host catalogue location and creates its parent directory;
+`state.Open` accepts an explicit database path and applies migrations.
 
 `session.Options` contains the workspace, initial title, backend, model, effort,
 current config path, and capabilities. `Capabilities` currently contains `DIND`
@@ -65,10 +67,12 @@ been removed.
 
 ## Package boundaries
 
-- `internal/session`: lifecycle, persistent storage preparation, Nix and DinD
-  startup, host service wiring, and outcome recording.
-- `internal/state`: host SQLite catalogue, migrations, workspace identities,
-  session storage properties, settings, and immutable backend bindings.
+- `internal/session`: lifecycle, workspace allocation, path and identity checks,
+  explicit directory removal, persistent storage preparation, resource naming,
+  Nix and DinD startup, host service wiring, and outcome recording.
+- `internal/state`: SQLite connections, migrations, transactions, and record
+  queries/updates for sessions, workspaces, storage, executions, and bindings.
+  It does not inspect paths or manage directories.
 - `internal/harness`: Pact-owned binding payload. Native protocol shapes stay
   inside the backend adapter.
 - `internal/codex`: native CLI configuration, authentication projection,
@@ -79,8 +83,9 @@ been removed.
 - `internal/gitbroker` and `internal/httpproxy`: host credential services.
 - `internal/docker` and `internal/nix`: Docker operations and embedded image inputs.
 
-There is no separate environment entity or package. Storage properties live on
-sessions. The retained storage key identifies existing Docker labels and Nix
+The runtime holds one persisted session record, including its workspace, storage,
+and current execution ID. There is no separate launch bundle or environment
+entity/package. Storage properties live on sessions. The retained storage key identifies existing Docker labels and Nix
 root paths; it has no independent lifecycle. Old physical root paths retain the
 `environments` directory component for compatibility.
 

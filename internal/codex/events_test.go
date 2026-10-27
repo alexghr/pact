@@ -40,9 +40,7 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { store.Close() })
-			launch, err := store.CreateLaunch(t.Context(), state.LaunchOptions{
-				Workspace: t.TempDir(), Owner: "operator", Backend: "codex",
-			})
+			launch, err := store.CreateSession(t.Context(), state.Workspace{Path: t.TempDir(), Owner: "operator", Status: "ready"}, state.Session{Backend: "codex"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -60,7 +58,7 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 				cancel() // A UUID already received from the process must survive cancellation.
 			}
 			go func() {
-				err := ConsumeExec(input, func(ref string) error { return store.BindBackendRef(context.WithoutCancel(ctx), launch.SessionID, ref) }, &output, &diagnostics, "01a14eba-7c54-7170-96ec-8d86bb280eec")
+				err := ConsumeExec(input, func(ref string) error { return store.BindBackendRef(context.WithoutCancel(ctx), launch.ID, ref) }, &output, &diagnostics, "01a14eba-7c54-7170-96ec-8d86bb280eec")
 				_ = input.Close()
 				done <- err
 				close(done)
@@ -78,7 +76,7 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 			if _, err := io.WriteString(writer, "{\"type\":\"turn.started\"}\n"); err != nil {
 				t.Fatal(err)
 			}
-			saved, err := reader.Session(t.Context(), launch.SessionID)
+			saved, err := reader.Session(t.Context(), launch.ID)
 			if err != nil || saved.BackendRef != "01a14eba-7c54-7170-96ec-8d86bb280eec" {
 				t.Fatalf("thread not durable before EOF: %v, %v", saved, err)
 			}
@@ -101,7 +99,7 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 			if strings.Contains(diagnostics.String(), "future.event") {
 				t.Fatal("unknown event produced a diagnostic")
 			}
-			saved, err = reader.Session(t.Context(), launch.SessionID)
+			saved, err = reader.Session(t.Context(), launch.ID)
 			if err != nil || saved.BackendRef != initial {
 				t.Fatalf("completion lost or changed the thread observation: %v, %v", saved, err)
 			}

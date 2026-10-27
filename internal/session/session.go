@@ -38,7 +38,6 @@ type Options struct {
 type Session struct {
 	Record                       state.Session
 	store                        *state.Store
-	launch                       state.Launch
 	configPath                   string
 	bridge                       hostbridge.Bridge
 	broker                       *gitbroker.Broker
@@ -50,48 +49,28 @@ type Session struct {
 }
 
 func New(ctx context.Context, store *state.Store, nix state.SharedStorage, options Options) (*Session, error) {
-	if options.Backend == "" {
-		options.Backend = "codex"
-	}
-	if options.Backend != "codex" {
-		return nil, fmt.Errorf("unsupported backend %q", options.Backend)
-	}
-	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{
-		Workspace: options.Workspace, Title: options.Title, Backend: options.Backend,
-		Owner:    "uid:" + strconv.Itoa(os.Getuid()),
-		Settings: state.LaunchSettings{Model: options.Model, Effort: options.Effort, Capabilities: options.Capabilities},
-	})
+	record, err := createRecord(ctx, store, options)
 	if err != nil {
 		return nil, err
 	}
-	return prepare(ctx, store, nix, launch, options.ConfigPath)
+	return prepare(ctx, store, nix, record, options.ConfigPath)
 }
 
 func Restore(ctx context.Context, store *state.Store, nix state.SharedStorage, id int64, configPath string) (*Session, error) {
-	saved, err := store.Session(ctx, id)
+	record, err := restoreRecord(ctx, store, id)
 	if err != nil {
 		return nil, err
 	}
-	if saved.Backend != "codex" {
-		return nil, fmt.Errorf("unsupported backend %q", saved.Backend)
-	}
-	launch, _, err := store.ResumeLaunch(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return prepare(ctx, store, nix, launch, configPath)
+	return prepare(ctx, store, nix, record, configPath)
 }
 
-func prepare(ctx context.Context, store *state.Store, nix state.SharedStorage, launch state.Launch, configPath string) (*Session, error) {
-	s := &Session{store: store, launch: launch, configPath: configPath}
-	err := prepareStorage(ctx, store, launch.Storage, nix)
-	if err == nil {
-		s.Record, err = store.Session(ctx, launch.SessionID)
-	}
-	if err != nil {
+func prepare(ctx context.Context, store *state.Store, nix state.SharedStorage, record state.Session, configPath string) (*Session, error) {
+	s := &Session{store: store, Record: record, configPath: configPath}
+	if err := prepareStorage(ctx, store, record.Storage, nix); err != nil {
 		s.runErr = err
-		return nil, fmt.Errorf("prepare session %d: %w", launch.SessionID, errors.Join(err, s.Cleanup()))
+		return nil, fmt.Errorf("prepare session %d: %w", record.ID, errors.Join(err, s.Cleanup()))
 	}
+	s.Record.Storage.Provisioned = true
 	return s, nil
 }
 
@@ -205,7 +184,7 @@ func (s *Session) runContainer(ctx context.Context, config docker.ContainerConfi
 	s.started, err = docker.Attach(ctx, s.containerID, docker.AttachOptions{
 		Streams:     docker.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},
 		Interactive: consume == nil, Interrupt: true, Consume: consume,
-		OnStart: func() error { return s.store.StartExecution(ctx, s.launch.ExecutionID) },
+		OnStart: func() error { return s.store.StartExecution(ctx, s.Record.ExecutionID) },
 	})
 	return err
 }
@@ -254,7 +233,7 @@ func (s *Session) Cleanup() error {
 	}
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finishCancel()
-	s.cleanupErr = errors.Join(s.cleanupErr, s.store.FinishExecution(finishCtx, s.launch.ExecutionID, status, exitCode(outcome), message))
+	s.cleanupErr = errors.Join(s.cleanupErr, s.store.FinishExecution(finishCtx, s.Record.ExecutionID, status, exitCode(outcome), message))
 	return s.cleanupErr
 }
 

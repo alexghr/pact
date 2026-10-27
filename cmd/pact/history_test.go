@@ -22,14 +22,8 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	first, err := store.CreateLaunch(t.Context(), state.LaunchOptions{Backend: "codex", Title: "Investigate deployments"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := store.CreateLaunch(t.Context(), state.LaunchOptions{Backend: "codex", Title: "Review migrations"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	first := failedSession(t, store, "Investigate deployments")
+	second := failedSession(t, store, "Review migrations")
 	if err := store.FinishExecution(t.Context(), second.ExecutionID, state.StartupFailed, 1, "runtime unavailable"); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +40,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 		return sessions
 	}
 	for _, sessions := range [][]state.Session{list(), list("--all")} {
-		if len(sessions) != 2 || sessions[0].ID != second.SessionID || sessions[1].ID != first.SessionID || sessions[0].Title != "Review migrations" || sessions[0].Status != "startupFailed" {
+		if len(sessions) != 2 || sessions[0].ID != second.ID || sessions[1].ID != first.ID || sessions[0].Title != "Review migrations" || sessions[0].Status != "startupFailed" {
 			t.Fatalf("unrelated directory hid chores or failed start: %+v", sessions)
 		}
 	}
@@ -54,7 +48,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 	if err := os.Symlink(first.Workspace, alias); err != nil {
 		t.Fatal(err)
 	}
-	if filtered := list("--workspace", alias); len(filtered) != 1 || filtered[0].ID != first.SessionID {
+	if filtered := list("--workspace", alias); len(filtered) != 1 || filtered[0].ID != first.ID {
 		t.Fatalf("explicit filter selected other workspaces: %+v", filtered)
 	}
 	var output bytes.Buffer
@@ -69,7 +63,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 		}
 	}
 	output.Reset()
-	if err := manageSessions([]string{"show", fmt.Sprint(first.SessionID)}, &output); err != nil || !strings.Contains(output.String(), first.Workspace) {
+	if err := manageSessions([]string{"show", fmt.Sprint(first.ID)}, &output); err != nil || !strings.Contains(output.String(), first.Workspace) {
 		t.Fatalf("inspection lost workspace: %s, %v", output.String(), err)
 	}
 }
@@ -81,16 +75,13 @@ func TestWorkspaceRemovalRequiresExplicitRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	launch, err := store.CreateLaunch(t.Context(), state.LaunchOptions{Backend: "codex", Owner: fmt.Sprintf("uid:%d", os.Getuid())})
-	if err != nil {
-		t.Fatal(err)
-	}
+	launch := failedSession(t, store, "")
 	file := filepath.Join(launch.Workspace, "unfinished-work")
 	if err := os.WriteFile(file, []byte("valuable"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	args := []string{"remove", fmt.Sprint(launch.SessionID)}
+	args := []string{"remove", fmt.Sprint(launch.ID)}
 	if err := manageWorkspaces(args, &output); err != nil || !strings.Contains(output.String(), launch.Workspace) {
 		t.Fatalf("workspace preview: %s, %v", output.String(), err)
 	}
@@ -103,7 +94,26 @@ func TestWorkspaceRemovalRequiresExplicitRequest(t *testing.T) {
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Fatalf("explicit request did not remove workspace files: %v", err)
 	}
-	if session, err := store.Session(t.Context(), launch.SessionID); err != nil || session.WorkspaceStatus != "removed" {
+	if session, err := store.Session(t.Context(), launch.ID); err != nil || session.WorkspaceStatus != "removed" {
 		t.Fatalf("explicit removal lost its retained record: %+v, %v", session, err)
 	}
+}
+
+func failedSession(t *testing.T, store *state.Store, title string) state.Session {
+	t.Helper()
+	// Fail against a real unreachable daemon after the workspace is recorded.
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
+	nix, err := store.EnsureSharedStorage(t.Context(), "pact-nix-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.New(t.Context(), store, nix, session.Options{Title: title}); err == nil {
+		t.Fatal("session unexpectedly started without Docker")
+	}
+	records, err := store.Sessions(t.Context(), "")
+	if err != nil || len(records) == 0 {
+		t.Fatalf("failed start lost session: %+v, %v", records, err)
+	}
+	return records[0]
 }
