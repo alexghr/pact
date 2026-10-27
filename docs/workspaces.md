@@ -23,10 +23,10 @@ ownership.
 
 Exiting or failing to start a container retains the directory and catalogue
 records. Resume reuses untracked files, local commits, unfinished merges, and
-build output alongside the saved agent environment. It does not retain running
+build output alongside the private agent state. It does not retain running
 processes or a previous Docker-in-Docker daemon's contents.
 
-Pact records allocation intent, session, environment, and execution before
+Pact records allocation intent, session storage and execution before
 creating a managed directory. After creation it records the directory's device
 and inode identity and marks it ready. Allocation errors name the session and
 path and record a startup failure. An abrupt launcher exit may leave an
@@ -60,8 +60,6 @@ The operation retains the catalogue, native conversation volumes, private Nix
 roots, and shared Nix storage. Other workspaces remain intact, including paths
 reached by symlinks inside the selected directory. Retained artifacts and memory
 must also live outside this deletable directory when those features arrive.
-This command is separate from `pact environments gc`, which only reclaims
-unreferenced private environment resources.
 
 Only a completed managed allocation owned by the current operator is eligible.
 Pact checks the directory identity and location and refuses supplied paths,

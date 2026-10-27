@@ -1,103 +1,50 @@
-# Native Codex discovery
+# Codex integration
 
-Investigation for [#4](https://forge.alexghr.me/ag/pact/issues/4), validated with
-`codex-cli 0.162.1` on Linux on 19 October 2026. Pact retains `codex exec` and the
-native TUI. Discovery uses the [App Server protocol](https://developers.openai.com/codex/app-server),
-without reading Codex's SQLite schema, copying database files, or parsing
-transcripts.
+Pact currently supports Codex. This package maps Pact run settings and an opaque
+backend reference to native Codex operations. It does not own the session
+catalogue, select recent conversations, or synchronize a native thread list.
 
-## Live observation
+## Initial identity and resume
 
-`pact-agent` starts a local `codex app-server`, initializes a Pact observer, and
-connects the native TUI using `codex --remote`. The Unix socket carries WebSocket
-frames, not newline-delimited JSON. The observer identifies itself as `pact`;
-it does not impersonate a native client.
+A prompted run uses `codex exec --json`; `thread.started` supplies the initial
+native reference before later output or failure. The host saves it once as the
+Pact session's `BackendRef`. The adapter validates an explicitly resumed reference
+and renders assistant output separately from tool/reasoning diagnostics.
 
-The pinned server broadcasts thread creation, name, archive, and status
-notifications to initialized connections. Pact treats these as refresh hints,
-then calls `thread/list` to obtain complete saved-thread metadata. In particular,
-`thread/started` can describe an empty, unsaved conversation and must not alone
-make it a resume target. Pact publishes small `threads` snapshots to its host
-catalogue; it does not forward transcripts or token output.
+For interactive runs, `pact-agent` starts a local `codex app-server` and connects
+the native TUI over its Unix WebSocket endpoint. Its observer waits for the first
+active-thread status after user input, then sends a Pact-owned binding payload
+to `/harness/binding`. Empty threads have no binding. The adapter emits only one
+reference; native `/new` and `/resume` actions do not redirect the Pact session.
+No transcript or native thread catalogue crosses the host bridge.
 
-Discovery does not resume or subscribe to threads. Turn/item notifications
-are scoped to subscribers, and subscribing can keep idle threads loaded. Neither
-is necessary for discovery. There is no dedicated notification for every resume
-or TUI selection. Metadata is also refreshed at startup, normal TUI exit, and
-before a later resume, so events are not the sole recovery mechanism.
+A prompted continuation uses `codex exec resume THREAD_ID PROMPT`. Interactive
+continuation uses `codex resume THREAD_ID` through the remote TUI. Before attaching,
+Pact prepares the saved thread through `thread/resume` with approval policy
+`never` and sandbox `danger-full-access`, and verifies effective permissions.
+This preserves Pact's container permissions when native saved permissions differ.
 
-Before attaching the remote TUI to a saved thread, Pact calls `thread/resume`
-with `approvalPolicy: "never"` and `sandbox: "danger-full-access"`, then checks
-the returned effective permissions. The TUI's ID-only resume rejoins that loaded
-thread. This reconciles restrictive saved permissions without passing the CLI
-overrides that remote resume rejects. Failure stops attachment.
+The same reference supports interactive and prompted continuation. There is no
+native picker or most-recent fallback when a reference is present. A session
+without a reference starts its first conversation. If an explicit target is
+unavailable, the native operation reports an error.
 
-Two initialized real clients confirmed passive start/fork/name notifications
-and that the observer remained unsubscribed. The native TUI probe confirmed
-remote operation with the observer attached. An empty new thread could emit a
-start notification while remaining absent from `thread/list`. The first
-connection's identity also influenced native origin/source metadata: a genuine
-Pact observer can produce source `vscode` in this version. Pact accepts that
-native classification rather than changing its client identity.
+## Ownership and validation
 
-See the pinned [notification routing](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/outgoing_message.rs),
-[thread lifecycle](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/request_processors/thread_processor.rs),
-and [Unix transport](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-transport/src/transport/unix_socket.rs).
+Pact owns the binding schema in `internal/harness`; native notification and CLI
+JSON types stay in `internal/codex`. The adapter reports the reference through a
+callback or the private bridge. Only session/state code persists it.
+Authentication projection and native CLI configuration also stay in the adapter.
+`hostbridge` transports ordinary HTTP handlers without interpreting these values.
 
-## Saved metadata and selection
+`PACT_TEST_CODEX=1 ./shell go test ./internal/codex -count=1` runs real app-server
+and CLI checks without an upstream model service. The tests use an unavailable
+loopback provider and verify initial binding, empty-thread exclusion, stable
+identity through native navigation, saved continuation history, and effective
+resume permissions. They wait for native input persistence before interrupting
+an offline run. Set `PACT_CODEX_BINARY` to exercise a specific installed version.
 
-List active and archived conversations, paginate all results, include `cli`,
-`exec`, `appServer`, and `vscode` sources, and do not restrict model providers.
-Internal subagents are excluded. IDs are opaque; titles prefer `name` over
-`preview`, and `forkedFromId` supplies optional lineage. Codex remains responsible
-for restoring conversation context.
-
-Default selection uses the protocol's `updatedAt`, with descending thread-ID
-order for ties. Public timestamps have second precision. Pact converts them to
-its catalogue representation without inventing finer precision. Opening an older
-conversation can advance saved recency without a new message. Switching to a
-still-loaded conversation may not; this is an accepted native limitation. An
-empty unsaved `/new` leaves the prior saved target intact. Pact does not classify
-user activity or promise to record every TUI selection.
-
-Each Pact environment has private native state, so identical container workspace
-paths do not mix sessions. Before resume and after execution, a network-isolated
-Docker helper starts the bundled adapter against that state and returns only
-metadata. The launcher retains execution ownership while recorded helpers run,
-after stopping the agent and sidecar. The native store is writable because Codex
-may repair its own metadata while listing. Pact does not edit native storage directly or transfer a
-tar snapshot to the host.
-
-Protocol errors are errors, not an empty catalogue. Previously known entries
-missing from a successful refresh remain marked missing. Missing or archived
-selected entries are rejected; Codex validates native conversation contents when
-resuming. Saved native recency remains authoritative after a crash, including
-any native persistence limitations.
-
-## Compatibility and checks
-
-The image pins Codex through `internal/nix/context/tools/flake.lock`. A documented
-protocol is a narrower integration boundary than internal storage, but upgrades
-can still change listing, notification, source, or timestamp behavior. Revalidate
-against the actual new binary and existing saved state when updating the pin.
-
-Use disposable `CODEX_HOME` state, unset inherited thread/session IDs, and keep
-any copied authentication private and remove it afterward. Check two initialized
-clients and the native TUI against the same server: start, fork, rename, resume,
-and leave an empty `/new`. Compare notifications with saved lists, verify archive
-and pagination behavior, and confirm that the observer is not subscribed. Check
-view-only saved recency and second-resolution ties. Finally stop the server and
-query the saved store through the isolated helper to cover missed notifications.
-
-Automated adapter checks use the real pinned app-server, not a fake executable.
-Historical Pact catalogue migrations retain their checksums for existing
-installations; obsolete activity-certainty and reconciliation columns are unused.
-
-`PACT_TEST_CODEX=1 ./shell go test ./internal/codex -count=1` checks restrictive
-saved permissions and prompted/interactive continuation using an unavailable
-loopback provider, without credentials or model work. For a live context and
-permission check, `PACT_TEST_CODEX_LIVE=1 ./shell go test ./cmd/pact -run
-TestLiveResumeContextAndPermissions -count=1` uses a sanitized host ChatGPT login
-in disposable native storage. It saves a restrictive conversation, then resumes
-with a prompt that writes a remembered token outside its temporary workspace.
-It uses the subscription and model service; it does not automate the terminal UI.
+The operator also validated completed interactive and prompted continuation on
+Codex 0.163.0. Pact pins the container toolset in
+`internal/nix/context/tools/flake.lock`; protocol compatibility should be checked
+when that pin changes.

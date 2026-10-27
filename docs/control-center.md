@@ -80,15 +80,16 @@ complete several issues during one implementation session.
 
 ## Sessions and external references
 
-Preserve the existing distinction between a durable session, conversations,
-storage, and live execution:
+The current lifecycle is described in [session management](session-management.md).
+A session owns its initial backend binding, storage, and settings. Future external
+references and artifacts can be attached without restoring an environment entity:
 
 | Concept | Responsibility |
 | --- | --- |
-| Session | A durable aim, associated threads, workspace/environment, external links, and private artifacts |
-| Thread | A native conversation within the session, with its own history |
+| Session | One initial backend conversation binding, workspace, storage, settings, external links, and private artifacts |
+
 | Workspace | The private working directory, containing zero or more repositories and other working files |
-| Environment | The recorded storage and launch context reused when replacing a container |
+
 | Execution | One live attempt to run the agent or native TUI, with its resources and outcome |
 | External reference | A connection type, named connection, and source-specific item identity linked to a session |
 | Artifact | A retained private output with revisions and provenance |

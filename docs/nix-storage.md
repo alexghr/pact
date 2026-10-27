@@ -1,16 +1,15 @@
-# Managed environment storage
+# Session Nix storage
 
-Each session has a private agent-state volume. All environments share one
+Each session has a private agent-state volume. All sessions share one
 catalogue-owned Docker volume and a persistent Nix daemon. Docker Engine and
 CLI 26 or newer are required for
 [volume subdirectory mounts](https://docs.docker.com/engine/release-notes/26.0/#new).
 
 ## Resource ownership and recovery
 
-The catalogue records the shared volume and each environment's private agent
-state volume before Docker creates anything. The environment fields remain
-backend-neutral. Pact does not serialize provisioning or cleanup across launcher
-processes; run these operations sequentially. Builds from different environments
+The catalogue records the shared volume and each session's private agent
+state volume before Docker creates anything. Storage properties are recorded directly on the session. Pact does not serialize provisioning or cleanup across launcher
+processes; run these operations sequentially. Builds from different sessions
 can run concurrently through the daemon.
 
 The daemon container has the shared volume's recorded name, an ownership label,
@@ -50,17 +49,15 @@ storage. Retrying setup reuses the recorded names and verifies Docker ownership
 labels. Missing established private state volumes cause an error requesting
 restoration from backup. A missing shared Nix volume is recreated under its
 recorded identity, with a notice that cached dependencies were lost. The baseline
-tools are rebuilt and environment root directories are recreated as needed;
+tools are rebuilt and session root directories are recreated as needed;
 previous package outputs, profiles, and roots require rebuilding. This does not
 recover deleted conversation history. Keep the catalogue and private-volume
-backups together, and use the same Docker context when restarting an environment.
+backups together, and use the same Docker context when restarting a session.
 
-Run `pact environments repair SESSION_ID` to finish an interrupted provision or
-check an environment using its recorded identities. It does not create another
-session or execution or resume a conversation. It can rebuild a missing shared
-package cache, but missing established private state must be restored under its
-original name with its `me.alexghr.pact.storage` label. The shared volume's label
-is its own name; a private volume's label is its environment ID.
+Starting or restoring a session prepares its recorded resources. Missing
+established private state must be restored under its original name and storage
+label. The shared volume's label is its own name; a private volume's label is its
+session storage key.
 
 If the daemon container's image hash differs from this Pact's expected revision,
 launch stops with both image references and leaves the existing daemon alone.
@@ -97,39 +94,16 @@ Nix owns collection within the running shared store, including space-pressure
 collection if configured. Pact does not schedule Nix GC. Removing an environment's
 roots makes its otherwise unreachable packages eligible for Nix collection.
 
-## Explicit cleanup
+## Cleanup and validation
 
-`pact environments gc` removes only environments without **any** retained session
-reference, including abandoned partial provisions. A finished, failed, or inactive
-session still retains its environment. The current CLI has no session deletion
-operation; ordinary recorded sessions are therefore never GC candidates. Do not
-delete catalogue rows manually to force collection.
+Normal session cleanup retains private agent state, Nix roots, and the shared
+store. There is no automatic orphan collection or environment repair/GC command.
+The operator removes abandoned Docker resources explicitly. Nix GC remains a
+separate operation and honors retained session roots.
 
-Cleanup preserves state volumes still referenced by another environment or
-Docker container, including stopped containers. It checks ownership labels before deleting a private state volume,
-removes that environment's persistent roots through the running daemon, then
-removes the environment record. An interruption leaves enough recorded identity
-to retry. The daemon must be available once shared storage is provisioned; repair
-or start it before retrying cleanup if it has stopped.
-
-Cleanup never prunes Docker volumes, runs Nix GC, deletes the shared store, touches
-workspace files, or deletes unrelated volumes. Shared-store reset is a separate
-operator action and is not offered by this command.
-
-## Validation
-
-`PACT_TEST_DOCKER=1 ./shell go test ./internal/environment -run TestSharedStorage -count=1`
-uses disposable real Docker volumes and the embedded image. It checks sequential
-provisioning, a project-source build through the daemon, package reuse and
-execution through read-only mounts, private persistent state, retained roots
-after explicit Nix collection, live tool updates and pinned-toolset reconciliation,
-refusal to replace an incompatible daemon or missing private state, and recovery
-after deletion of the shared package cache.
-It builds the agent and daemon images if needed and removes only its own
+`PACT_TEST_DOCKER=1 ./shell go test ./internal/session -run TestSharedStorage -count=1`
+uses disposable real Docker volumes and embedded images. It checks sequential
+provisioning, source builds through the daemon, shared package reuse, private
+state, read-only store mounts, persistent roots, live tool updates, daemon
+compatibility, and rebuilding a deleted package cache. It removes only its own
 disposable resources.
-It also checks retained-session and stopped-container protection, ownership
-rejection, partial-provision cleanup, preservation of unrelated volumes, and
-collection after the last environment root disappears.
-
-The layout follows Nix's [client/daemon model](https://nix.dev/manual/nix/2.34/installation/multi-user.html)
-and the NixOS manual's [shared daemon container example](https://nixos.org/manual/nixos/stable/#sec-gitlab-runner).

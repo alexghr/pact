@@ -39,18 +39,18 @@ control, path routing, and cleanup. Register handlers with
 `hostbridge.Server`. `internal/httpproxy` provides `NewHTTP` to forward requests
 to a fixed upstream endpoint and apply host-held credentials. Neither package
 interprets MCP.
-`cmd/pact/mcp.go` adapts MCP configuration into these HTTP handlers; the launcher
+`internal/session/mcp.go` adapts MCP configuration into these HTTP handlers; the launcher
 advertises only configured MCP servers to Codex. The Git broker uses the same
 bridge as an ordinary HTTP handler.
 
 Configured MCP servers use `/mcp/<name>`. Container helpers use `/harness/git`
-for Git brokering and `/harness/events` for saved-thread metadata. The wrapper
-publishes these events automatically; they are not agent MCP tools. Both route
+for Git brokering and `/harness/binding` for the initial backend reference. The wrapper
+publishes this binding automatically; they are not agent MCP tools. Both route
 namespaces share the same listener, authentication, and lifetime.
 
 The container socket path `/opt/pact/mcp.sock` and `PACT_MCP_SOCKET` retain their
 historical names but carry all bridge HTTP traffic. `PACT_GIT_URL` and
-`PACT_EVENTS_URL` supply the helper endpoints; `/_pact/health` remains the health
+`PACT_BINDING_URL` supply the helper endpoints; `/_pact/health` remains the health
 route. The internal relay script is `host-relay.sh`.
 
 ## Transport and lifetime

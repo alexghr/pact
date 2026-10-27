@@ -4,64 +4,43 @@ Pact is an agent isolation solution using your existing ChatGPT subscription.
 
 ## Sessions
 
-Run `pact` for an interactive session in a fresh, empty managed workspace, or
-`pact -p 'Investigate deployment errors'` to start with a prompt. The agent can
-clone authorized repositories inside it. Use `pact -w PATH` to supply an existing
-directory instead. Pact retains workspace files after exit or startup failure;
-resume uses the original directory and private agent state.
+Run `pact` for an interactive session in a fresh managed workspace, or
+`pact -p 'Investigate deployment errors'` to start with a prompt. Use
+`pact -w PATH` to supply an existing directory. Pact retains workspace files,
+private agent state, launch settings, and Nix roots between runs.
 
-Each validated launch prints a Pact session ID to stderr and records the workspace,
-launch settings, and outcome on the host, including when startup fails. The
-catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
-`~/.local/state/pact/sessions.db`. Each new session has private persistent agent
-state; sessions share a managed Nix daemon and read-only package store.
+Each new session prints its Pact ID. Find sessions from any directory with
+`pact sessions list`, or inspect one with `pact sessions show 42`. Both accept
+`--json`; listing supports `--workspace PATH` and `--all`.
+The catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
+`~/.local/state/pact/sessions.db`.
 
-Find saved sessions from any directory with `pact sessions list`. It lists all
-workspaces, newest use first, with session IDs, titles, execution status, and
-update times. Use `--workspace PATH` to filter; `--all` remains an alias for the
-default. Use `pact sessions show 42` to inspect the workspace path and session,
-and `pact sessions threads 42` to list its native thread IDs.
-Each command accepts `--json`. Listings show saved metadata, updated during
-interactive use and after execution. Resume refreshes it automatically before
-choosing a conversation.
+A Pact session binds once to the agent's initial native conversation. Resume it
+interactively with `pact resume 42`, or continue with a prompt using
+`pact resume 42 -p 'Continue the investigation'`. Both reuse its saved model,
+reasoning effort, Docker-in-Docker and host-network capabilities, workspace, and
+private state. Git and MCP connections use current host configuration;
+`--config PATH` selects another config file.
 
-Resume the last used saved conversation with `pact resume 42`, or select one
-explicitly with `pact resume 42:THREAD_ID`. Pact reuses the
-session's workspace, private state, and recorded launch settings. Without
-`--prompt`, resume opens the native Codex terminal UI, including for sessions
-started with a prompt. Git and MCP connections use the current host config;
-pass `--config PATH` to select another config.
+Codex is currently the supported backend. Native `/new` and `/resume` navigation
+does not change the Pact session's saved backend reference. Pact does not list
+native threads or select whichever was most recently used. A session with no
+backend reference starts its first conversation on its next run. An unavailable
+saved conversation causes a native resume error.
 
-Use `pact resume 42 --prompt 'Continue the investigation'` for prompted
-continuation, or provide `42:THREAD_ID` to target an exact conversation. The
-prompt continues that saved conversation in the same environment; it requires
-an existing available thread. `-p` and `-prompt` are accepted too.
+The launcher records execution outcomes and removes temporary agent/DinD
+containers and socket volumes on exit or handled cancellation. Shared Nix
+storage and private session state remain. A hard crash can leave running
+containers and unfinished records: stop/remove stray resources manually with
+`docker rm -f` and `docker volume rm` before resuming. Pact does not lock writers
+or recover previous executions; interrupted prompts are not replayed.
 
-Pact selects the conversation with the newest saved last-use timestamp in Codex.
-Opening an older conversation can update this without sending a message;
-switching back to an already-loaded thread may leave the timestamp unchanged.
-An empty `/new` is
-saved only after its first message, so leaving it keeps the previous saved
-conversation as the target. Missing, archived, or unreadable saved state produces
-an error rather than starting a different conversation.
-
-Pact records execution outcomes and removes temporary containers and DinD socket
-volumes when the launcher exits normally or handles cancellation. A hard crash
-can leave containers, volumes, and unfinished execution records; remove stray
-resources manually with `docker rm -f` and `docker volume rm`. Pact does not
-recover previous executions or prevent concurrent writers. Stop previous
-containers before resuming or removing their workspace. Interrupted prompts are
-never replayed automatically.
-History from the older global state volume is not imported automatically.
-
-See [storage and recovery](docs/nix-storage.md) for persistent Nix roots,
-`pact environments repair SESSION_ID`, and `pact environments gc`.
-See [managed workspaces](docs/workspaces.md) for allocation and recovery.
-Preview permanent workspace removal with `pact workspaces remove SESSION_ID`,
-then repeat with `--yes` to delete its files after ownership checks.
-Conversation history, private agent state, and shared Nix storage are retained.
-Removal prevents further resume into that workspace; operator-supplied paths
-are never eligible.
+See [session management](docs/session-management.md) and
+[Nix storage](docs/nix-storage.md) for lifecycle and persistence details.
+Preview permanent workspace removal with `pact workspaces remove 42`, then
+repeat with `--yes` to delete its files after ownership checks. Native state,
+Nix storage, and catalogue history are retained. Stop containers using the
+workspace before removing it. See [managed workspaces](docs/workspaces.md).
 
 ## System skills
 
