@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,7 +34,8 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			t.Setenv("XDG_STATE_HOME", t.TempDir())
-			store, err := state.Open(t.Context())
+			path := filepath.Join(t.TempDir(), "sessions.db")
+			store, err := state.Open(t.Context(), path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -44,7 +46,7 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reader, err := state.Open(t.Context())
+			reader, err := state.Open(t.Context(), path)
 			if err != nil {
 				t.Fatal(err)
 			}

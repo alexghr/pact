@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
-	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -19,29 +17,15 @@ type Store struct {
 }
 
 // Open creates or opens the host catalogue and applies pending migrations.
-func Open(ctx context.Context) (*Store, error) {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("find catalogue home: %w", err)
-		}
-		dir = filepath.Join(home, ".local", "state")
+func Open(ctx context.Context, path string) (*Store, error) {
+	if path == "" {
+		return nil, errors.New("catalogue path is required")
 	}
-	if !filepath.IsAbs(dir) {
-		return nil, errors.New("catalogue state directory must be absolute")
-	}
-	dir = filepath.Join(dir, "pact")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, fmt.Errorf("create catalogue directory: %w", err)
-	}
-
 	options := url.Values{
 		"_journal_mode": {"WAL"},
 		"_foreign_keys": {"on"},
 		"_busy_timeout": {"5000"},
 	}
-	path := filepath.Join(dir, "sessions.db")
 	dsn := (&url.URL{
 		Scheme:   "file",
 		Path:     path,
@@ -63,3 +47,6 @@ func Open(ctx context.Context) (*Store, error) {
 func (s *Store) Close() error {
 	return s.db.Close()
 }
+
+// Path is the database location supplied by the caller.
+func (s *Store) Path() string { return s.path }

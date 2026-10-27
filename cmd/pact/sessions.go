@@ -14,7 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/alexghr/pact/internal/state"
+	"github.com/alexghr/pact/internal/session"
 )
 
 func manageSessions(args []string, output io.Writer) (runErr error) {
@@ -66,7 +66,7 @@ func manageSessions(args []string, output io.Writer) (runErr error) {
 		}
 	}
 	ctx := context.Background()
-	store, err := state.Open(ctx)
+	store, err := session.OpenStore(ctx)
 	if err != nil {
 		return err
 	}

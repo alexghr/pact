@@ -19,7 +19,7 @@ import (
 
 func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := state.Open(t.Context())
+	store, err := OpenStore(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,16 +51,16 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := t.Context()
-	if err := store.RemoveWorkspace(ctx, first.Storage.WorkspaceID); err != nil {
+	if err := RemoveWorkspace(ctx, store, first.Storage.WorkspaceID); err != nil {
 		t.Fatalf("workspace cleanup: %v", err)
 	}
-	if err := store.RemoveWorkspace(ctx, first.Storage.WorkspaceID); err != nil {
+	if err := RemoveWorkspace(ctx, store, first.Storage.WorkspaceID); err != nil {
 		t.Fatalf("repeated cleanup: %v", err)
 	}
 	if _, err := os.Stat(first.Workspace); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("selected workspace remains: %v", err)
 	}
-	if err := store.RemoveWorkspace(ctx, supplied.Storage.WorkspaceID); err == nil {
+	if err := RemoveWorkspace(ctx, store, supplied.Storage.WorkspaceID); err == nil {
 		t.Fatal("operator-owned directory was eligible for removal")
 	}
 	nested := filepath.Join(sibling.Workspace, "nested")
@@ -68,7 +68,7 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	create(nested)
-	if err := store.RemoveWorkspace(ctx, sibling.Storage.WorkspaceID); err == nil {
+	if err := RemoveWorkspace(ctx, store, sibling.Storage.WorkspaceID); err == nil {
 		t.Fatal("cleanup ignored an overlapping workspace registration")
 	}
 	for _, launch := range []state.Launch{sibling, supplied} {
@@ -97,7 +97,7 @@ func TestSharedStorage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 	defer cancel()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := state.Open(ctx)
+	store, err := OpenStore(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

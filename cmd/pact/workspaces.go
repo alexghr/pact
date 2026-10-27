@@ -12,7 +12,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/alexghr/pact/internal/state"
+	"github.com/alexghr/pact/internal/session"
 )
 
 func manageWorkspaces(args []string, output io.Writer) (runErr error) {
@@ -34,20 +34,20 @@ func manageWorkspaces(args []string, output io.Writer) (runErr error) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	store, err := state.Open(ctx)
+	store, err := session.OpenStore(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { runErr = errors.Join(runErr, store.Close()) }()
-	session, err := store.Session(ctx, id)
+	record, err := store.Session(ctx, id)
 	if err != nil {
 		return err
 	}
-	if !session.WorkspaceManaged {
+	if !record.WorkspaceManaged {
 		return errors.New("operator-supplied workspaces cannot be removed by Pact")
 	}
-	fmt.Fprintf(output, "Session %d workspace: %s\n", id, session.Workspace)
-	sessions, err := store.Sessions(ctx, session.Workspace)
+	fmt.Fprintf(output, "Session %d workspace: %s\n", id, record.Workspace)
+	sessions, err := store.Sessions(ctx, record.Workspace)
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func manageWorkspaces(args []string, output io.Writer) (runErr error) {
 		fmt.Fprintf(output, "To request removal after ownership checks: pact workspaces remove %d --yes\n", id)
 		return nil
 	}
-	if err := store.RemoveWorkspace(ctx, session.Storage.WorkspaceID); err != nil {
+	if err := session.RemoveWorkspace(ctx, store, record.Storage.WorkspaceID); err != nil {
 		return err
 	}
 	fmt.Fprintln(output, "Workspace removed; retained session history is still available.")

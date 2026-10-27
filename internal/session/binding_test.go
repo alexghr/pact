@@ -10,7 +10,7 @@ import (
 
 func TestSessionBindingOnlyChangesBoundSession(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := state.Open(t.Context())
+	store, err := OpenStore(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

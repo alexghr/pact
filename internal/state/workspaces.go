@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,113 +98,25 @@ func (s *Store) checkWorkspace(w Workspace) error {
 	return nil
 }
 
-// checkWorkspaceOverlap refuses deletion through an overlapping registration.
-func (s *Store) checkWorkspaceOverlap(ctx context.Context, w Workspace) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT path FROM workspaces WHERE id <> ?", w.ID)
+// Workspaces returns recorded directories without inspecting the filesystem.
+func (s *Store) Workspaces(ctx context.Context) ([]Workspace, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT id, path, owner, managed, status, identity FROM workspaces ORDER BY id")
 	if err != nil {
-		return err
+		return nil, err
 	}
+	defer rows.Close()
+	var workspaces []Workspace
 	for rows.Next() {
-		var path string
-		if err := rows.Scan(&path); err != nil {
-			rows.Close()
-			return err
+		var w Workspace
+		if err := rows.Scan(&w.ID, &w.Path, &w.Owner, &w.Managed, &w.Status, &w.Identity); err != nil {
+			return nil, err
 		}
-		for _, pair := range [][2]string{{w.Path, path}, {path, w.Path}} {
-			rel, err := filepath.Rel(pair[0], pair[1])
-			if err != nil || rel == "." || filepath.IsLocal(rel) {
-				rows.Close()
-				return fmt.Errorf("workspace %s overlaps another registration at %s; resolve its references before removal", w.Path, path)
-			}
-		}
+		workspaces = append(workspaces, w)
 	}
-	return errors.Join(rows.Err(), rows.Close())
+	return workspaces, rows.Err()
 }
 
-// RemoveWorkspace only removes the recorded managed directory.
-// cleanupPending is durable before deletion, so interruption never permits a
-// launch into a partially removed directory. Retrying finishes the same intent.
-func (s *Store) RemoveWorkspace(ctx context.Context, id int64) error {
-	w, err := s.Workspace(ctx, id)
-	if err != nil {
-		return err
-	}
-	if err := s.checkWorkspaceOverlap(ctx, w); err != nil {
-		return err
-	}
-	if !w.Managed || w.Owner != fmt.Sprintf("uid:%d", os.Getuid()) {
-		return errors.New("only this operator's catalogue-owned managed workspaces can be removed")
-	}
-	if w.Identity == "" || (w.Status != "ready" && w.Status != "cleanupPending" && w.Status != "removed") {
-		return fmt.Errorf("workspace %s is %s without a completed allocation; recover it manually", w.Path, w.Status)
-	}
-	root, err := filepath.EvalSymlinks(filepath.Join(filepath.Dir(s.path), "workspaces"))
-	if err != nil {
-		return err
-	}
-	if filepath.Dir(w.Path) != root {
-		return errors.New("managed workspace storage was redirected; restore its original location")
-	}
-	parent, err := os.OpenRoot(root)
-	if err != nil {
-		return err
-	}
-	defer parent.Close()
-	name := filepath.Base(w.Path)
-	info, err := parent.Lstat(name)
-	if errors.Is(err, os.ErrNotExist) && (w.Status == "cleanupPending" || w.Status == "removed") {
-		_, err = s.db.ExecContext(ctx, "UPDATE workspaces SET status = 'removed' WHERE id = ?", w.ID)
-		return err
-	}
-	if err != nil {
-		return fmt.Errorf("workspace needs recovery: %w", err)
-	}
-	if !info.IsDir() || fileIdentity(info) != w.Identity || w.Status == "removed" {
-		return errors.New("managed workspace was redirected or replaced; refusing removal")
-	}
-	if info.Sys().(*syscall.Stat_t).Uid != uint32(os.Getuid()) {
-		return errors.New("managed workspace is no longer owned by this operator")
-	}
-	dir, err := parent.OpenRoot(name)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	info, err = dir.Stat(".")
-	if err != nil {
-		return fmt.Errorf("inspect open workspace: %w", err)
-	}
-	if fileIdentity(info) != w.Identity {
-		return errors.New("managed workspace changed while opening it; refusing removal")
-	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE workspaces SET status = 'cleanupPending' WHERE id = ?", w.ID); err != nil {
-		return err
-	}
-	entries, err := fs.ReadDir(dir.FS(), ".")
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := dir.RemoveAll(entry.Name()); err != nil {
-			return fmt.Errorf("workspace cleanup is incomplete; correct the error and retry removal: %w", err)
-		}
-	}
-	info, err = parent.Lstat(name)
-	if err != nil {
-		return fmt.Errorf("inspect workspace path before completing cleanup: %w", err)
-	}
-	if !info.IsDir() || fileIdentity(info) != w.Identity {
-		return errors.New("workspace path changed during cleanup; inspect it before retrying")
-	}
-	if err := parent.Remove(name); err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx, "UPDATE workspaces SET status = 'removed' WHERE id = ?", w.ID)
-	if err != nil {
-		return fmt.Errorf("workspace files removed; retry to record completion: %w", err)
-	}
-	return nil
+func (s *Store) UpdateWorkspace(ctx context.Context, w Workspace) error {
+	result, err := s.db.ExecContext(ctx, "UPDATE workspaces SET status = ?, identity = ? WHERE id = ?", w.Status, w.Identity, w.ID)
+	return executionUpdate(result, err)
 }

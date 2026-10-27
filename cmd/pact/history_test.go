@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alexghr/pact/internal/session"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -16,7 +17,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
 	t.Chdir(t.TempDir())
-	store, err := state.Open(t.Context())
+	store, err := session.OpenStore(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 
 func TestWorkspaceRemovalRequiresExplicitRequest(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := state.Open(t.Context())
+	store, err := session.OpenStore(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

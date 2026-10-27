@@ -14,7 +14,6 @@ import (
 	"syscall"
 
 	"github.com/alexghr/pact/internal/session"
-	"github.com/alexghr/pact/internal/state"
 )
 
 const maxSessionTitleLength = 120
@@ -95,7 +94,7 @@ func run(args []string) (runErr error) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	store, err := state.Open(ctx)
+	store, err := session.OpenStore(ctx)
 	if err != nil {
 		return err
 	}

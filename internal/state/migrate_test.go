@@ -3,6 +3,7 @@ package state
 import (
 	"database/sql"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 func openStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(t.Context())
+	store, err := Open(t.Context(), filepath.Join(os.Getenv("XDG_STATE_HOME"), "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
