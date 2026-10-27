@@ -10,40 +10,19 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
-	"github.com/alexghr/pact/internal/codex"
-	"github.com/alexghr/pact/internal/config"
-	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/environment"
-	"github.com/alexghr/pact/internal/gitbroker"
-	"github.com/alexghr/pact/internal/hostbridge"
-	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/session"
 	"github.com/alexghr/pact/internal/state"
 )
 
 const maxSessionTitleLength = 120
 
-// agentConfig holds the options passed to the container's agent entrypoint.
-// Pact's environment instructions are supplied by the container entrypoint.
 type agentConfig struct {
-	hostNet     bool
-	dind        bool
-	workspace   string
-	prompt      string
-	model       string
-	effort      string
-	config      string
-	git         config.Git
-	bridge      hostbridge.Bridge
-	mcpNames    []string
-	environment state.Storage
-	resumeID    int64
-	threadID    string
-	authFile    string
+	hostNet, dind                            bool
+	workspace, prompt, model, effort, config string
+	resumeID                                 int64
 }
 
 func parseArgs(args []string, output io.Writer) (agentConfig, error) {
@@ -95,64 +74,14 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	return cfg, nil
 }
 
-func agentContainer(cfg agentConfig, image string, uid, gid int) docker.ContainerConfig {
-	config := docker.ContainerConfig{
-		Image: image, TTY: cfg.prompt == "", Interactive: cfg.prompt == "",
-		Mounts: []docker.Mount{
-			{Type: "bind", Source: cfg.workspace, Target: "/home/pact/workspace"},
-			{Type: "volume", Source: cfg.environment.StateVolume, Target: "/home/pact/.codex"},
-			{Type: "bind", Source: cfg.authFile, Target: "/home/pact/.codex/auth.json", ReadOnly: true},
-		},
-		Env: []string{"HOST_UID=" + strconv.Itoa(uid), "HOST_GID=" + strconv.Itoa(gid),
-			"PACT_GIT_NAME=" + cfg.git.Name, "PACT_GIT_EMAIL=" + cfg.git.Email,
-			"PACT_GIT_URL=" + cfg.bridge.AgentURL() + gitbroker.HandlerPath,
-			"PACT_BINDING_URL=" + cfg.bridge.AgentURL() + "/harness/binding"},
-		Command: []string{cfg.prompt, cfg.model, cfg.effort},
-	}
-	if cfg.hostNet {
-		config.Network = "host"
-	}
-	environment.ConfigureContainer(cfg.environment, &config)
-	if cfg.resumeID > 0 {
-		config.Env = append(config.Env, "PACT_RESUME_THREAD="+cfg.threadID)
-	}
-	bridgeConfig := cfg.bridge.ContainerConfig()
-	for _, mount := range bridgeConfig.ReadOnlyMounts {
-		config.Mounts = append(config.Mounts, docker.Mount{Type: "bind", Source: mount.Source, Target: mount.Target, ReadOnly: true})
-	}
-	config.Env = append(config.Env, bridgeConfig.Env...)
-	for _, name := range cfg.mcpNames {
-		config.Command = append(config.Command, "--config", fmt.Sprintf(
-			`mcp_servers.%s={url="%s/mcp/%s"}`, name, cfg.bridge.AgentURL(), name))
-	}
-	return config
-}
-
-func runContainer(ctx context.Context, config docker.ContainerConfig, onStart func() error, consume func(io.Reader) error) (started, stopped bool, runErr error) {
-	id, err := docker.CreateContainer(ctx, config)
-	if err != nil {
-		return false, false, err
-	}
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		err := docker.RemoveContainer(cleanupCtx, id, true, true)
-		stopped = err == nil
-		runErr = errors.Join(runErr, err)
-	}()
-	started, runErr = docker.Attach(ctx, id, docker.AttachOptions{
-		Streams:     docker.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},
-		Interactive: consume == nil, Interrupt: true, OnStart: onStart, Consume: consume,
-	})
-	return
-}
-
 func run(args []string) (runErr error) {
-	if len(args) > 0 && args[0] == "sessions" {
-		return manageSessions(args[1:], os.Stdout)
-	}
-	if len(args) > 0 && args[0] == "workspaces" {
-		return manageWorkspaces(args[1:], os.Stdout)
+	if len(args) > 0 {
+		switch args[0] {
+		case "sessions":
+			return manageSessions(args[1:], os.Stdout)
+		case "workspaces":
+			return manageWorkspaces(args[1:], os.Stdout)
+		}
 	}
 	var cfg agentConfig
 	var err error
@@ -164,136 +93,32 @@ func run(args []string) (runErr error) {
 	if err != nil {
 		return err
 	}
-	settings, err := config.Load(cfg.config)
-	if err != nil {
-		return err
-	}
-	cfg.git = settings.Git
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	cfg.authFile, err = createAuthSnapshot(filepath.Join(home, ".codex", "auth.json"))
-	if err != nil {
-		return err
-	}
-	defer os.Remove(cfg.authFile)
-	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithCancelCause(signalCtx)
-	defer cancel(nil)
-	servers, err := mcpServers(settings.MCP)
-	if err != nil {
-		return err
-	}
-	for _, server := range servers {
-		cfg.mcpNames = append(cfg.mcpNames, strings.TrimPrefix(server.Path, "/mcp/"))
-	}
 	store, err := state.Open(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { runErr = errors.Join(runErr, store.Close()) }()
-	var launch state.Launch
+	nix, err := session.PrepareNix(ctx, store)
+	if err != nil {
+		return err
+	}
+	var current *session.Session
 	if cfg.resumeID > 0 {
-		var saved state.LaunchSettings
-		launch, saved, err = store.ResumeLaunch(ctx, cfg.resumeID)
-		cfg.model, cfg.effort, cfg.dind = saved.Model, saved.Effort, saved.Capabilities.DIND
-		cfg.hostNet = saved.Capabilities.HostNetwork
+		current, err = session.Restore(ctx, store, nix, cfg.resumeID, cfg.config)
 	} else {
-		launch, err = store.CreateLaunch(ctx, state.LaunchOptions{
-			Workspace: cfg.workspace,
-			Title:     sessionTitle(cfg.prompt),
-			Owner:     "uid:" + strconv.Itoa(os.Getuid()),
-			Backend:   "codex",
-			Settings:  state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Capabilities: state.Capabilities{DIND: cfg.dind, HostNetwork: cfg.hostNet}},
+		current, err = session.New(ctx, store, nix, session.Options{
+			Workspace: cfg.workspace, Title: sessionTitle(cfg.prompt), Model: cfg.model, Effort: cfg.effort,
+			ConfigPath: cfg.config, Capabilities: session.Capabilities{DIND: cfg.dind, HostNetwork: cfg.hostNet},
 		})
 	}
 	if err != nil {
 		return err
 	}
-	cfg.workspace = launch.Workspace
-	cfg.environment = launch.Storage
-	fmt.Fprintf(os.Stderr, "Pact session %d\n", launch.SessionID)
-	containerStarted := false
-	defer func() {
-		status := state.Succeeded
-		message := ""
-		if runErr != nil {
-			message = runErr.Error()
-			status = state.StartupFailed
-			if containerStarted {
-				status = state.Failed
-			}
-		}
-		if signalCtx.Err() != nil {
-			status = state.Interrupted
-		}
-		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer finishCancel()
-		runErr = errors.Join(runErr, store.FinishExecution(finishCtx, launch.ExecutionID, status, exitCode(runErr), message))
-	}()
-	broker, err := gitbroker.New(cfg.config, cfg.workspace)
-	if err != nil {
-		return fmt.Errorf("start Git broker: %w", err)
-	}
-	defer func() { runErr = errors.Join(runErr, broker.Close()) }()
-	servers = append(servers, hostbridge.Server{Path: gitbroker.HandlerPath, Handler: broker})
-	servers = append(servers, hostbridge.Server{Path: "/harness/binding", Handler: sessionBinding(store, launch.SessionID)})
-	bridge, err := hostbridge.Start(servers, cfg.workspace)
-	if err != nil {
-		return err
-	}
-	defer func() { runErr = errors.Join(runErr, bridge.Close()) }()
-	cfg.bridge = bridge
-	go func() {
-		select {
-		case err := <-bridge.Done():
-			cancel(errors.Join(errors.New("host bridge stopped"), err))
-		case <-ctx.Done():
-		}
-	}()
-	image, err := container.BuildAgentImage(ctx)
-	if err != nil {
-		return errors.Join(err, context.Cause(ctx))
-	}
-	if err := environment.Prepare(ctx, store, cfg.environment); err != nil {
-		return fmt.Errorf("prepare environment for session %d: %w", launch.SessionID, err)
-	}
-	if cfg.resumeID > 0 {
-		saved, err := store.Session(ctx, launch.SessionID)
-		if err != nil {
-			return err
-		}
-		cfg.threadID = saved.BackendRef
-	}
-	agent := agentContainer(cfg, image, os.Getuid(), os.Getgid())
-	if cfg.dind {
-		name, cleanup, err := startDIND(ctx, cfg.workspace)
-		if err != nil {
-			return err
-		}
-		defer func() { runErr = errors.Join(runErr, cleanup()) }()
-		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "volume", Source: name, Target: dindSocketDir})
-		agent.Env = append(agent.Env, "DOCKER_HOST="+dindSocket)
-	}
-	var consume func(io.Reader) error
-	if cfg.prompt != "" {
-		consume = func(input io.Reader) error {
-			return codex.ConsumeExec(input, func(ref string) error {
-				writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				defer cancel()
-				return store.BindBackendRef(writeCtx, launch.SessionID, ref)
-			}, os.Stdout, os.Stderr, cfg.threadID)
-		}
-	}
-	containerStarted, _, err = runContainer(ctx, agent, func() error {
-		return store.StartExecution(ctx, launch.ExecutionID)
-	}, consume)
-	if err != nil {
-		return errors.Join(err, context.Cause(ctx))
-	}
-	return context.Cause(ctx)
+	fmt.Fprintf(os.Stderr, "Pact session %d\n", current.Record.ID)
+	defer func() { runErr = errors.Join(runErr, current.Cleanup()) }()
+	return current.Start(ctx, cfg.prompt)
 }
 
 func exitCode(err error) int {

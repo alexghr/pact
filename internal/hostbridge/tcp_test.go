@@ -6,16 +6,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/environment"
 	"github.com/alexghr/pact/internal/nix"
-	"github.com/alexghr/pact/internal/state"
 )
 
 func TestTCPAuthenticationAndLifetime(t *testing.T) {
@@ -76,34 +73,20 @@ func TestTCPAuthenticationAndLifetime(t *testing.T) {
 	if os.Getenv("PACT_TEST_DOCKER") == "1" {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 		defer cancel()
-		t.Setenv("XDG_STATE_HOME", t.TempDir())
-		store, err := state.Open(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { store.Close() })
-		launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Owner: "test", Backend: "codex"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		env := launch.Storage
-		t.Cleanup(func() {
-			cleanupCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
-			defer stop()
-			_ = exec.CommandContext(cleanupCtx, "docker", "rm", "--force", env.NixVolume).Run()
-			_ = exec.CommandContext(cleanupCtx, "docker", "volume", "rm", env.StateVolume, env.NixVolume).Run()
-		})
 		image, err := container.BuildAgentImage(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = environment.Prepare(ctx, store, env)
+		target, err := url.Parse(bridge.AgentURL() + "/mcp/example")
 		if err != nil {
 			t.Fatal(err)
 		}
-		config := docker.ContainerConfig{Image: image, Remove: true, Entrypoint: "/opt/pact/tools/bin/curl",
-			Command: []string{"--noproxy", "*", "--fail", "--silent", "--show-error", "--max-time", "10", bridge.AgentURL() + "/mcp/example"}}
-		environment.ConfigureContainer(env, &config)
+		config := docker.ContainerConfig{Image: image, Remove: true, Entrypoint: "/bin/bash",
+			Command: []string{"-ec", `exec 3<>/dev/tcp/"$1"/"$2"
+printf 'GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n' "$3" "$1" >&3
+IFS= read -r status <&3
+[[ "$status" == 'HTTP/1.1 204 '* ]] || { printf '%s\n' "$status"; exit 1; }
+`, "bridge-check", target.Hostname(), target.Port(), target.RequestURI()}}
 		var output bytes.Buffer
 		if err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &output}); err != nil {
 			t.Fatalf("Docker Desktop bridge: %v: %s", err, strings.ReplaceAll(output.String(), base.Path, "/<token>"))

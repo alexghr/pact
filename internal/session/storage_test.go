@@ -1,4 +1,4 @@
-package environment
+package session
 
 import (
 	"context"
@@ -51,16 +51,16 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := t.Context()
-	if err := RemoveWorkspace(ctx, store, first.SessionID); err != nil {
+	if err := store.RemoveWorkspace(ctx, first.Storage.WorkspaceID); err != nil {
 		t.Fatalf("workspace cleanup: %v", err)
 	}
-	if err := RemoveWorkspace(ctx, store, first.SessionID); err != nil {
+	if err := store.RemoveWorkspace(ctx, first.Storage.WorkspaceID); err != nil {
 		t.Fatalf("repeated cleanup: %v", err)
 	}
 	if _, err := os.Stat(first.Workspace); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("selected workspace remains: %v", err)
 	}
-	if err := RemoveWorkspace(ctx, store, supplied.SessionID); err == nil {
+	if err := store.RemoveWorkspace(ctx, supplied.Storage.WorkspaceID); err == nil {
 		t.Fatal("operator-owned directory was eligible for removal")
 	}
 	nested := filepath.Join(sibling.Workspace, "nested")
@@ -68,7 +68,7 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	create(nested)
-	if err := RemoveWorkspace(ctx, store, sibling.SessionID); err == nil {
+	if err := store.RemoveWorkspace(ctx, sibling.Storage.WorkspaceID); err == nil {
 		t.Fatal("cleanup ignored an overlapping workspace registration")
 	}
 	for _, launch := range []state.Launch{sibling, supplied} {
@@ -127,7 +127,11 @@ func TestSharedStorage(t *testing.T) {
 		}
 	})
 	prepare := func(env state.Storage) error {
-		return Prepare(ctx, store, env)
+		nix, err := PrepareNix(ctx, store)
+		if err != nil {
+			return err
+		}
+		return prepareStorage(ctx, store, env, nix)
 	}
 	for _, env := range environments {
 		if err := prepare(env); err != nil {
@@ -142,7 +146,7 @@ func TestSharedStorage(t *testing.T) {
 				`usermod --non-unique --uid "$HOST_UID" --gid "$HOST_GID" pact; chown -R pact /home/pact; exec gosu pact /bin/bash -euc "$1"`,
 				"test-client", `export PATH=/opt/pact/tools/bin:$PATH; ` + script},
 		}
-		ConfigureContainer(env, &config)
+		configureStorage(env, &config)
 		var output strings.Builder
 		err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &output})
 		return strings.TrimSpace(output.String()), err
@@ -152,7 +156,7 @@ func TestSharedStorage(t *testing.T) {
 	liveConfig := docker.ContainerConfig{Name: live, Image: image, Detach: true,
 		User:       strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
 		Entrypoint: "/bin/bash", Command: []string{"-ec", "exec sleep infinity"}}
-	ConfigureContainer(environments[0], &liveConfig)
+	configureStorage(environments[0], &liveConfig)
 	if err := docker.RunContainer(ctx, liveConfig, docker.Streams{}); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +322,7 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	if _, err := dockerOutput(ctx, "volume", "rm", environments[0].StateVolume); err != nil {
 		t.Fatal(err)
 	}
-	if err := Prepare(ctx, store, environments[0]); err == nil || !strings.Contains(err.Error(), "restore") {
+	if err := prepare(environments[0]); err == nil || !strings.Contains(err.Error(), "restore") {
 		t.Fatalf("missing established state was silently recreated: %v", err)
 	}
 }

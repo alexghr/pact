@@ -12,7 +12,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/alexghr/pact/internal/environment"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -63,7 +62,7 @@ func manageWorkspaces(args []string, output io.Writer) (runErr error) {
 		fmt.Fprintf(output, "To request removal after ownership checks: pact workspaces remove %d --yes\n", id)
 		return nil
 	}
-	if err := environment.RemoveWorkspace(ctx, store, id); err != nil {
+	if err := store.RemoveWorkspace(ctx, session.Storage.WorkspaceID); err != nil {
 		return err
 	}
 	fmt.Fprintln(output, "Workspace removed; retained session history is still available.")

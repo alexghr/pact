@@ -226,27 +226,41 @@ func TestExecResumeRetainsContext(t *testing.T) {
 		}
 		if event.Type == "turn.started" {
 			accepted = true
-		}
-		if event.Type == "turn.failed" || event.Type == "turn.completed" {
 			break
 		}
 	}
-	// Interrupt after the real turn-acceptance event; no provider response is
-	// needed to check persistence and continuation into the interactive client.
-	stopExec()
-	_ = command.Wait()
 	if !found || !accepted {
+		stopExec()
+		_ = command.Wait()
 		t.Fatalf("native continuation did not resume: %s\n%s", output.String(), diagnostics.String())
 	}
 	_, resumed := startAppServer(t, ctx, home)
+	// Turn acceptance precedes native disk persistence. Wait for the real
+	// saved input before interrupting the unavailable provider's inference.
+	for {
+		var saved json.RawMessage
+		err := resumed.call(ctx, "thread/read", map[string]any{"threadId": started.Thread.ID, "includeTurns": true}, &saved)
+		if err == nil && bytes.Contains(saved, []byte(continuation)) {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			stopExec()
+			_ = command.Wait()
+			t.Fatal("continuation was not saved")
+		}
+	}
+	stopExec()
+	_ = command.Wait()
 	// Cold ID-only resume can lose native sandbox provenance. Interactive
 	// continuation uses Pact's permission preparation before rejoining.
 	if err := resumed.PrepareResume(ctx, started.Thread.ID); err != nil {
 		t.Fatal(err)
 	}
 	var history json.RawMessage
-	if err := resumed.call(ctx, "thread/turns/list", map[string]any{
-		"threadId": started.Thread.ID, "itemsView": "full", "limit": 100,
+	if err := resumed.call(ctx, "thread/read", map[string]any{
+		"threadId": started.Thread.ID, "includeTurns": true,
 	}, &history); err != nil {
 		t.Fatal(err)
 	}

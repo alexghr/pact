@@ -2,6 +2,8 @@ package state
 
 import (
 	"context"
+	"crypto/rand"
+	"strings"
 )
 
 type SharedStorage struct {
@@ -37,4 +39,12 @@ func (s *Store) ResetStorage(ctx context.Context) error {
 func (s *Store) ProvisionSessionStorage(ctx context.Context, key string) error {
 	_, err := s.db.ExecContext(ctx, "UPDATE sessions SET provisioned = 1 WHERE storage_key = ?", key)
 	return err
+}
+
+func (s *Store) EnsureSharedStorage(ctx context.Context) (SharedStorage, error) {
+	volume := "pact-nix-" + strings.ToLower(rand.Text())
+	if _, err := s.db.ExecContext(ctx, "INSERT INTO shared_storage(singleton, volume) VALUES(1, ?) ON CONFLICT DO NOTHING", volume); err != nil {
+		return SharedStorage{}, err
+	}
+	return s.SharedStorage(ctx)
 }

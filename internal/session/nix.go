@@ -1,4 +1,4 @@
-package environment
+package session
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alexghr/pact/internal/nix"
 
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/state"
@@ -67,4 +69,41 @@ func startNixDaemon(ctx context.Context, storage state.SharedStorage, image stri
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+// PrepareNix starts or reuses the shared service. Session cleanup retains it.
+func PrepareNix(ctx context.Context, store *state.Store) (state.SharedStorage, error) {
+	storage, err := store.EnsureSharedStorage(ctx)
+	if err != nil {
+		return storage, err
+	}
+	image, err := container.BuildDaemonImage(ctx)
+	if err != nil {
+		return storage, err
+	}
+	info, err := docker.Inspect(ctx, "volume", storage.Volume)
+	if err != nil {
+		return storage, err
+	}
+	if info == nil && storage.Provisioned {
+		if err := store.ResetStorage(ctx); err != nil {
+			return storage, err
+		}
+		storage.Provisioned = false
+		fmt.Fprintln(os.Stderr, "Shared Nix volume is missing; recreating the package cache. Project dependencies will need rebuilding.")
+	}
+	if err := volume(ctx, storage.Volume, storage.Volume, false); err != nil {
+		return storage, err
+	}
+	if err := startNixDaemon(ctx, storage, image); err != nil {
+		return storage, err
+	}
+	if err := store.ProvisionStorage(ctx); err != nil {
+		return storage, err
+	}
+	if err := realiseTools(ctx, storage.Volume); err != nil {
+		return storage, err
+	}
+	storage.Provisioned = true
+	return storage, nil
 }

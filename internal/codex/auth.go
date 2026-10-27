@@ -1,4 +1,4 @@
-package main
+package codex
 
 import (
 	"encoding/json"
@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// createAuthSnapshot projects only native ChatGPT login fields. The empty
+// CreateAuthSnapshot projects only native ChatGPT login fields. The empty
 // refresh_token satisfies Codex's parser without allowing container refreshes.
 // Preserve last_refresh so native login-age handling stays in effect.
-func createAuthSnapshot(source string) (string, error) {
+func CreateAuthSnapshot(source string) (string, error) {
 	data, err := os.ReadFile(source)
 	if err != nil {
 		return "", fmt.Errorf("read host Codex login: %w", err)
