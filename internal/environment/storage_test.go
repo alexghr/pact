@@ -342,10 +342,8 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	forget := func(env state.Environment) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, `
-			DELETE FROM execution_resources WHERE cleaned = 1 AND execution_id IN
-			    (SELECT x.id FROM executions x JOIN sessions s ON s.id = x.session_id WHERE s.environment_id = ?);
 			DELETE FROM executions WHERE session_id IN (SELECT id FROM sessions WHERE environment_id = ?);
-			DELETE FROM sessions WHERE environment_id = ?`, env.ID, env.ID, env.ID); err != nil {
+			DELETE FROM sessions WHERE environment_id = ?`, env.ID, env.ID); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -1,4 +1,4 @@
-package sidecar
+package main
 
 import (
 	"bufio"
@@ -41,7 +41,7 @@ func TestDINDStartCancellation(t *testing.T) {
 			stop()
 		}
 	}()
-	volume, cleanup, err := StartDINDSidecar(startCtx, t.TempDir())
+	volume, cleanup, err := startDIND(startCtx, t.TempDir())
 	if err == nil {
 		defer cleanup()
 		t.Fatal("startup was not interrupted at resource creation")

@@ -10,7 +10,6 @@ import (
 
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/nix"
-	"github.com/alexghr/pact/internal/sidecar"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -84,10 +83,7 @@ func Prepare(ctx context.Context, store *state.Store, env state.Environment) err
 	if err := volume(ctx, storage.Volume, storage.Volume, false); err != nil {
 		return err
 	}
-	if err := sidecar.StartNixSidecar(ctx, sidecar.NixConfig{
-		Volume: storage.Volume, Image: daemonImage, Provisioned: storage.Provisioned,
-		Labels: map[string]string{ownershipLabel: storage.Volume},
-	}); err != nil {
+	if err := startNixDaemon(ctx, storage, daemonImage); err != nil {
 		return err
 	}
 	if err := store.ProvisionStorage(ctx); err != nil {

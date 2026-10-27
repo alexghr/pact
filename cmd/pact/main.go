@@ -22,7 +22,6 @@ import (
 	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/nix"
-	"github.com/alexghr/pact/internal/sidecar"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -303,13 +302,13 @@ func run(args []string) (runErr error) {
 	}()
 	agent := agentContainer(cfg, image, os.Getuid(), os.Getgid())
 	if cfg.dind {
-		name, cleanup, err := sidecar.StartDINDSidecar(ctx, cfg.workspace)
+		name, cleanup, err := startDIND(ctx, cfg.workspace)
 		if err != nil {
 			return err
 		}
 		defer func() { runErr = errors.Join(runErr, cleanup()) }()
-		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "volume", Source: name, Target: sidecar.DINDSocketDir})
-		agent.Env = append(agent.Env, "DOCKER_HOST="+sidecar.DINDSocket)
+		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "volume", Source: name, Target: dindSocketDir})
+		agent.Env = append(agent.Env, "DOCKER_HOST="+dindSocket)
 	}
 	var consume func(io.Reader) error
 	if cfg.prompt != "" {

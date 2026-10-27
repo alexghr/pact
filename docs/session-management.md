@@ -261,10 +261,11 @@ input and present results; none should implement a second session scheduler.
 
 Container, volume, and image operations go through
 [`internal/docker`](../internal/docker/docker.go), including mount encoding and
-attached I/O. [`internal/sidecar`](../internal/sidecar/nix.go) starts the shared
-Nix daemon and private DinD containers. Storage provisioning and retention remain
-in `internal/environment`; the launcher records completion and calls local
-cleanup functions. Bridge, broker, and private DinD lifetimes follow the
+attached I/O. [`internal/environment`](../internal/environment/nix.go) starts the
+shared Nix daemon as part of storage preparation. The launcher starts private
+DinD containers in `cmd/pact`. Storage provisioning and retention remain in
+`internal/environment`; the launcher records completion and calls local cleanup
+functions. Bridge, broker, and private DinD lifetimes follow the
 launcher and must follow future supervision. DinD shares workspace and socket
 storage, without agent state or credentials.
 
