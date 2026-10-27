@@ -13,5 +13,5 @@ func RemoveWorkspace(ctx context.Context, store *state.Store, sessionID int64) e
 	if err != nil {
 		return err
 	}
-	return store.RemoveWorkspace(ctx, session.Environment.WorkspaceID)
+	return store.RemoveWorkspace(ctx, session.Storage.WorkspaceID)
 }

@@ -12,16 +12,19 @@ import (
 )
 
 // LaunchSettings records non-secret execution choices, not conversation content.
-type LaunchSettings struct {
-	Model    string `json:"model"`
-	Effort   string `json:"effort,omitempty"`
-	Prompted bool   `json:"prompted"`
-	DinD     bool   `json:"dind"`
-	HostNet  bool   `json:"hostNet,omitempty"`
+type Capabilities struct {
+	DIND        bool `json:"dind"`
+	HostNetwork bool `json:"hostNetwork"`
 }
 
-type Environment struct {
-	ID          string
+type LaunchSettings struct {
+	Model        string       `json:"model"`
+	Effort       string       `json:"effort,omitempty"`
+	Capabilities Capabilities `json:"capabilities"`
+}
+
+type Storage struct {
+	Key         string
 	WorkspaceID int64
 	StateVolume string
 	NixVolume   string
@@ -40,7 +43,7 @@ type Launch struct {
 	SessionID   int64
 	ExecutionID int64
 	Workspace   string
-	Environment Environment
+	Storage     Storage
 }
 
 type ExecutionStatus string
@@ -87,23 +90,23 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 		return Launch{}, fmt.Errorf("register workspace: %w", err)
 	}
 	launch := Launch{
-		Workspace:   workspace,
-		Environment: Environment{ID: rand.Text()},
+		Workspace: workspace,
+		Storage:   Storage{Key: rand.Text()},
 	}
 	volume := "pact-nix-" + strings.ToLower(rand.Text())
 	if _, err := tx.ExecContext(ctx, "INSERT INTO shared_storage(singleton, volume) VALUES(1, ?) ON CONFLICT DO NOTHING", volume); err != nil {
 		return Launch{}, fmt.Errorf("record shared storage intent: %w", err)
 	}
-	if err := tx.QueryRowContext(ctx, "SELECT volume FROM shared_storage WHERE singleton = 1").Scan(&launch.Environment.NixVolume); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT volume FROM shared_storage WHERE singleton = 1").Scan(&launch.Storage.NixVolume); err != nil {
 		return Launch{}, err
 	}
-	launch.Environment.StateVolume = "pact-state-" + strings.ToLower(launch.Environment.ID)
-	if err := tx.QueryRowContext(ctx, "SELECT id FROM workspaces WHERE path = ?", workspace).Scan(&launch.Environment.WorkspaceID); err != nil {
+	launch.Storage.StateVolume = "pact-state-" + strings.ToLower(launch.Storage.Key)
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM workspaces WHERE path = ?", workspace).Scan(&launch.Storage.WorkspaceID); err != nil {
 		return Launch{}, fmt.Errorf("find workspace: %w", err)
 	}
 	if !managed {
 		var w Workspace
-		if err := tx.QueryRowContext(ctx, "SELECT path, managed, status, identity FROM workspaces WHERE id = ?", launch.Environment.WorkspaceID).
+		if err := tx.QueryRowContext(ctx, "SELECT path, managed, status, identity FROM workspaces WHERE id = ?", launch.Storage.WorkspaceID).
 			Scan(&w.Path, &w.Managed, &w.Status, &w.Identity); err != nil {
 			return Launch{}, err
 		}
@@ -111,16 +114,9 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 			return Launch{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO environments(id, workspace_id, state_volume, nix_volume, created_at) VALUES(?, ?, ?, ?, ?)",
-		launch.Environment.ID, launch.Environment.WorkspaceID, launch.Environment.StateVolume, launch.Environment.NixVolume, now,
-	); err != nil {
-		return Launch{}, fmt.Errorf("record environment: %w", err)
-	}
 	result, err := tx.ExecContext(ctx,
-		"INSERT INTO sessions(environment_id, owner, backend, created_at, title) VALUES(?, ?, ?, ?, ?)",
-		launch.Environment.ID, options.Owner, options.Backend, now, options.Title,
-	)
+		"INSERT INTO sessions(workspace_id, storage_key, state_volume, nix_volume, owner, backend, created_at, title) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+		launch.Storage.WorkspaceID, launch.Storage.Key, launch.Storage.StateVolume, launch.Storage.NixVolume, options.Owner, options.Backend, now, options.Title)
 	if err != nil {
 		return Launch{}, fmt.Errorf("record session: %w", err)
 	}

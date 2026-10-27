@@ -36,7 +36,7 @@ func TestSessionListing(t *testing.T) {
 		t.Fatalf("all-workspaces listing: %v, %v", all, err)
 	}
 	session, err := store.Session(t.Context(), first.SessionID)
-	if err != nil || session.Environment != first.Environment {
+	if err != nil || session.Storage != first.Storage {
 		t.Fatalf("saved session environment changed: %+v, %v", session, err)
 	}
 }

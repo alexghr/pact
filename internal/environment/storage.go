@@ -50,8 +50,8 @@ func volume(ctx context.Context, name, owner string, provisioned bool) error {
 
 // Prepare reuses recorded resource identities.
 // Resources remain after any error so an interrupted provision can be retried.
-func Prepare(ctx context.Context, store *state.Store, env state.Environment) error {
-	env, err := store.Environment(ctx, env.ID)
+func Prepare(ctx context.Context, store *state.Store, env state.Storage) error {
+	env, err := store.Storage(ctx, env.Key)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func Prepare(ctx context.Context, store *state.Store, env state.Environment) err
 	if err != nil {
 		return err
 	}
-	if err := volume(ctx, env.StateVolume, env.ID, env.Provisioned); err != nil {
+	if err := volume(ctx, env.StateVolume, env.Key, env.Provisioned); err != nil {
 		return err
 	}
 	sharedExists, err := exists(ctx, "volume", storage.Volume)
@@ -99,17 +99,17 @@ func Prepare(ctx context.Context, store *state.Store, env state.Environment) err
 		`mkdir -p "$1/toolsets"
 chown "$2:$3" "$1"
 tools=$(readlink -f /nix/var/nix/profiles/pact-tools)
-ln -sfn "$tools" "$1/toolsets/${tools##*/}"`, "sh", Roots+env.ID, strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid())); err != nil {
+ln -sfn "$tools" "$1/toolsets/${tools##*/}"`, "sh", Roots+env.Key, strconv.Itoa(os.Getuid()), strconv.Itoa(os.Getgid())); err != nil {
 		return err
 	}
-	return store.ProvisionEnvironment(ctx, env.ID)
+	return store.ProvisionSessionStorage(ctx, env.Key)
 }
 
 // ConfigureContainer only grants writes to this environment's roots, never the store/DB.
-func ConfigureContainer(env state.Environment, config *docker.ContainerConfig) {
+func ConfigureContainer(env state.Storage, config *docker.ContainerConfig) {
 	config.Mounts = append(config.Mounts,
 		docker.Mount{Type: "volume", Source: env.NixVolume, Target: "/nix", ReadOnly: true, NoCopy: true},
-		docker.Mount{Type: "volume", Source: env.NixVolume, Subpath: "var/nix/gcroots/environments/" + env.ID, Target: Roots + env.ID, NoCopy: true},
+		docker.Mount{Type: "volume", Source: env.NixVolume, Subpath: "var/nix/gcroots/environments/" + env.Key, Target: Roots + env.Key, NoCopy: true},
 	)
-	config.Env = append(config.Env, "NIX_REMOTE=daemon", "PACT_NIX_ROOTS="+Roots+env.ID)
+	config.Env = append(config.Env, "NIX_REMOTE=daemon", "PACT_NIX_ROOTS="+Roots+env.Key)
 }

@@ -50,7 +50,7 @@ func (s *Store) allocateWorkspace(ctx context.Context, launch Launch) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, "UPDATE workspaces SET identity = ?, status = 'ready' WHERE id = ?", identity, launch.Environment.WorkspaceID)
+	_, err = s.db.ExecContext(ctx, "UPDATE workspaces SET identity = ?, status = 'ready' WHERE id = ?", identity, launch.Storage.WorkspaceID)
 	return err
 }
 

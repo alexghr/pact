@@ -97,7 +97,7 @@ func TestManagedLaunchFailureCanResume(t *testing.T) {
 		t.Fatal("resume succeeded without Docker")
 	}
 	after, err := store.Session(t.Context(), session.ID)
-	if err != nil || after.Environment != session.Environment || after.Workspace != session.Workspace {
+	if err != nil || after.Storage != session.Storage || after.Workspace != session.Workspace {
 		t.Fatalf("resume changed retained environment: %+v, %v", after, err)
 	}
 	if data, err := os.ReadFile(file); err != nil || string(data) != "keep" {

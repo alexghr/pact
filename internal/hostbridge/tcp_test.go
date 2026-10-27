@@ -86,7 +86,7 @@ func TestTCPAuthenticationAndLifetime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := launch.Environment
+		env := launch.Storage
 		t.Cleanup(func() {
 			cleanupCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 			defer stop()

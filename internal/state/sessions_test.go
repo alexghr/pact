@@ -45,13 +45,13 @@ func TestLaunchAllocation(t *testing.T) {
 	if a.launch.SessionID != 1 || b.launch.SessionID <= a.launch.SessionID {
 		t.Fatalf("session IDs = %d, %d, want distinct increasing IDs starting at 1", a.launch.SessionID, b.launch.SessionID)
 	}
-	if a.launch.Environment.WorkspaceID != b.launch.Environment.WorkspaceID {
+	if a.launch.Storage.WorkspaceID != b.launch.Storage.WorkspaceID {
 		t.Fatal("workspace alias received a separate registration")
 	}
-	if a.launch.Environment.ID == b.launch.Environment.ID || a.launch.ExecutionID == b.launch.ExecutionID {
+	if a.launch.Storage.Key == b.launch.Storage.Key || a.launch.ExecutionID == b.launch.ExecutionID {
 		t.Fatal("independent launches share environment or execution identity")
 	}
-	if a.launch.Environment.StateVolume == b.launch.Environment.StateVolume || a.launch.Environment.NixVolume != b.launch.Environment.NixVolume {
+	if a.launch.Storage.StateVolume == b.launch.Storage.StateVolume || a.launch.Storage.NixVolume != b.launch.Storage.NixVolume {
 		t.Fatal("independent environments must have private state and one shared store")
 	}
 	// Deleting the newest session must not make its issued ID available again.
@@ -71,64 +71,15 @@ func TestLaunchAllocation(t *testing.T) {
 	}
 }
 
-func TestStorageReclamationReferences(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store := openStore(t)
-	opts := LaunchOptions{Workspace: t.TempDir(), Owner: "operator", Backend: "codex"}
-	launch, err := store.CreateLaunch(t.Context(), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.FinishExecution(t.Context(), launch.ExecutionID, StartupFailed, 1, "interrupted provisioning"); err != nil {
-		t.Fatal(err)
-	}
-	stale, err := store.StaleEnvironments(t.Context())
-	if err != nil || len(stale) != 0 {
-		t.Fatalf("retained failed session eligible for GC: %v, %v", stale, err)
-	}
-	// A second retained session protects the same environment after the first
-	// reference is removed. Completed executions do not imply abandonment.
-	if _, err := store.db.ExecContext(t.Context(), `
-		INSERT INTO sessions(environment_id, owner, backend, created_at) SELECT environment_id, owner, backend, created_at FROM sessions;
-		DELETE FROM executions;
-		DELETE FROM sessions WHERE id = ?`, launch.SessionID); err != nil {
-		t.Fatal(err)
-	}
-	stale, err = store.StaleEnvironments(t.Context())
-	if err != nil || len(stale) != 0 {
-		t.Fatalf("second session reference was ignored: %v, %v", stale, err)
-	}
-	if _, err := store.db.ExecContext(t.Context(), "DELETE FROM sessions"); err != nil {
-		t.Fatal(err)
-	}
-	stale, err = store.StaleEnvironments(t.Context())
-	if err != nil || len(stale) != 1 || stale[0].ID != launch.Environment.ID {
-		t.Fatalf("unreferenced partial provision not reclaimable: %v, %v", stale, err)
-	}
-	// A different environment can still reference the volume in either role.
-	other, err := store.CreateLaunch(t.Context(), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.ExecContext(t.Context(), `
-		UPDATE environments SET nix_volume = ? WHERE id = ?`, launch.Environment.StateVolume, other.Environment.ID); err != nil {
-		t.Fatal(err)
-	}
-	stale, err = store.StaleEnvironments(t.Context())
-	if err != nil || len(stale) != 0 {
-		t.Fatalf("cross-environment volume reference was ignored: %v, %v", stale, err)
-	}
-}
-
 func TestLaunchAllocationRollsBack(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	store := openStore(t)
-	// An invalid backend fails the session insert after workspace/environment insertion.
+	// An invalid backend fails the session insert after workspace insertion.
 	_, err := store.CreateLaunch(t.Context(), LaunchOptions{Workspace: t.TempDir(), Owner: "operator"})
 	if err == nil {
 		t.Fatal("launch with an empty backend succeeded")
 	}
-	for _, table := range []string{"workspaces", "environments", "sessions", "executions", "shared_storage"} {
+	for _, table := range []string{"workspaces", "sessions", "executions", "shared_storage"} {
 		var count int
 		if err := store.db.QueryRowContext(t.Context(), "SELECT count(*) FROM "+table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -156,7 +107,7 @@ func TestManagedWorkspaceLifecycle(t *testing.T) {
 	if t.Failed() {
 		t.FailNow()
 	}
-	if a.Workspace == b.Workspace || a.Environment.StateVolume == b.Environment.StateVolume {
+	if a.Workspace == b.Workspace || a.Storage.StateVolume == b.Storage.StateVolume {
 		t.Fatal("independent launches share workspace or agent state")
 	}
 	for _, launch := range []Launch{a, b} {
@@ -206,8 +157,8 @@ func TestManagedWorkspaceLifecycle(t *testing.T) {
 	if err := store.FinishExecution(t.Context(), a.ExecutionID, StartupFailed, 1, "runtime unavailable"); err != nil {
 		t.Fatal(err)
 	}
-	resumed, _, err := store.ResumeLaunch(t.Context(), a.SessionID, false)
-	if err != nil || resumed.Workspace != a.Workspace || resumed.Environment != a.Environment {
+	resumed, _, err := store.ResumeLaunch(t.Context(), a.SessionID)
+	if err != nil || resumed.Workspace != a.Workspace || resumed.Storage != a.Storage {
 		t.Fatalf("resume lost workspace or environment: %+v, %v", resumed, err)
 	}
 	if after := git("status", "--porcelain") + git("rev-parse", "HEAD", "MERGE_HEAD"); after != before {
@@ -219,13 +170,13 @@ func TestManagedWorkspaceLifecycle(t *testing.T) {
 	if err := os.Rename(a.Workspace, a.Workspace+"-original"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.ResumeLaunch(t.Context(), a.SessionID, false); err == nil {
+	if _, _, err := store.ResumeLaunch(t.Context(), a.SessionID); err == nil {
 		t.Fatal("resume replaced a missing retained directory")
 	}
 	if err := os.Mkdir(a.Workspace, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.ResumeLaunch(t.Context(), a.SessionID, false); err == nil {
+	if _, _, err := store.ResumeLaunch(t.Context(), a.SessionID); err == nil {
 		t.Fatal("resume accepted a replacement directory")
 	}
 }
@@ -246,7 +197,7 @@ func TestManagedAllocationFailureIsRetained(t *testing.T) {
 	if err != nil || len(sessions) != 1 || sessions[0].Status != "startupFailed" || !sessions[0].WorkspaceManaged || sessions[0].WorkspaceStatus != "allocating" {
 		t.Fatalf("failure lost allocation records: %+v, %v", sessions, err)
 	}
-	if _, _, err := store.ResumeLaunch(t.Context(), sessions[0].ID, false); err == nil {
+	if _, _, err := store.ResumeLaunch(t.Context(), sessions[0].ID); err == nil {
 		t.Fatal("resume silently completed a failed allocation")
 	}
 }
@@ -266,7 +217,7 @@ func TestWorkspaceRemovalRecovery(t *testing.T) {
 	if err := os.Symlink(t.TempDir(), launch.Workspace); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RemoveWorkspace(t.Context(), launch.Environment.WorkspaceID); err == nil {
+	if err := store.RemoveWorkspace(t.Context(), launch.Storage.WorkspaceID); err == nil {
 		t.Fatal("cleanup followed a redirected workspace")
 	}
 	if err := os.Remove(launch.Workspace); err != nil {
@@ -286,14 +237,14 @@ func TestWorkspaceRemovalRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(protected, 0700) })
-	if err := store.RemoveWorkspace(t.Context(), launch.Environment.WorkspaceID); err == nil {
+	if err := store.RemoveWorkspace(t.Context(), launch.Storage.WorkspaceID); err == nil {
 		t.Fatal("removal succeeded despite protected contents")
 	}
 	session, err := store.Session(t.Context(), launch.SessionID)
 	if err != nil || session.WorkspaceStatus != "cleanupPending" {
 		t.Fatalf("partial deletion lost intent: %+v, %v", session, err)
 	}
-	if _, _, err := store.ResumeLaunch(t.Context(), launch.SessionID, false); err == nil {
+	if _, _, err := store.ResumeLaunch(t.Context(), launch.SessionID); err == nil {
 		t.Fatal("resume wrote into partially removed workspace")
 	}
 	if _, err := store.CreateLaunch(t.Context(), LaunchOptions{Workspace: launch.Workspace, Backend: "codex"}); err == nil {
@@ -302,18 +253,18 @@ func TestWorkspaceRemovalRecovery(t *testing.T) {
 	if err := os.Chmod(protected, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RemoveWorkspace(t.Context(), launch.Environment.WorkspaceID); err != nil {
+	if err := store.RemoveWorkspace(t.Context(), launch.Storage.WorkspaceID); err != nil {
 		t.Fatalf("could not retry partial deletion: %v", err)
 	}
 	// Reproduce an interruption after filesystem removal but before recording
 	// completion. Retrying must finish the intent without allocating a directory.
-	if _, err := store.db.ExecContext(t.Context(), "UPDATE workspaces SET status = 'cleanupPending' WHERE id = ?", launch.Environment.WorkspaceID); err != nil {
+	if _, err := store.db.ExecContext(t.Context(), "UPDATE workspaces SET status = 'cleanupPending' WHERE id = ?", launch.Storage.WorkspaceID); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RemoveWorkspace(t.Context(), launch.Environment.WorkspaceID); err != nil {
+	if err := store.RemoveWorkspace(t.Context(), launch.Storage.WorkspaceID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.ResumeLaunch(t.Context(), launch.SessionID, false); err == nil || !strings.Contains(err.Error(), "intentionally removed") {
+	if _, _, err := store.ResumeLaunch(t.Context(), launch.SessionID); err == nil || !strings.Contains(err.Error(), "intentionally removed") {
 		t.Fatalf("removed workspace was recreated or unexplained: %v", err)
 	}
 	if err := os.Mkdir(launch.Workspace, 0700); err != nil {
@@ -322,7 +273,7 @@ func TestWorkspaceRemovalRecovery(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(launch.Workspace, "replacement"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RemoveWorkspace(t.Context(), launch.Environment.WorkspaceID); err == nil {
+	if err := store.RemoveWorkspace(t.Context(), launch.Storage.WorkspaceID); err == nil {
 		t.Fatal("repeated removal deleted a replacement directory")
 	}
 }

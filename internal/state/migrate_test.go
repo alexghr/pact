@@ -1,6 +1,9 @@
 package state
 
 import (
+	"database/sql"
+	"io/fs"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -108,5 +111,63 @@ func TestMigrationChangedAfterApplying(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("changed migration was executed")
+	}
+}
+
+func TestUpgradeRetainsSessionBindingAndStorage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := &Store{db: db, path: path}
+	old := fstest.MapFS{}
+	names, err := fs.Glob(migrations, "migrations/000*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		data, err := fs.ReadFile(migrations, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		old[name] = &fstest.MapFile{Data: data}
+	}
+	if err := store.migrate(t.Context(), old); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	_, err = db.Exec(`
+        INSERT INTO workspaces(id,path,owner,created_at) VALUES(1,?,'operator',1);
+        INSERT INTO environments(id,workspace_id,state_volume,nix_volume,created_at,provisioned)
+          VALUES('LegacyRoot',1,'pact-state-legacyroot','pact-nix-existing',1,1);
+        INSERT INTO sessions(id,environment_id,owner,backend,created_at,title)
+          VALUES(9,'LegacyRoot','operator','codex',1,'Retained work');
+        INSERT INTO executions(id,session_id,settings,status,created_at,thread_id)
+          VALUES(1,9,'{"model":"saved","dind":true,"hostNet":true}','succeeded',1,'original');
+        INSERT INTO executions(id,session_id,settings,status,created_at,thread_id)
+          VALUES(2,9,'{"model":"saved","dind":true,"hostNet":true}','succeeded',2,'later-native-thread');
+        `, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.migrate(t.Context(), migrations); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.Session(t.Context(), 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.BackendRef != "original" || !saved.Settings.Capabilities.DIND || !saved.Settings.Capabilities.HostNetwork || saved.Workspace != workspace || saved.Storage.Key != "LegacyRoot" ||
+		saved.Storage.StateVolume != "pact-state-legacyroot" || saved.Storage.NixVolume != "pact-nix-existing" || !saved.Storage.Provisioned {
+		t.Fatalf("upgrade changed session identity or storage: %+v", saved)
+	}
+	if err := store.BindBackendRef(t.Context(), 9, "another"); err != nil {
+		t.Fatal(err)
+	}
+	resumed, _, err := store.ResumeLaunch(t.Context(), 9)
+	if err != nil || resumed.Storage != saved.Storage || resumed.Workspace != workspace {
+		t.Fatalf("upgrade lost resume resources: %+v, %v", resumed, err)
 	}
 }

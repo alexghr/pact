@@ -40,7 +40,7 @@ type agentConfig struct {
 	git         config.Git
 	bridge      hostbridge.Bridge
 	mcpNames    []string
-	environment state.Environment
+	environment state.Storage
 	resumeID    int64
 	threadID    string
 	authFile    string
@@ -63,7 +63,6 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 	flags.StringVar(&cfg.config, "config", "", "Config file (default: $XDG_CONFIG_HOME/pact/config.json or ~/.config/pact/config.json)")
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
-		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
 		fmt.Fprintln(output, "       pact workspaces remove SESSION_ID [--yes]")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID")
 		fmt.Fprintln(output, "       pact resume SESSION_ID [--prompt TEXT] [--config PATH]")
@@ -149,9 +148,6 @@ func runContainer(ctx context.Context, config docker.ContainerConfig, onStart fu
 }
 
 func run(args []string) (runErr error) {
-	if len(args) > 0 && args[0] == "environments" {
-		return manageEnvironments(args[1:])
-	}
 	if len(args) > 0 && args[0] == "sessions" {
 		return manageSessions(args[1:], os.Stdout)
 	}
@@ -201,23 +197,23 @@ func run(args []string) (runErr error) {
 	var launch state.Launch
 	if cfg.resumeID > 0 {
 		var saved state.LaunchSettings
-		launch, saved, err = store.ResumeLaunch(ctx, cfg.resumeID, cfg.prompt != "")
-		cfg.model, cfg.effort, cfg.dind = saved.Model, saved.Effort, saved.DinD
-		cfg.hostNet = saved.HostNet
+		launch, saved, err = store.ResumeLaunch(ctx, cfg.resumeID)
+		cfg.model, cfg.effort, cfg.dind = saved.Model, saved.Effort, saved.Capabilities.DIND
+		cfg.hostNet = saved.Capabilities.HostNetwork
 	} else {
 		launch, err = store.CreateLaunch(ctx, state.LaunchOptions{
 			Workspace: cfg.workspace,
 			Title:     sessionTitle(cfg.prompt),
 			Owner:     "uid:" + strconv.Itoa(os.Getuid()),
 			Backend:   "codex",
-			Settings:  state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Prompted: cfg.prompt != "", DinD: cfg.dind, HostNet: cfg.hostNet},
+			Settings:  state.LaunchSettings{Model: cfg.model, Effort: cfg.effort, Capabilities: state.Capabilities{DIND: cfg.dind, HostNetwork: cfg.hostNet}},
 		})
 	}
 	if err != nil {
 		return err
 	}
 	cfg.workspace = launch.Workspace
-	cfg.environment = launch.Environment
+	cfg.environment = launch.Storage
 	fmt.Fprintf(os.Stderr, "Pact session %d\n", launch.SessionID)
 	containerStarted := false
 	defer func() {

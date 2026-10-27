@@ -2,7 +2,6 @@ package environment
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -79,7 +78,7 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 	}
 	for _, launch := range []state.Launch{first, shared} {
 		session, err := store.Session(ctx, launch.SessionID)
-		if err != nil || session.WorkspaceStatus != "removed" || session.Environment != launch.Environment {
+		if err != nil || session.WorkspaceStatus != "removed" || session.Storage != launch.Storage {
 			t.Fatalf("cleanup lost history/environment or removal reason: %+v, %v", session, err)
 		}
 	}
@@ -107,13 +106,13 @@ func TestSharedStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var environments []state.Environment
+	var environments []state.Storage
 	for range 2 {
 		launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Owner: "test", Backend: "codex"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		environments = append(environments, launch.Environment)
+		environments = append(environments, launch.Storage)
 	}
 	shared := environments[0].NixVolume
 	t.Cleanup(func() {
@@ -127,7 +126,7 @@ func TestSharedStorage(t *testing.T) {
 			_, _ = dockerOutput(cleanupCtx, "volume", "rm", name)
 		}
 	})
-	prepare := func(env state.Environment) error {
+	prepare := func(env state.Storage) error {
 		return Prepare(ctx, store, env)
 	}
 	for _, env := range environments {
@@ -135,7 +134,7 @@ func TestSharedStorage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	client := func(env state.Environment, script string) (string, error) {
+	client := func(env state.Storage, script string) (string, error) {
 		config := docker.ContainerConfig{Image: image, Remove: true, Entrypoint: "/bin/bash",
 			Mounts: []docker.Mount{{Type: "volume", Source: env.StateVolume, Target: "/home/pact/.codex"}},
 			Env:    []string{"HOME=/home/pact", "HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid())},
@@ -321,100 +320,6 @@ readlink -f "$PACT_NIX_ROOTS/package"
 	}
 	if err := Prepare(ctx, store, environments[0]); err == nil || !strings.Contains(err.Error(), "restore") {
 		t.Fatalf("missing established state was silently recreated: %v", err)
-	}
-	removed, err := Collect(ctx, store)
-	if err != nil || len(removed) != 0 {
-		t.Fatalf("GC reclaimed a retained session: %v, %v", removed, err)
-	}
-	// Exercise the physical cleanup after removing catalogue references, as a
-	// future session-deletion operation would. The real FK constraints still apply.
-	db, err := sql.Open("sqlite3", filepath.Join(os.Getenv("XDG_STATE_HOME"), "pact", "sessions.db")+"?_foreign_keys=on")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	forget := func(env state.Environment) {
-		t.Helper()
-		if _, err := db.ExecContext(ctx, `
-			DELETE FROM executions WHERE session_id IN (SELECT id FROM sessions WHERE environment_id = ?);
-			DELETE FROM sessions WHERE environment_id = ?`, env.ID, env.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for i, env := range environments {
-		forget(env)
-		if i == 1 {
-			// A stopped container retains storage too, even without catalogue refs.
-			name := env.StateVolume + "-client"
-			if _, err := dockerOutput(ctx, "create", "--name", name, "--volume", env.StateVolume+":/state", image); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() {
-				cleanupCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
-				defer stop()
-				_, _ = dockerOutput(cleanupCtx, "rm", "--force", name)
-			})
-			removed, err = Collect(ctx, store)
-			if err != nil || len(removed) != 0 {
-				t.Fatalf("GC ignored a Docker container reference: %v, %v", removed, err)
-			}
-			if _, err := dockerOutput(ctx, "rm", name); err != nil {
-				t.Fatal(err)
-			}
-		}
-		removed, err = Collect(ctx, store)
-		if err != nil || len(removed) != 1 || removed[0] != env.ID {
-			t.Fatalf("unreferenced environment not reclaimed: %v, %v", removed, err)
-		}
-		if found, err := exists(ctx, "volume", env.StateVolume); err != nil || found {
-			t.Fatalf("private volume survived GC: %v, %v", found, err)
-		}
-		if _, err := dockerOutput(ctx, "exec", shared, "test", "!", "-e", Roots+env.ID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := dockerOutput(ctx, "exec", shared, "nix-store", "--store", "daemon", "--gc"); err != nil {
-			t.Fatal(err)
-		}
-		if i == 0 {
-			if _, err := client(environments[1], `"$PACT_NIX_ROOTS/package/bin/hello"`); err != nil {
-				t.Fatalf("removing one environment lost another's package: %v", err)
-			}
-		}
-	}
-	if _, err := dockerOutput(ctx, "exec", shared, "test", "!", "-e", packagePath); err != nil {
-		t.Fatalf("dropping the last environment root did not release its package: %v", err)
-	}
-	if err := owned(ctx, "volume", shared, shared); err != nil {
-		t.Fatalf("shared store was reclaimed: %v", err)
-	}
-	// An abandoned partial provision is eligible, but its name alone never
-	// authorizes deleting an unlabelled volume, or any unrelated Docker resource.
-	launch, err := store.CreateLaunch(ctx, state.LaunchOptions{Workspace: t.TempDir(), Owner: "test", Backend: "codex"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := launch.Environment
-	environments = append(environments, env)
-	for _, name := range []string{env.StateVolume, shared + "-unrelated"} {
-		if _, err := dockerOutput(ctx, "volume", "create", name); err != nil {
-			t.Fatal(err)
-		}
-	}
-	forget(env)
-	if _, err := Collect(ctx, store); err == nil || !strings.Contains(err.Error(), "unowned") {
-		t.Fatalf("GC accepted an unowned volume: %v", err)
-	}
-	if _, err := dockerOutput(ctx, "volume", "rm", env.StateVolume); err != nil {
-		t.Fatal(err)
-	}
-	if err := volume(ctx, env.StateVolume, env.ID, false); err != nil {
-		t.Fatal(err)
-	}
-	if removed, err := Collect(ctx, store); err != nil || len(removed) != 1 {
-		t.Fatalf("partial provision not reclaimed: %v, %v", removed, err)
-	}
-	if found, err := exists(ctx, "volume", shared+"-unrelated"); err != nil || !found {
-		t.Fatalf("GC reclaimed unrelated storage: %v, %v", found, err)
 	}
 }
 
