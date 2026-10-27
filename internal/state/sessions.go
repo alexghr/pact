@@ -54,8 +54,7 @@ const (
 )
 
 // CreateLaunch registers the workspace and allocates the launch records together.
-// An empty Workspace requests a fresh managed directory. Callers hold LockStorage
-// through execution locking and provisioning, as for ResumeLaunch.
+// An empty Workspace requests a fresh managed directory.
 func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch, error) {
 	managed := options.Workspace == ""
 	var workspace string

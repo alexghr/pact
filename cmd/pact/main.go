@@ -197,15 +197,6 @@ func run(args []string) (runErr error) {
 		return err
 	}
 	defer func() { runErr = errors.Join(runErr, store.Close()) }()
-	unlock, err := store.LockStorage(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if unlock != nil {
-			unlock()
-		}
-	}()
 	var launch state.Launch
 	if cfg.resumeID > 0 {
 		var saved state.LaunchSettings
@@ -230,11 +221,7 @@ func run(args []string) (runErr error) {
 	containerStarted := false
 	runtimeStopped := false
 	var owner *execution.Owner
-	var release func()
 	defer func() {
-		if release != nil {
-			defer release()
-		}
 		var cleanupErr error
 		if owner != nil {
 			cleanupErr = owner.Cleanup()
@@ -259,10 +246,6 @@ func run(args []string) (runErr error) {
 		defer finishCancel()
 		runErr = errors.Join(runErr, store.FinishExecution(finishCtx, launch.ExecutionID, status, exitCode(runErr), message))
 	}()
-	release, err = store.LockExecution(launch)
-	if err != nil {
-		return err
-	}
 	owner = &execution.Owner{Store: store, Launch: launch}
 	if err := owner.Recover(ctx); err != nil {
 		return err
@@ -329,8 +312,6 @@ func run(args []string) (runErr error) {
 		defer refreshCancel()
 		runErr = errors.Join(runErr, refreshSession(refreshCtx, store, launch, image, owner))
 	}()
-	unlock()
-	unlock = nil
 	agent := agentContainer(cfg, image, os.Getuid(), os.Getgid())
 	if cfg.dind {
 		name, err := sidecar.StartDINDSidecar(ctx, owner, cfg.workspace)

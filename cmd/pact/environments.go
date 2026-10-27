@@ -39,11 +39,6 @@ func manageEnvironments(args []string) (runErr error) {
 		}
 		return err
 	}
-	unlock, err := store.LockStorage(ctx)
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	env, err := store.SessionEnvironment(ctx, sessionID)
 	if err != nil {
 		return err

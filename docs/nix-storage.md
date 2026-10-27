@@ -9,10 +9,9 @@ CLI 26 or newer are required for
 
 The catalogue records the shared volume and each environment's private agent
 state volume before Docker creates anything. The environment fields remain
-backend-neutral. A storage lock beside the database serializes provisioning and
-cleanup across launcher processes; the kernel releases it after a crash. It is
-held during setup, never while an agent is working. Builds from different
-environments can run concurrently through the daemon.
+backend-neutral. Pact does not serialize provisioning or cleanup across launcher
+processes; run these operations sequentially. Builds from different environments
+can run concurrently through the daemon.
 
 The daemon container has the shared volume's recorded name, an ownership label,
 and Docker's `unless-stopped` restart policy. Session shutdown leaves it running.
@@ -106,9 +105,8 @@ session still retains its environment. The current CLI has no session deletion
 operation; ordinary recorded sessions are therefore never GC candidates. Do not
 delete catalogue rows manually to force collection.
 
-Cleanup shares the provisioning lock. It also preserves state volumes still
-referenced by another environment or Docker container, including stopped
-containers. It checks ownership labels before deleting a private state volume,
+Cleanup preserves state volumes still referenced by another environment or
+Docker container, including stopped containers. It checks ownership labels before deleting a private state volume,
 removes that environment's persistent roots through the running daemon, then
 removes the environment record. An interruption leaves enough recorded identity
 to retry. The daemon must be available once shared storage is provisioned; repair

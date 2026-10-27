@@ -97,12 +97,7 @@ func TestTCPAuthenticationAndLifetime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		unlock, err := store.LockStorage(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
 		err = environment.Prepare(ctx, store, env)
-		unlock()
 		if err != nil {
 			t.Fatal(err)
 		}

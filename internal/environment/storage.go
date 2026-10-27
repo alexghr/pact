@@ -49,7 +49,7 @@ func volume(ctx context.Context, name, owner string, provisioned bool) error {
 	return owned(ctx, "volume", name, owner)
 }
 
-// Prepare reuses recorded resource identities. Caller holds Store.LockStorage.
+// Prepare reuses recorded resource identities.
 // Resources remain after any error so an interrupted provision can be retried.
 func Prepare(ctx context.Context, store *state.Store, env state.Environment) error {
 	env, err := store.Environment(ctx, env.ID)

@@ -107,7 +107,7 @@ func (o *Owner) Remove(ctx context.Context, r state.Resource) error {
 	return o.Store.ResourceCleaned(ctx, r.Name)
 }
 
-// Cleanup runs before releasing execution ownership, even after cancellation.
+// Cleanup removes recorded resources even after cancellation.
 func (o *Owner) Cleanup() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

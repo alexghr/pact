@@ -1,7 +1,6 @@
 package environment
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -21,32 +20,6 @@ import (
 )
 
 func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
-	if id := os.Getenv("PACT_TEST_CLEANUP_SESSION"); id != "" {
-		store, err := state.Open(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer store.Close()
-		sessionID, _ := strconv.ParseInt(id, 10, 64)
-		unlock, err := store.LockStorage(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		launch, _, err := store.ResumeLaunch(t.Context(), sessionID, false)
-		if err != nil {
-			unlock()
-			t.Fatal(err)
-		}
-		release, err := store.LockExecution(launch)
-		unlock()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer release()
-		fmt.Println("owned")
-		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
-		return
-	}
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	store, err := state.Open(t.Context())
 	if err != nil {
@@ -62,8 +35,7 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 		return launch
 	}
 	first, sibling, supplied := create(""), create(""), create(t.TempDir())
-	// Every session/environment at this path must be checked, including a
-	// different session's process that currently owns the workspace.
+	// Removal must retain every session and environment sharing the workspace.
 	shared := create(first.Workspace)
 	if err := store.RecordThread(t.Context(), state.Thread{ID: "saved", SessionID: first.SessionID, Title: "Retained conversation"}); err != nil {
 		t.Fatal(err)
@@ -80,40 +52,9 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 	if err := os.Symlink(supplied.Workspace, filepath.Join(first.Workspace, "outside")); err != nil {
 		t.Fatal(err)
 	}
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	child := exec.CommandContext(ctx, binary, "-test.run=^TestWorkspaceRemovalBoundariesAndOwnership$")
-	child.Env = append(os.Environ(), fmt.Sprintf("PACT_TEST_CLEANUP_SESSION=%d", shared.SessionID))
-	input, err := child.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer input.Close()
-	output, err := child.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	child.Stderr = os.Stderr
-	if err := child.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { child.Process.Kill(); child.Wait() })
-	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "owned\n" {
-		t.Fatalf("writer did not acquire ownership: %q, %v", line, err)
-	}
-	if err := RemoveWorkspace(ctx, store, first.SessionID); err == nil {
-		t.Fatal("cleanup removed another session's live workspace")
-	}
-	if err := child.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	_ = child.Wait()
+	ctx := t.Context()
 	if err := RemoveWorkspace(ctx, store, first.SessionID); err != nil {
-		t.Fatalf("cleanup after writer exit: %v", err)
+		t.Fatalf("workspace cleanup: %v", err)
 	}
 	if err := RemoveWorkspace(ctx, store, first.SessionID); err != nil {
 		t.Fatalf("repeated cleanup: %v", err)
@@ -238,20 +179,10 @@ func TestSharedStorage(t *testing.T) {
 		}
 	})
 	prepare := func(env state.Environment) error {
-		unlock, err := store.LockStorage(ctx)
-		if err != nil {
-			return err
-		}
-		defer unlock()
 		return Prepare(ctx, store, env)
 	}
-	// Independent launchers must serialize initial provisioning and reuse the daemon.
-	results := make(chan error, 2)
 	for _, env := range environments {
-		go func() { results <- prepare(env) }()
-	}
-	for range 2 {
-		if err := <-results; err != nil {
+		if err := prepare(env); err != nil {
 			t.Fatal(err)
 		}
 	}

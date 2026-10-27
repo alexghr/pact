@@ -2,37 +2,8 @@ package state
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"syscall"
-	"time"
 )
-
-// LockStorage serializes provisioning and reclamation across launcher processes.
-// The kernel releases the lock even if a launcher crashes during provisioning.
-func (s *Store) LockStorage(ctx context.Context) (func(), error) {
-	file, err := os.OpenFile(s.path+".storage-lock", os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return nil, err
-	}
-	for {
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			return func() { file.Close() }, nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) {
-			file.Close()
-			return nil, fmt.Errorf("lock storage: %w", err)
-		}
-		select {
-		case <-ctx.Done():
-			file.Close()
-			return nil, context.Cause(ctx)
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-}
 
 type SharedStorage struct {
 	Volume      string
@@ -79,7 +50,6 @@ func (s *Store) ProvisionEnvironment(ctx context.Context, id string) error {
 
 // StaleEnvironments excludes retained sessions, unfinished executions (through
 // their session), and volumes referenced by another environment.
-// Callers hold LockStorage until Docker deletion and catalogue removal finish.
 func (s *Store) StaleEnvironments(ctx context.Context) ([]Environment, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, workspace_id, state_volume, nix_volume, provisioned

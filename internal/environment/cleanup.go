@@ -11,11 +11,6 @@ import (
 // Collect only reclaims unreferenced, catalogue-owned private resources.
 // Removing roots is separate from Nix GC; the shared store is always retained.
 func Collect(ctx context.Context, store *state.Store) ([]string, error) {
-	unlock, err := store.LockStorage(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
 	environments, err := store.StaleEnvironments(ctx)
 	if err != nil || len(environments) == 0 {
 		return nil, err

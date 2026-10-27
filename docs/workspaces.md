@@ -15,9 +15,9 @@ required at the workspace root.
 
 `pact -w PATH` uses an existing directory and records it as operator owned.
 The operator chooses the entire directory exposed to the agent through this
-mount. Repeated launches there get independent agent state but share workspace files
-and therefore the same execution lock. A supplied alias of an existing managed
-directory retains its managed ownership.
+mount. Repeated launches there get independent agent state but share workspace
+files. A supplied alias of an existing managed directory retains its managed
+ownership.
 
 ## Persistence and recovery
 
@@ -42,11 +42,9 @@ The runtime uses a bind mount that refuses missing sources rather than creating
 an empty host directory. A directory must not be moved or replaced while Pact
 owns it.
 
-New launches, provisioning, and reclamation share the catalogue storage lock.
-Executions additionally hold workspace and private-state locks through runtime
-cleanup. A crashed launcher releases its OS locks; recorded Docker resources
-still need reconciliation before another writer can start. Workspace allocation
-does not change the existing execution and environment recovery rules.
+Pact does not lock workspaces, private state, provisioning, or reclamation.
+Avoid concurrent launches or maintenance against the same resources. Recorded
+Docker resources still need reconciliation before a replacement starts.
 
 ## Explicit workspace removal
 
@@ -69,14 +67,13 @@ Pact checks the directory identity and location and refuses supplied paths,
 redirected/replaced directories, and overlapping workspace registrations. All
 sessions and environments referring to the directory participate in the same
 writer and recovery checks, including environments without a retained session.
-Shared agent-state references are locked too. A live launcher, surviving
-container, or uncertain Docker inspection blocks removal. Stop the reported
-writer explicitly and retry; cleanup never stops a surviving writer on your
+A surviving recorded container or uncertain Docker inspection blocks removal.
+Stop the reported writer explicitly and retry; cleanup never stops a surviving writer on your
 behalf.
 
-Removal holds the storage lock and every referenced execution lock throughout
-recovery and deletion. Files are removed through an open directory root so
-workspace symlinks cannot redirect deletion outside it. Catalogue intent becomes
+Removal does not serialize recovery and deletion against launches. Files are
+removed through an open directory root so workspace symlinks cannot redirect
+deletion outside it. Catalogue intent becomes
 `cleanupPending` before removing files. Interrupted or failed deletion can leave
 only some files behind; inspection reports this status and all launches/resumes
 against the directory are blocked. Correct the reported filesystem or Docker

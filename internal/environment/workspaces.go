@@ -12,11 +12,6 @@ import (
 // RemoveWorkspace retains the catalogue and private state, including environments
 // referenced by other sessions. Only the explicitly selected workspace is lost.
 func RemoveWorkspace(ctx context.Context, store *state.Store, sessionID int64) error {
-	unlock, err := store.LockStorage(ctx)
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	session, err := store.Session(ctx, sessionID)
 	if err != nil {
 		return err
@@ -32,11 +27,6 @@ func RemoveWorkspace(ctx context.Context, store *state.Store, sessionID int64) e
 	if err != nil {
 		return err
 	}
-	release, err := store.LockExecution(references...)
-	if err != nil {
-		return err
-	}
-	defer release()
 	for _, launch := range references {
 		owner := execution.Owner{Store: store, Launch: launch}
 		if err := owner.Recover(ctx); err != nil {

@@ -1,61 +1,6 @@
 package state
 
-import (
-	"context"
-	"crypto/sha256"
-	"errors"
-	"fmt"
-	"io"
-	"os"
-	"slices"
-	"syscall"
-)
-
-// LockExecution owns both the canonical workspace and private agent store.
-// Lock files live outside the workspace and remain in place after release.
-func (s *Store) LockExecution(launches ...Launch) (func(), error) {
-	var keys []string
-	for _, launch := range launches {
-		for _, key := range []string{"workspace:" + launch.Workspace, "environment:" + launch.Environment.ID, "state:" + launch.Environment.StateVolume} {
-			if !slices.Contains(keys, key) {
-				keys = append(keys, key)
-			}
-		}
-	}
-	var files []*os.File
-	unlock := func() {
-		for _, file := range files {
-			file.Close()
-		}
-	}
-	for _, key := range keys {
-		path := fmt.Sprintf("%s.execution-%x", s.path, sha256.Sum256([]byte(key)))
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
-		if err != nil {
-			unlock()
-			return nil, err
-		}
-		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-			owner, _ := io.ReadAll(io.LimitReader(file, 4096))
-			file.Close()
-			unlock()
-			if errors.Is(err, syscall.EWOULDBLOCK) {
-				return nil, fmt.Errorf("%s is busy: %s", key, owner)
-			}
-			return nil, fmt.Errorf("lock execution: %w", err)
-		}
-		files = append(files, file)
-		if err := file.Truncate(0); err != nil {
-			unlock()
-			return nil, err
-		}
-		if _, err := fmt.Fprintf(file, "Pact session %d, execution %d, launcher PID %d", launches[0].SessionID, launches[0].ExecutionID, os.Getpid()); err != nil {
-			unlock()
-			return nil, err
-		}
-	}
-	return unlock, nil
-}
+import "context"
 
 type Resource struct {
 	Name        string
@@ -100,7 +45,6 @@ func (s *Store) Resources(ctx context.Context, executionID int64) ([]Resource, e
 }
 
 // PendingExecutions includes cleanup failures even when foreground work ended.
-// Callers hold LockExecution while inspecting Docker and reconciling these rows.
 func (s *Store) PendingExecutions(ctx context.Context, launch Launch) ([]int64, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT x.id FROM executions x
 		JOIN sessions s ON s.id = x.session_id JOIN environments e ON e.id = s.environment_id

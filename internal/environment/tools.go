@@ -12,7 +12,6 @@ import (
 
 // realiseTools always asks Nix for this Pact's pinned toolset. Nix reuses valid
 // outputs and atomically switches the shared profile only after a successful build.
-// Caller holds the storage lock, including while copying the small flake inputs.
 func realiseTools(ctx context.Context, daemon string) error {
 	files, err := fs.Sub(container.BuildContext, "tools")
 	if err != nil {

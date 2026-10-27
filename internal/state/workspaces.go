@@ -102,7 +102,6 @@ func (s *Store) checkWorkspace(w Workspace) error {
 // WorkspaceReferences includes environments with no retained sessions and every
 // session sharing an environment. Overlapping registrations require manual
 // recovery rather than authorizing deletion through a different session.
-// The caller holds LockStorage through inspection, execution locks, and removal.
 func (s *Store) WorkspaceReferences(ctx context.Context, w Workspace) ([]Launch, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT path FROM workspaces WHERE id <> ?", w.ID)
 	if err != nil {
@@ -145,8 +144,8 @@ func (s *Store) WorkspaceReferences(ctx context.Context, w Workspace) ([]Launch,
 	return launches, rows.Err()
 }
 
-// RemoveWorkspace only removes the recorded managed directory. The caller holds
-// storage and all reference locks and has reconciled every possible writer.
+// RemoveWorkspace only removes the recorded managed directory. The caller
+// has reconciled recorded writers.
 // cleanupPending is durable before deletion, so interruption never permits a
 // launch into a partially removed directory. Retrying finishes the same intent.
 func (s *Store) RemoveWorkspace(ctx context.Context, id int64) error {

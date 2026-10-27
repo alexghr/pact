@@ -57,11 +57,9 @@ before permitting a replacement.
 
 ### Foreground ownership and recovery
 
-Execution lock files live beside the host catalogue, outside the mounted
-workspace. Busy errors identify the owning session, execution, and launcher PID.
-The PID is diagnostic; releasing a kernel lock does not prove a container stopped.
-Independent workspaces and private stores can execute concurrently. The existing
-storage lock still serializes provisioning and reclamation.
+Pact currently has no workspace, private-state, or storage locks. Avoid concurrent
+launches, provisioning, or reclamation against the same resources. Recovery
+checks recorded Docker resources but does not serialize launchers.
 
 `execution_resources` records each agent, history helper, DinD container, and
 DinD socket volume before creation. Resources carry environment, workspace,
@@ -69,7 +67,7 @@ session, execution, and unique resource labels. Container creation and attachmen
 are separate operations; Pact records the actual container ID and image digest
 before starting it. Shared Nix resources retain their existing storage ownership.
 
-After acquiring ownership, recovery inspects unfinished executions and resources
+Recovery inspects unfinished executions and resources
 whose cleanup failed. It removes only stopped resources with matching ownership
 and identity. Running, paused, restarting, changed, or uninspectable resources
 block replacement, with their names and an explicit operator recovery action.
@@ -366,12 +364,9 @@ each other's conversation state. Keep these resources when replacing a container
 or resuming a session. The managed Nix daemon coordinates store writes while
 agents mount the store read-only.
 
-Permit one active execution per environment and acquire an exclusive workspace
-lease for its duration, including a native TUI attachment. Independent
-workspaces may run concurrently. The first foreground release reports a busy
-workspace and its owning execution; a later service can queue work and identify
-the execution it is waiting for. Reading saved history does not acquire the
-workspace lease.
+A future supervisor should coordinate active executions per environment and
+workspace, including native TUI attachments. The current foreground launcher
+does not provide workspace or private-state locking.
 
 Allocate workspace IDs independently of paths. Use canonical paths to find an
 existing registration, and provide an explicit relocation operation when a
@@ -435,8 +430,8 @@ side-effecting prompt automatically.
 Label containers with Pact environment/session/runtime IDs. Recover by inspecting
 those labels and checking the owning process or supervisor. Lease expiry alone
 is insufficient: a still-running container must be stopped or reattached before
-a new writer starts. Serialize local ownership with an OS lock as well as the
-catalogue transaction. Start with a single-host service; distributed scheduling
+a new writer starts. A future supervisor should serialize local ownership
+alongside catalogue transactions. Start with a single-host service; distributed scheduling
 is outside this proposal.
 
 Persist completed messages and lifecycle events before publishing them. Stream
@@ -486,7 +481,7 @@ a routing mechanism across Pact sessions.
 
 Start with the module embedded in the foreground launcher. When `pact serve`
 arrives, have the CLI use a private local socket; a supervised run can outlive
-the CLI. Both entry points must honor the same locks, and embedded mode must
+the CLI. Both entry points will need shared ownership coordination, and embedded mode must
 refuse to compete with an active service for the same environment or workspace.
 
 For a future HTTP API, expose a small versioned surface:
@@ -612,7 +607,7 @@ failure boundaries, with a small set of integration scenarios:
 - Import legacy history twice and retain one mapping per thread, including
   unresolved workspace associations, without changing the source store.
 
-Use real processes, locks, sockets, and disposable Docker resources for ownership
+Use real processes, sockets, and disposable Docker resources for ownership
 and recovery checks. Use live Codex checks for persistence, native TUI
 interoperability, and protocol upgrades. Follow the repository's `./shell p-ci`
 and `./shell p-build` workflows.

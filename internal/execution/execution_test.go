@@ -13,7 +13,7 @@ import (
 )
 
 // Real Docker covers a launcher dying after creation but before recording the
-// container ID, and proves that releasing an OS lock cannot authorize a writer.
+// container ID, and proves that recovery refuses to replace a running writer.
 func TestRecovery(t *testing.T) {
 	if os.Getenv("PACT_TEST_DOCKER") != "1" {
 		t.Skip("set PACT_TEST_DOCKER=1 for real Docker recovery")
@@ -60,11 +60,6 @@ func TestRecovery(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	unlock, err := store.LockExecution(resumed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unlock()
 	if err := replacement.Recover(ctx); err == nil || !strings.Contains(err.Error(), r.Name) {
 		t.Fatalf("running writer was replaced or unidentified: %v", err)
 	}

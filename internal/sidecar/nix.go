@@ -22,7 +22,7 @@ type NixConfig struct {
 }
 
 // StartNixSidecar reuses or creates the shared daemon on an existing volume.
-// Caller holds the storage lock. The container remains after errors and shutdown.
+// The container remains after errors and shutdown.
 func StartNixSidecar(ctx context.Context, config NixConfig) error {
 	name := config.Volume
 	info, err := docker.Inspect(ctx, "container", name)

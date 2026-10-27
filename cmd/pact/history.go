@@ -12,7 +12,7 @@ import (
 	"github.com/alexghr/pact/internal/state"
 )
 
-// Refresh asks the harness while the caller retains execution ownership.
+// Refresh asks the harness for saved conversation metadata.
 func refreshSession(ctx context.Context, store *state.Store, launch state.Launch, image string, owner *execution.Owner) error {
 	threads, err := environment.Threads(ctx, launch.Environment, image, owner)
 	if err != nil {
