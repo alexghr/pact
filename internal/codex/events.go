@@ -3,14 +3,10 @@ package codex
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"time"
-
-	"github.com/alexghr/pact/internal/state"
 )
 
 type execEvent struct {
@@ -39,7 +35,7 @@ type execEvent struct {
 // ConsumeExec consumes the one prompted run's stdout. Diagnostics are a separate
 // process stream; only assistant messages are rendered to output. A captured
 // thread survives a later protocol error, process failure, or cancellation.
-func ConsumeExec(ctx context.Context, input io.Reader, store *state.Store, launch state.Launch, output, diagnostics io.Writer, expectedThread string) error {
+func ConsumeExec(input io.Reader, bind func(string) error, output, diagnostics io.Writer, expectedThread string) error {
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	threadID := ""
@@ -62,14 +58,7 @@ func ConsumeExec(ctx context.Context, input io.Reader, store *state.Store, launc
 				continue
 			}
 			threadID = event.ThreadID
-			// Cancellation must not discard a thread ID already received from the process.
-			writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			err := store.ObserveThread(writeCtx, launch.ExecutionID, threadID, time.Now().UnixNano())
-			cancel()
-			if err != nil {
-				return err
-			}
-			if _, err := fmt.Fprintf(diagnostics, "Pact thread %d:%s\n", launch.SessionID, threadID); err != nil {
+			if err := bind(threadID); err != nil {
 				return err
 			}
 		case "turn.started", "turn.completed":

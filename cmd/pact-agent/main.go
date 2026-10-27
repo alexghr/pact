@@ -1,4 +1,4 @@
-// pact-agent connects the native Codex TUI to Pact's saved-thread catalogue.
+// pact-agent reports the initial Codex conversation and runs the native TUI.
 package main
 
 import (
@@ -41,20 +41,11 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	if len(args) == 0 || (args[0] != "list" && args[0] != "run") {
-		return fmt.Errorf("expected list or run [server configuration] -- [native TUI arguments]")
+	separator := slices.Index(args, "--")
+	if len(args) == 0 || args[0] != "run" || separator < 1 {
+		return fmt.Errorf("expected run [server configuration] -- [native TUI arguments]")
 	}
-	mode, args := args[0], args[1:]
-	var serverConfig, native []string
-	if mode == "run" {
-		separator := slices.Index(args, "--")
-		if separator < 0 {
-			return fmt.Errorf("run requires -- before native TUI arguments")
-		}
-		serverConfig, native = args[:separator], args[separator+1:]
-	} else if len(args) != 0 {
-		return fmt.Errorf("list takes no arguments")
-	}
+	serverConfig, native := args[1:separator], args[separator+1:]
 	dir, err := os.MkdirTemp("", "pact-agent-")
 	if err != nil {
 		return err
@@ -88,25 +79,6 @@ func run(ctx context.Context, args []string) error {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	defer httpClient.CloseIdleConnections()
-	refresh := func(ctx context.Context) error {
-		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		defer cancel()
-		threads, err := client.Threads(ctx)
-		if err != nil {
-			return err
-		}
-		event := harness.Event{Type: "threads", Threads: threads}
-		if mode == "list" {
-			return json.NewEncoder(os.Stdout).Encode(event)
-		}
-		return publish(ctx, httpClient, event)
-	}
-	if err := refresh(ctx); err != nil {
-		return fmt.Errorf("refresh saved threads: %w", err)
-	}
-	if mode == "list" {
-		return nil
-	}
 	if threadID := os.Getenv("PACT_RESUME_THREAD"); threadID != "" {
 		resumeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		err := client.PrepareResume(resumeCtx, threadID)
@@ -143,12 +115,17 @@ func run(ctx context.Context, args []string) error {
 		select {
 		case err := <-tuiDone:
 			reaped = true
-			// The host may have cancelled execution; allow one bounded final snapshot.
-			finalErr := refresh(context.Background())
-			return errors.Join(err, finalErr)
-		case <-client.Changes():
-			if err := refresh(ctx); err != nil {
-				return fmt.Errorf("refresh saved threads: %w", err)
+			select {
+			case ref := <-client.Bindings():
+				if err := publish(context.Background(), httpClient, harness.Event{Type: "binding", BackendRef: ref}); err != nil {
+					return err
+				}
+			default:
+			}
+			return err
+		case ref := <-client.Bindings():
+			if err := publish(ctx, httpClient, harness.Event{Type: "binding", BackendRef: ref}); err != nil {
+				return err
 			}
 		case <-client.Done():
 			return fmt.Errorf("Codex observer disconnected: %w", client.Err())

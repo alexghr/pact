@@ -6,19 +6,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/alexghr/pact/internal/environment"
 	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/state"
 )
-
-// Refresh asks the harness for saved conversation metadata.
-func refreshSession(ctx context.Context, store *state.Store, launch state.Launch, image string) error {
-	threads, err := environment.Threads(ctx, launch.Environment, image)
-	if err != nil {
-		return err
-	}
-	return saveThreads(ctx, store, launch.SessionID, threads)
-}
 
 func saveThreads(ctx context.Context, store *state.Store, sessionID int64, threads []harness.Thread) error {
 	saved := make([]state.Thread, 0, len(threads))
@@ -45,6 +35,14 @@ func sessionEvents(store *state.Store, sessionID int64) http.Handler {
 		var event harness.Event
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 			http.Error(w, "invalid harness event", http.StatusBadRequest)
+			return
+		}
+		if event.Type == "binding" {
+			if err := store.BindBackendRef(r.Context(), sessionID, event.BackendRef); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if event.Type != "threads" {

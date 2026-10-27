@@ -4,20 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
+	"github.com/coder/websocket"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
-	"time"
-
-	"github.com/alexghr/pact/internal/harness"
-	"github.com/coder/websocket"
 )
 
 type rpcResponse struct {
 	ID     uint64          `json:"id"`
 	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
 	Result json.RawMessage `json:"result"`
 	Error  *struct {
 		Code    int    `json:"code"`
@@ -28,13 +24,13 @@ type rpcResponse struct {
 // Client connects to a local Codex app-server.
 // Call Close to release its connection and reader goroutine.
 type Client struct {
-	conn    *websocket.Conn
-	changes chan struct{}
-	done    chan struct{}
-	mu      sync.Mutex
-	nextID  uint64
-	pending map[uint64]chan rpcResponse
-	err     error
+	conn     *websocket.Conn
+	bindings chan string
+	done     chan struct{}
+	mu       sync.Mutex
+	nextID   uint64
+	pending  map[uint64]chan rpcResponse
+	err      error
 }
 
 func Dial(ctx context.Context, socket string) (*Client, error) {
@@ -51,19 +47,21 @@ func Dial(ctx context.Context, socket string) (*Client, error) {
 	// Thread lists may include long previews; bound each message without the
 	// websocket library's small default limit truncating ordinary catalogues.
 	conn.SetReadLimit(16 << 20)
-	client := &Client{conn: conn, changes: make(chan struct{}, 1), done: make(chan struct{}), pending: make(map[uint64]chan rpcResponse)}
+	client := &Client{conn: conn, bindings: make(chan string, 1), done: make(chan struct{}), pending: make(map[uint64]chan rpcResponse)}
 	go client.read()
 	if err := client.call(ctx, "initialize", map[string]any{
 		"clientInfo": map[string]string{"name": "pact", "version": "1"},
 	}, nil); err != nil {
+		readErr := client.Err()
 		client.Close()
-		return nil, err
+		return nil, fmt.Errorf("initialize Codex: %w (reader: %v)", err, readErr)
 	}
 	// initialize is a request; initialized is its one-way acknowledgment. It
 	// has no ID or response; call would incorrectly turn it into a request.
 	if err := client.write(ctx, map[string]string{"method": "initialized"}); err != nil {
+		readErr := client.Err()
 		client.Close()
-		return nil, err
+		return nil, fmt.Errorf("initialize Codex: %w (reader: %v)", err, readErr)
 	}
 	return client, nil
 }
@@ -74,14 +72,14 @@ func (c *Client) Close() error {
 	return err
 }
 
-// Changes coalesces metadata notifications. Refresh Threads after each hint;
-// thread/started alone does not imply a conversation has been saved.
-func (c *Client) Changes() <-chan struct{} { return c.changes }
-func (c *Client) Done() <-chan struct{}    { return c.done }
-func (c *Client) Err() error               { c.mu.Lock(); defer c.mu.Unlock(); return c.err }
+// Bindings emits the initial conversation after its first accepted user turn.
+func (c *Client) Bindings() <-chan string { return c.bindings }
+func (c *Client) Done() <-chan struct{}   { return c.done }
+func (c *Client) Err() error              { c.mu.Lock(); defer c.mu.Unlock(); return c.err }
 
 func (c *Client) read() {
 	defer close(c.done)
+	bound := false
 	for {
 		_, data, err := c.conn.Read(context.Background())
 		var response rpcResponse
@@ -95,14 +93,26 @@ func (c *Client) read() {
 			c.conn.CloseNow()
 			return
 		}
-		if response.Method != "" {
-			switch response.Method {
-			case "thread/started", "thread/name/updated", "thread/archived", "thread/unarchived", "thread/status/changed":
-				select {
-				case c.changes <- struct{}{}:
-				default:
-				}
+		if !bound && response.Method == "thread/status/changed" {
+			var params struct {
+				ThreadID string `json:"threadId"`
+				Status   struct {
+					Type string `json:"type"`
+				} `json:"status"`
 			}
+			if err := json.Unmarshal(response.Params, &params); err != nil {
+				c.mu.Lock()
+				c.err = fmt.Errorf("read Codex status: %w", err)
+				c.mu.Unlock()
+				c.conn.CloseNow()
+				return
+			}
+			if params.Status.Type == "active" && params.ThreadID != "" {
+				c.bindings <- params.ThreadID
+				bound = true
+			}
+		}
+		if response.Method != "" {
 			continue
 		}
 		c.mu.Lock()
@@ -174,61 +184,4 @@ func (c *Client) PrepareResume(ctx context.Context, threadID string) error {
 		return fmt.Errorf("Codex refused Pact's resume permissions: approval policy %q, sandbox %q", result.ApprovalPolicy, result.Sandbox.Type)
 	}
 	return nil
-}
-
-// Threads queries both active and archived saved conversations. Native listing
-// owns storage recovery and excludes unsaved thread/started notifications.
-func (c *Client) Threads(ctx context.Context) ([]harness.Thread, error) {
-	threads := []harness.Thread{}
-	for _, archived := range []bool{false, true} {
-		cursor := ""
-		seen := map[string]bool{}
-		for {
-			var page struct {
-				Data []struct {
-					ID        string `json:"id"`
-					ParentID  string `json:"forkedFromId"`
-					Name      string `json:"name"`
-					Preview   string `json:"preview"`
-					CreatedAt int64  `json:"createdAt"`
-					UpdatedAt int64  `json:"updatedAt"`
-				} `json:"data"`
-				NextCursor string `json:"nextCursor"`
-			}
-			params := map[string]any{
-				"archived": archived, "limit": 100, "sortKey": "updated_at", "sortDirection": "desc",
-				"sourceKinds": []string{"cli", "exec", "appServer", "vscode"}, "modelProviders": []string{},
-			}
-			if cursor != "" {
-				params["cursor"] = cursor
-			}
-			if err := c.call(ctx, "thread/list", params, &page); err != nil {
-				return nil, err
-			}
-			for _, native := range page.Data {
-				if native.ID == "" || native.CreatedAt <= 0 || native.UpdatedAt < native.CreatedAt || native.UpdatedAt > math.MaxInt64/int64(time.Second) {
-					return nil, fmt.Errorf("Codex returned invalid metadata for thread %q", native.ID)
-				}
-				title := native.Name
-				if title == "" {
-					title = native.Preview
-				}
-				title = strings.Join(strings.Fields(title), " ")
-				if runes := []rune(title); len(runes) > 160 {
-					title = string(runes[:160])
-				}
-				threads = append(threads, harness.Thread{ID: native.ID, ParentID: native.ParentID, Title: title,
-					CreatedAt: native.CreatedAt * int64(time.Second), LastUsed: native.UpdatedAt * int64(time.Second), Archived: archived})
-			}
-			if page.NextCursor == "" {
-				break
-			}
-			if seen[page.NextCursor] {
-				return nil, fmt.Errorf("Codex thread/list repeated a pagination cursor")
-			}
-			seen[page.NextCursor] = true
-			cursor = page.NextCursor
-		}
-	}
-	return threads, nil
 }

@@ -220,7 +220,6 @@ func run(args []string) (runErr error) {
 	cfg.environment = launch.Environment
 	fmt.Fprintf(os.Stderr, "Pact session %d\n", launch.SessionID)
 	containerStarted := false
-	runtimeStopped := false
 	defer func() {
 		status := state.Succeeded
 		message := ""
@@ -266,40 +265,12 @@ func run(args []string) (runErr error) {
 		return fmt.Errorf("prepare environment for session %d: %w", launch.SessionID, err)
 	}
 	if cfg.resumeID > 0 {
-		if err := refreshSession(ctx, store, launch, image); err != nil {
-			return err
-		}
-		threads, err := store.Threads(ctx, launch.SessionID)
+		saved, err := store.Session(ctx, launch.SessionID)
 		if err != nil {
 			return err
 		}
-		var thread state.Thread
-		if cfg.threadID == "" {
-			thread, err = state.LastThread(threads)
-		} else {
-			thread, err = exactThread(threads, cfg.threadID)
-		}
-		if err != nil {
-			return err
-		}
-		if thread.ID == "" && cfg.prompt != "" {
-			return fmt.Errorf("session %d has no saved conversation to continue", launch.SessionID)
-		}
-		cfg.threadID = thread.ID
-		if thread.ID == "" {
-			fmt.Fprintf(os.Stderr, "Starting the first saved conversation in Pact session %d\n", launch.SessionID)
-		} else {
-			fmt.Fprintf(os.Stderr, "Resuming Pact thread %d:%s\n", launch.SessionID, thread.ID)
-		}
+		cfg.threadID = saved.BackendRef
 	}
-	defer func() {
-		if !containerStarted || !runtimeStopped {
-			return
-		}
-		refreshCtx, refreshCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-		defer refreshCancel()
-		runErr = errors.Join(runErr, refreshSession(refreshCtx, store, launch, image))
-	}()
 	agent := agentContainer(cfg, image, os.Getuid(), os.Getgid())
 	if cfg.dind {
 		name, cleanup, err := startDIND(ctx, cfg.workspace)
@@ -313,10 +284,14 @@ func run(args []string) (runErr error) {
 	var consume func(io.Reader) error
 	if cfg.prompt != "" {
 		consume = func(input io.Reader) error {
-			return codex.ConsumeExec(ctx, input, store, launch, os.Stdout, os.Stderr, cfg.threadID)
+			return codex.ConsumeExec(input, func(ref string) error {
+				writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				return store.BindBackendRef(writeCtx, launch.SessionID, ref)
+			}, os.Stdout, os.Stderr, cfg.threadID)
 		}
 	}
-	containerStarted, runtimeStopped, err = runContainer(ctx, agent, func() error {
+	containerStarted, _, err = runContainer(ctx, agent, func() error {
 		return store.StartExecution(ctx, launch.ExecutionID, cfg.threadID)
 	}, consume)
 	if err != nil {

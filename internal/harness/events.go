@@ -16,6 +16,7 @@ type Thread struct {
 // Event carries a complete snapshot of the harness's saved conversations.
 // Notifications about unsaved conversations do not enter the catalogue.
 type Event struct {
-	Type    string   `json:"type"`
-	Threads []Thread `json:"threads"`
+	BackendRef string   `json:"backendRef,omitempty"`
+	Type       string   `json:"type"`
+	Threads    []Thread `json:"threads"`
 }

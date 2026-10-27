@@ -58,7 +58,7 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 				cancel() // A UUID already received from the process must survive cancellation.
 			}
 			go func() {
-				err := ConsumeExec(ctx, input, store, launch, &output, &diagnostics, "01a14eba-7c54-7170-96ec-8d86bb280eec")
+				err := ConsumeExec(input, func(ref string) error { return store.BindBackendRef(context.WithoutCancel(ctx), launch.SessionID, ref) }, &output, &diagnostics, "01a14eba-7c54-7170-96ec-8d86bb280eec")
 				_ = input.Close()
 				done <- err
 				close(done)
@@ -76,11 +76,11 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 			if _, err := io.WriteString(writer, "{\"type\":\"turn.started\"}\n"); err != nil {
 				t.Fatal(err)
 			}
-			threads, err := reader.Threads(t.Context(), launch.SessionID)
-			if err != nil || len(threads) != 1 || threads[0].ID != "01a14eba-7c54-7170-96ec-8d86bb280eec" {
-				t.Fatalf("thread not durable before EOF: %v, %v", threads, err)
+			saved, err := reader.Session(t.Context(), launch.SessionID)
+			if err != nil || saved.BackendRef != "01a14eba-7c54-7170-96ec-8d86bb280eec" {
+				t.Fatalf("thread not durable before EOF: %v, %v", saved, err)
 			}
-			lastUsed := threads[0].LastUsed
+			initial := saved.BackendRef
 			if _, err := io.WriteString(writer, scenario.suffix); err != nil {
 				t.Fatal(err)
 			}
@@ -99,9 +99,9 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 			if strings.Contains(diagnostics.String(), "future.event") {
 				t.Fatal("unknown event produced a diagnostic")
 			}
-			threads, err = reader.Threads(t.Context(), launch.SessionID)
-			if err != nil || len(threads) != 1 || threads[0].LastUsed != lastUsed {
-				t.Fatalf("completion lost or changed the thread observation: %v, %v", threads, err)
+			saved, err = reader.Session(t.Context(), launch.SessionID)
+			if err != nil || saved.BackendRef != initial {
+				t.Fatalf("completion lost or changed the thread observation: %v, %v", saved, err)
 			}
 		})
 	}
@@ -109,11 +109,11 @@ func TestExecPersistsBeforeStreamEnds(t *testing.T) {
 
 func TestExecWithoutThreadFails(t *testing.T) {
 	// No event can lead to a catalogue write, so nil is intentionally unused.
-	err := ConsumeExec(t.Context(), strings.NewReader("{\"type\":\"future.event\"}\n"), nil, state.Launch{}, io.Discard, io.Discard, "")
+	err := ConsumeExec(strings.NewReader("{\"type\":\"future.event\"}\n"), nil, io.Discard, io.Discard, "")
 	if err == nil || !strings.Contains(err.Error(), "without reporting a thread") {
 		t.Fatalf("missing thread = %v", err)
 	}
-	err = ConsumeExec(t.Context(), strings.NewReader(startedEvent), nil, state.Launch{}, io.Discard, io.Discard, "different-target")
+	err = ConsumeExec(strings.NewReader(startedEvent), nil, io.Discard, io.Discard, "different-target")
 	if err == nil || !strings.Contains(err.Error(), "instead of requested thread") {
 		t.Fatalf("a mismatched native UUID was accepted: %v", err)
 	}

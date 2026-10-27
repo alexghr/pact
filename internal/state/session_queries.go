@@ -14,6 +14,7 @@ type Session struct {
 	Workspace        string         `json:"workspace"`
 	WorkspaceManaged bool           `json:"workspaceManaged"`
 	WorkspaceStatus  string         `json:"workspaceStatus"`
+	BackendRef       string         `json:"backendRef,omitempty"`
 	Backend          string         `json:"backend"`
 	CreatedAt        int64          `json:"createdAt"`
 	Status           string         `json:"status"`
@@ -28,7 +29,7 @@ const sessionQuery = `
 	                 ORDER BY t.last_activity DESC, t.id DESC LIMIT 1), NULLIF(s.title, ''), 'Untitled session'),
 	       MAX(s.created_at, COALESCE(x.finished_at, x.started_at, x.created_at, 0),
 	           COALESCE((SELECT MAX(last_activity) / 1000000 FROM threads WHERE session_id = s.id AND internal = 0), 0)) AS updated_at,
-	       w.path, w.managed, w.status, s.backend, s.created_at,
+	       w.path, w.managed, w.status, s.backend, s.backend_ref, s.created_at,
 	       COALESCE(x.status, ''), COALESCE(x.error, ''), COALESCE(x.settings, '{}'),
 	       e.id, e.workspace_id, e.state_volume, e.nix_volume, e.provisioned
 	FROM sessions s
@@ -39,7 +40,7 @@ const sessionQuery = `
 func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var session Session
 	var settings string
-	err := row.Scan(&session.ID, &session.Title, &session.UpdatedAt, &session.Workspace, &session.WorkspaceManaged, &session.WorkspaceStatus, &session.Backend, &session.CreatedAt,
+	err := row.Scan(&session.ID, &session.Title, &session.UpdatedAt, &session.Workspace, &session.WorkspaceManaged, &session.WorkspaceStatus, &session.Backend, &session.BackendRef, &session.CreatedAt,
 		&session.Status, &session.Error, &settings,
 		&session.Environment.ID, &session.Environment.WorkspaceID, &session.Environment.StateVolume,
 		&session.Environment.NixVolume, &session.Environment.Provisioned)

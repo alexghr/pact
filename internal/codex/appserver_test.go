@@ -14,132 +14,61 @@ import (
 	"time"
 )
 
-// This exercises real cross-client notifications, unsaved-thread exclusion, and
-// saved-turn discovery and transport cleanup without an upstream model service.
-func TestAppServerObserver(t *testing.T) {
+// The real server broadcasts status changes across clients without subscribing
+// Pact to transcripts. Bind once, after user input; ignore subsequent navigation.
+func TestAppServerBinding(t *testing.T) {
 	if os.Getenv("PACT_TEST_CODEX") != "1" {
-		t.Skip("set PACT_TEST_CODEX=1 to run the real Codex app-server")
+		t.Skip("set PACT_TEST_CODEX=1 for the real Codex app-server")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	home := offlineCodexHome(t)
-	command, observer := startAppServer(t, ctx, home)
-	socket := filepath.Join(home, "server.sock")
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	actor, err := Dial(ctx, socket)
+	_, observer := startAppServer(t, ctx, home)
+	actor, err := Dial(ctx, filepath.Join(home, "server.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { actor.Close() })
-	var started struct {
-		Thread struct {
-			ID string `json:"id"`
-		} `json:"thread"`
-		ApprovalPolicy string `json:"approvalPolicy"`
-		Sandbox        struct {
-			Type string `json:"type"`
-		} `json:"sandbox"`
-	}
-	if err := actor.call(ctx, "thread/start", map[string]any{"cwd": home, "approvalPolicy": "on-request", "sandbox": "read-only"}, &started); err != nil {
-		t.Fatal(err)
-	}
-	if started.ApprovalPolicy != "on-request" || started.Sandbox.Type != "readOnly" {
-		t.Fatalf("test thread was not restrictive: %+v", started)
-	}
-	select {
-	case <-observer.Changes():
-	case <-ctx.Done():
-		t.Fatal("observer did not receive thread creation")
-	}
-	threads, err := observer.Threads(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(threads) != 0 {
-		t.Fatalf("unsaved conversation entered the catalogue: %+v", threads)
-	}
-	if err := actor.call(ctx, "thread/name/set", map[string]any{"threadId": started.Thread.ID, "name": "observer test"}, nil); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-observer.Changes():
-	case <-ctx.Done():
-		t.Fatal("observer did not receive rename")
-	}
-	// A notification must not block RPC responses even when Pact has not drained
-	// Changes. The second client does not subscribe to or retain these threads.
-	if err := actor.call(ctx, "thread/fork", map[string]any{"threadId": started.Thread.ID}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := observer.Threads(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := actor.call(ctx, "turn/start", map[string]any{
-		"threadId": started.Thread.ID,
-		"input":    []map[string]any{{"type": "text", "text": "Saved offline turn", "text_elements": []any{}}},
-	}, nil); err != nil {
-		t.Fatal(err)
-	}
-	for {
-		threads, err = observer.Threads(ctx)
-		if err != nil {
+	defer actor.Close()
+	start := func() string {
+		t.Helper()
+		var started struct {
+			Thread struct{ ID string } `json:"thread"`
+		}
+		if err := actor.call(ctx, "thread/start", map[string]any{"cwd": home, "approvalPolicy": "never", "sandbox": "danger-full-access"}, &started); err != nil {
 			t.Fatal(err)
 		}
-		found := false
-		for _, thread := range threads {
-			if thread.ID != started.Thread.ID {
-				continue
-			}
-			found = true
-			if thread.Title != "observer test" || thread.CreatedAt <= 0 || thread.LastUsed < thread.CreatedAt || thread.Archived {
-				t.Fatalf("incorrect saved metadata: %+v", thread)
-			}
-		}
-		if found {
-			break
-		}
-		select {
-		case <-observer.Changes():
-		case <-ticker.C: // Native persistence may finish after the start notification.
-		case <-ctx.Done():
-			t.Fatal("accepted user input missing from saved conversations")
+		return started.Thread.ID
+	}
+	first := start()
+	select {
+	case ref := <-observer.Bindings():
+		t.Fatalf("empty TUI thread became a resume target: %s", ref)
+	default:
+	}
+	turn := func(ref string) {
+		t.Helper()
+		if err := actor.call(ctx, "turn/start", map[string]any{"threadId": ref, "input": []map[string]any{{"type": "text", "text": "Saved offline turn"}}}, nil); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if err := command.Process.Kill(); err != nil {
+	turn(first)
+	select {
+	case ref := <-observer.Bindings():
+		if ref != first {
+			t.Fatalf("binding = %q, want %q", ref, first)
+		}
+	case <-ctx.Done():
+		t.Fatal("initial user turn did not expose a backend reference")
+	}
+	second := start()
+	turn(second)
+	if err := actor.call(ctx, "thread/read", map[string]any{"threadId": second}, nil); err != nil {
 		t.Fatal(err)
 	}
 	select {
-	case <-observer.Done():
-	case <-ctx.Done():
-		t.Fatal("observer did not notice transport loss")
-	}
-	if observer.Err() == nil {
-		t.Fatal("transport loss has no error")
-	}
-	_ = command.Wait()
-	_, prepared := startAppServer(t, ctx, home)
-	if err := prepared.PrepareResume(ctx, started.Thread.ID); err != nil {
-		t.Fatal(err)
-	}
-	// A second client performs the ID-only resume used by the remote TUI.
-	// Check effective server state, not the arguments sent by Pact.
-	tui, err := Dial(ctx, socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tui.Close()
-	var resumed struct {
-		ApprovalPolicy string `json:"approvalPolicy"`
-		Sandbox        struct {
-			Type string `json:"type"`
-		} `json:"sandbox"`
-	}
-	if err := tui.call(ctx, "thread/resume", map[string]any{"threadId": started.Thread.ID, "excludeTurns": true}, &resumed); err != nil {
-		t.Fatal(err)
-	}
-	if resumed.ApprovalPolicy != "never" || resumed.Sandbox.Type != "dangerFullAccess" {
-		t.Fatalf("remote resume restored restrictive permissions: %+v", resumed)
+	case ref := <-observer.Bindings():
+		t.Fatalf("native navigation emitted another binding: %s", ref)
+	default:
 	}
 }
 
@@ -150,7 +79,7 @@ func startAppServer(t *testing.T, ctx context.Context, home string) (*exec.Cmd, 
 		binary = "codex"
 	}
 	socket := filepath.Join(home, "server.sock")
-	command := exec.CommandContext(ctx, binary, "app-server", "--listen", "unix://"+socket)
+	command := exec.CommandContext(ctx, binary, "-c", `sandbox_mode="danger-full-access"`, "-c", `approval_policy="never"`, "app-server", "--listen", "unix://"+socket)
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
 		if key != "CODEX_HOME" && key != "CODEX_THREAD_ID" && key != "CODEX_SESSION_ID" && key != "OPENAI_API_KEY" && strings.ToUpper(key) != "NO_PROXY" {
@@ -239,11 +168,13 @@ func TestExecResumeRetainsContext(t *testing.T) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		threads, err := client.Threads(ctx)
-		if err != nil {
-			t.Fatal(err)
+		var saved struct {
+			Thread struct {
+				Turns []json.RawMessage `json:"turns"`
+			} `json:"thread"`
 		}
-		if len(threads) == 1 {
+		err := client.call(ctx, "thread/read", map[string]any{"threadId": started.Thread.ID, "includeTurns": true}, &saved)
+		if err == nil && len(saved.Thread.Turns) != 0 {
 			break
 		}
 		select {
@@ -318,10 +249,6 @@ func TestExecResumeRetainsContext(t *testing.T) {
 	}
 	if !bytes.Contains(history, []byte(original)) || !bytes.Contains(history, []byte(continuation)) {
 		t.Fatalf("interactive continuation lost saved context: %s", history)
-	}
-	threads, err := resumed.Threads(ctx)
-	if err != nil || len(threads) != 1 || threads[0].ID != started.Thread.ID {
-		t.Fatalf("continuation changed the saved conversation: %+v, %v", threads, err)
 	}
 	unavailable := exec.CommandContext(ctx, binary, command.Args[1:]...)
 	unavailable.Args[len(unavailable.Args)-2] = "0199a213-81c0-7800-8aa1-bbab2a035a53"
