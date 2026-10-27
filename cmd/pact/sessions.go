@@ -19,12 +19,12 @@ import (
 
 func manageSessions(args []string, output io.Writer) (runErr error) {
 	if len(args) == 0 {
-		return errors.New("usage: pact sessions list [--workspace PATH | --all] [--json] | show ID [--json] | threads ID [--json]")
+		return errors.New("usage: pact sessions list [--workspace PATH | --all] [--json] | show ID [--json]")
 	}
 	operation := args[0]
 	args = args[1:]
 	var id int64
-	if operation == "show" || operation == "threads" {
+	if operation == "show" {
 		if len(args) == 0 {
 			return errors.New("a positive session ID is required")
 		}
@@ -91,42 +91,14 @@ func manageSessions(args []string, output io.Writer) (runErr error) {
 	if err != nil {
 		return err
 	}
-	threads, err := store.Threads(ctx, id)
-	if err != nil {
-		return err
-	}
 	if *jsonOutput {
-		if operation == "threads" {
-			return json.NewEncoder(output).Encode(threads)
-		}
-		return json.NewEncoder(output).Encode(struct {
-			state.Session
-			Threads []state.Thread `json:"threads"`
-		}{session, threads})
+		return json.NewEncoder(output).Encode(session)
 	}
-	if operation == "show" {
-		fmt.Fprintf(output, "Session: %d\nTitle: %s\nUpdated: %s\nWorkspace: %s\nBackend: %s\nStatus: %s\n",
-			session.ID, session.Title, time.UnixMilli(session.UpdatedAt).UTC().Format(time.RFC3339), session.Workspace, session.Backend, session.Status)
-		fmt.Fprintf(output, "Workspace managed: %t\nWorkspace status: %s\n", session.WorkspaceManaged, session.WorkspaceStatus)
-		if session.Error != "" {
-			fmt.Fprintln(output, "Last error:", session.Error)
-		}
+	fmt.Fprintf(output, "Session: %d\nTitle: %s\nUpdated: %s\nWorkspace: %s\nBackend: %s\nBackend ref: %s\nStatus: %s\n",
+		session.ID, session.Title, time.UnixMilli(session.UpdatedAt).UTC().Format(time.RFC3339), session.Workspace, session.Backend, session.BackendRef, session.Status)
+	fmt.Fprintf(output, "Workspace managed: %t\nWorkspace status: %s\n", session.WorkspaceManaged, session.WorkspaceStatus)
+	if session.Error != "" {
+		fmt.Fprintln(output, "Last error:", session.Error)
 	}
-	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "THREAD\tLAST USED\tSTATE\tTITLE")
-	for _, thread := range threads {
-		status := "available"
-		if thread.Internal {
-			status = "internal"
-		}
-		if thread.Archived {
-			status = "archived"
-		}
-		if thread.Missing {
-			status = "missing"
-		}
-		lastUsed := time.Unix(0, thread.LastUsed).UTC().Format(time.RFC3339Nano)
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n", thread.ID, lastUsed, status, thread.Title)
-	}
-	return writer.Flush()
+	return nil
 }

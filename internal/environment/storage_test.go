@@ -36,7 +36,7 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 	first, sibling, supplied := create(""), create(""), create(t.TempDir())
 	// Removal must retain every session and environment sharing the workspace.
 	shared := create(first.Workspace)
-	if err := store.RecordThread(t.Context(), state.Thread{ID: "saved", SessionID: first.SessionID, Title: "Retained conversation"}); err != nil {
+	if err := store.BindBackendRef(t.Context(), first.SessionID, "saved"); err != nil {
 		t.Fatal(err)
 	}
 	storage, err := store.SharedStorage(t.Context())
@@ -83,8 +83,8 @@ func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
 			t.Fatalf("cleanup lost history/environment or removal reason: %+v, %v", session, err)
 		}
 	}
-	if threads, err := store.Threads(ctx, first.SessionID); err != nil || len(threads) != 1 || threads[0].Title != "Retained conversation" {
-		t.Fatalf("cleanup lost saved conversation metadata: %+v, %v", threads, err)
+	if saved, err := store.Session(ctx, first.SessionID); err != nil || saved.BackendRef != "saved" {
+		t.Fatalf("cleanup lost backend reference: %+v, %v", saved, err)
 	}
 	if after, err := store.SharedStorage(ctx); err != nil || after != storage {
 		t.Fatalf("cleanup changed shared Nix storage: %+v, %v", after, err)

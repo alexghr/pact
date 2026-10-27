@@ -117,14 +117,14 @@ func run(ctx context.Context, args []string) error {
 			reaped = true
 			select {
 			case ref := <-client.Bindings():
-				if err := publish(context.Background(), httpClient, harness.Event{Type: "binding", BackendRef: ref}); err != nil {
+				if err := publish(context.Background(), httpClient, harness.Binding{BackendRef: ref}); err != nil {
 					return err
 				}
 			default:
 			}
 			return err
 		case ref := <-client.Bindings():
-			if err := publish(ctx, httpClient, harness.Event{Type: "binding", BackendRef: ref}); err != nil {
+			if err := publish(ctx, httpClient, harness.Binding{BackendRef: ref}); err != nil {
 				return err
 			}
 		case <-client.Done():
@@ -168,23 +168,23 @@ func stopServer(cmd *exec.Cmd, done <-chan struct{}) {
 	}
 }
 
-func publish(ctx context.Context, client *http.Client, event harness.Event) error {
-	data, err := json.Marshal(event)
+func publish(ctx context.Context, client *http.Client, binding harness.Binding) error {
+	data, err := json.Marshal(binding)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, os.Getenv("PACT_EVENTS_URL"), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, os.Getenv("PACT_BINDING_URL"), bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	res, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("publish Pact thread metadata: %w", err)
+		return fmt.Errorf("publish Pact backend binding: %w", err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("publish Pact thread metadata: %s", res.Status)
+		return fmt.Errorf("publish Pact backend binding: %s", res.Status)
 	}
 	_, err = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
 	return err

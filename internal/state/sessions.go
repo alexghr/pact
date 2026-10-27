@@ -154,10 +154,10 @@ func (s *Store) CreateLaunch(ctx context.Context, options LaunchOptions) (Launch
 }
 
 // StartExecution records the foreground runtime process, not a model turn.
-func (s *Store) StartExecution(ctx context.Context, id int64, threadID string) error {
+func (s *Store) StartExecution(ctx context.Context, id int64) error {
 	result, err := s.db.ExecContext(ctx,
-		"UPDATE executions SET status = 'running', started_at = ?, thread_id = ? WHERE id = ?",
-		time.Now().UnixMilli(), threadID, id,
+		"UPDATE executions SET status = 'running', started_at = ? WHERE id = ?",
+		time.Now().UnixMilli(), id,
 	)
 	return executionUpdate(result, err)
 }

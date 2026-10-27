@@ -65,8 +65,8 @@ func parseArgs(args []string, output io.Writer) (agentConfig, error) {
 		fmt.Fprintln(output, "Usage: pact [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact environments gc | repair SESSION_ID")
 		fmt.Fprintln(output, "       pact workspaces remove SESSION_ID [--yes]")
-		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID | threads SESSION_ID")
-		fmt.Fprintln(output, "       pact resume SESSION_ID[:THREAD_UUID] [--prompt TEXT] [--config PATH]")
+		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID")
+		fmt.Fprintln(output, "       pact resume SESSION_ID [--prompt TEXT] [--config PATH]")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -107,7 +107,7 @@ func agentContainer(cfg agentConfig, image string, uid, gid int) docker.Containe
 		Env: []string{"HOST_UID=" + strconv.Itoa(uid), "HOST_GID=" + strconv.Itoa(gid),
 			"PACT_GIT_NAME=" + cfg.git.Name, "PACT_GIT_EMAIL=" + cfg.git.Email,
 			"PACT_GIT_URL=" + cfg.bridge.AgentURL() + gitbroker.HandlerPath,
-			"PACT_EVENTS_URL=" + cfg.bridge.AgentURL() + "/harness/events"},
+			"PACT_BINDING_URL=" + cfg.bridge.AgentURL() + "/harness/binding"},
 		Command: []string{cfg.prompt, cfg.model, cfg.effort},
 	}
 	if cfg.hostNet {
@@ -243,7 +243,7 @@ func run(args []string) (runErr error) {
 	}
 	defer func() { runErr = errors.Join(runErr, broker.Close()) }()
 	servers = append(servers, hostbridge.Server{Path: gitbroker.HandlerPath, Handler: broker})
-	servers = append(servers, hostbridge.Server{Path: "/harness/events", Handler: sessionEvents(store, launch.SessionID)})
+	servers = append(servers, hostbridge.Server{Path: "/harness/binding", Handler: sessionBinding(store, launch.SessionID)})
 	bridge, err := hostbridge.Start(servers, cfg.workspace)
 	if err != nil {
 		return err
@@ -292,7 +292,7 @@ func run(args []string) (runErr error) {
 		}
 	}
 	containerStarted, _, err = runContainer(ctx, agent, func() error {
-		return store.StartExecution(ctx, launch.ExecutionID, cfg.threadID)
+		return store.StartExecution(ctx, launch.ExecutionID)
 	}, consume)
 	if err != nil {
 		return errors.Join(err, context.Cause(ctx))

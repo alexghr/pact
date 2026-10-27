@@ -24,11 +24,8 @@ type Session struct {
 }
 
 const sessionQuery = `
-	SELECT s.id,
-	       COALESCE((SELECT NULLIF(t.title, '') FROM threads t WHERE t.session_id = s.id AND t.internal = 0
-	                 ORDER BY t.last_activity DESC, t.id DESC LIMIT 1), NULLIF(s.title, ''), 'Untitled session'),
-	       MAX(s.created_at, COALESCE(x.finished_at, x.started_at, x.created_at, 0),
-	           COALESCE((SELECT MAX(last_activity) / 1000000 FROM threads WHERE session_id = s.id AND internal = 0), 0)) AS updated_at,
+    SELECT s.id, COALESCE(NULLIF(s.title, ''), 'Untitled session'),
+           MAX(s.created_at, COALESCE(x.finished_at, x.started_at, x.created_at, 0)) AS updated_at,
 	       w.path, w.managed, w.status, s.backend, s.backend_ref, s.created_at,
 	       COALESCE(x.status, ''), COALESCE(x.error, ''), COALESCE(x.settings, '{}'),
 	       e.id, e.workspace_id, e.state_volume, e.nix_volume, e.provisioned

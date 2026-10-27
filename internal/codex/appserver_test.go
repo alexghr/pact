@@ -174,7 +174,8 @@ func TestExecResumeRetainsContext(t *testing.T) {
 			} `json:"thread"`
 		}
 		err := client.call(ctx, "thread/read", map[string]any{"threadId": started.Thread.ID, "includeTurns": true}, &saved)
-		if err == nil && len(saved.Thread.Turns) != 0 {
+		data, _ := json.Marshal(saved)
+		if err == nil && bytes.Contains(data, []byte(original)) {
 			break
 		}
 		select {
@@ -225,6 +226,8 @@ func TestExecResumeRetainsContext(t *testing.T) {
 		}
 		if event.Type == "turn.started" {
 			accepted = true
+		}
+		if event.Type == "turn.failed" || event.Type == "turn.completed" {
 			break
 		}
 	}
