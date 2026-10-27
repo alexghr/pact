@@ -27,7 +27,6 @@ COPY host-relay.sh /opt/pact/host-relay.sh
 COPY agent-instructions.md /opt/pact/agent-instructions.md
 RUN chmod 0755 /opt/pact/entrypoint.sh
 
-ENV CODEX_HOME=/home/pact/.codex
 ENV NIX_REMOTE=daemon
 ENV CI=0
 

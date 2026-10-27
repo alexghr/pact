@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alexghr/pact/internal/harness"
 )
 
 // The real server broadcasts status changes across clients without subscribing
@@ -192,11 +194,13 @@ func TestExecResumeRetainsContext(t *testing.T) {
 	}
 	execCtx, stopExec := context.WithCancel(ctx)
 	defer stopExec()
-	command := exec.CommandContext(execCtx, binary,
-		"-c", `model="offline"`, "-c", `model_provider="offline"`,
+	args := []string{
+		"-c", `model_provider="offline"`,
 		"-c", `model_providers.offline={name="Offline",base_url="http://127.0.0.1:0/v1",wire_api="responses",requires_openai_auth=false,request_max_retries=0,stream_max_retries=0}`,
-		"-c", `approval_policy="never"`, "-c", `sandbox_mode="danger-full-access"`,
-		"exec", "resume", "--dangerously-bypass-approvals-and-sandbox", "--json", "--ignore-user-config", "--skip-git-repo-check", "--", started.Thread.ID, continuation)
+	}
+	instructions := "Offline \"validation\".\nKeep the user's original text."
+	args = append(args, execArgs(harness.Options{Model: "offline", BackendRef: started.Thread.ID, Prompt: continuation}, instructions)...)
+	command := exec.CommandContext(execCtx, binary, args...)
 	command.Env = server.Env
 	command.Cancel = func() error { return command.Process.Signal(os.Interrupt) }
 	command.WaitDelay = 3 * time.Second

@@ -1,4 +1,4 @@
-// Package codex reads the native CLI protocol without storing conversation text.
+// Package codex adapts Pact runs to native authentication, invocation, and protocols.
 package codex
 
 import (

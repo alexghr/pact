@@ -26,9 +26,10 @@ roots in the supplied Nix store. The shared container and volume names are not
 session data or catalogue entries. Restore reuses the private state and root key,
 and validates the recorded workspace. It does not search native history or choose another conversation.
 
-`Start` loads current host configuration, projects the native login, starts the
-Git broker and private HTTP bridge, starts DinD when requested, creates the agent
-container, and attaches its process streams. Prompted stdout is rendered by the
+`Start` loads current host configuration, starts the Git broker and private HTTP
+bridge, starts DinD when requested, and asks the backend to prepare native
+state/authentication mounts and a launch request. It creates the agent container
+and attaches its process streams. Prompted stdout is rendered by the
 backend adapter. Interactive sessions use the native terminal UI.
 
 `Cleanup` removes the agent container, private DinD container/socket volume,
@@ -74,10 +75,10 @@ been removed.
 - `internal/state`: SQLite connections, migrations, transactions, and record
   queries/updates for sessions, workspaces, storage, executions, and bindings.
   It does not inspect paths or manage directories.
-- `internal/harness`: Pact-owned binding payload. Native protocol shapes stay
-  inside the backend adapter.
-- `internal/codex`: native CLI configuration, authentication projection,
-  app-server notifications/resume preparation, and prompted event translation.
+- `internal/harness`: Pact-owned launch intent, binding payload, and binding
+  publication. Native protocol shapes stay inside the backend adapter.
+- `internal/codex`: native state/authentication mounts, login projection, CLI
+  invocation, interactive supervision/resume preparation, and event translation.
   It does not import the catalogue.
 - `internal/hostbridge`: private HTTP transport, routing, access control, and
   listener lifetime. It does not interpret backend payloads.

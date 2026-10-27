@@ -1,10 +1,10 @@
 package session
 
 import (
-	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+
+	"github.com/alexghr/pact/internal/harness"
 )
 
 func TestSessionBindingOnlyChangesBoundSession(t *testing.T) {
@@ -24,14 +24,9 @@ func TestSessionBindingOnlyChangesBoundSession(t *testing.T) {
 	}
 	server := httptest.NewServer(sessionBinding(store, first.ID))
 	defer server.Close()
-	for _, body := range []string{`{"backendRef":"initial"}`, `{"backendRef":"native-new"}`} {
-		response, err := server.Client().Post(server.URL, "application/json", strings.NewReader(body))
-		if err != nil {
+	for _, ref := range []string{"initial", "native-new"} {
+		if err := harness.PublishBinding(t.Context(), server.URL, ref); err != nil {
 			t.Fatal(err)
-		}
-		response.Body.Close()
-		if response.StatusCode != http.StatusNoContent {
-			t.Fatal(response.Status)
 		}
 	}
 	firstSaved, err := store.Session(t.Context(), first.ID)

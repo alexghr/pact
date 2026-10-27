@@ -1,4 +1,4 @@
-package main
+package codex
 
 import (
 	"bytes"
@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/alexghr/pact/internal/codex"
 )
 
 func TestLiveResumeContextAndPermissions(t *testing.T) {
@@ -31,7 +29,7 @@ func TestLiveResumeContextAndPermissions(t *testing.T) {
 		}
 		codexHome = filepath.Join(userHome, ".codex")
 	}
-	snapshot, err := codex.CreateAuthSnapshot(filepath.Join(codexHome, "auth.json"))
+	snapshot, err := CreateAuthSnapshot(filepath.Join(codexHome, "auth.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

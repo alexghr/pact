@@ -11,7 +11,7 @@ native reference before later output or failure. The host saves it once as the
 Pact session's `BackendRef`. The adapter validates an explicitly resumed reference
 and renders assistant output separately from tool/reasoning diagnostics.
 
-For interactive runs, `pact-agent` starts a local `codex app-server` and connects
+For interactive runs, the adapter starts a local `codex app-server` and connects
 the native TUI over its Unix WebSocket endpoint. Its observer waits for the first
 active-thread status after user input, then sends a Pact-owned binding payload
 to `/harness/binding`. Empty threads have no binding. The adapter emits only one
@@ -31,18 +31,35 @@ unavailable, the native operation reports an error.
 
 ## Ownership and validation
 
-Pact owns the binding schema in `internal/harness`; native notification and CLI
-JSON types stay in `internal/codex`. The adapter reports the reference through a
-callback or the private bridge. Only session/state code persists it.
-Authentication projection and native CLI configuration also stay in the adapter.
-`hostbridge` transports ordinary HTTP handlers without interpreting these values.
+Pact owns `harness.Options` (prompt, model, effort, backend reference, and MCP
+endpoints), the binding schema, and binding publication. Native notification and
+CLI JSON types stay in `internal/codex`. The adapter reports the reference through
+a callback; only session/state code persists it. `hostbridge` transports ordinary
+HTTP handlers without interpreting these values.
+
+`codex.PrepareContainer` projects the host login into a temporary snapshot,
+configures native state/authentication mounts, and returns snapshot cleanup to
+the session. It supplies `pact-agent codex JSON_OPTIONS` as the container command.
+The request carries launch intent; the host login is mounted separately.
+
+`cmd/pact-agent` decodes the request, reads Pact's instruction text, and calls
+`codex.Run`. The adapter checks native login status and translates the request
+into Codex flags. Prompted runs replace the runner process with `codex exec`;
+interactive runs supervise the app-server, TUI, initial binding observation, and
+native resume preparation. Codex's Ctrl-C handling stays inside the adapter.
+
+The shell entrypoint only prepares user identity, private state ownership, Nix
+profiles, and host Git/HTTP services before executing the supplied command.
+Adapters supply `PACT_AGENT_STATE_DIR` and `PACT_AGENT_AUTH_FILE` so this bootstrap
+can prepare writable state without changing a read-only login snapshot.
 
 `PACT_TEST_CODEX=1 ./shell go test ./internal/codex -count=1` runs real app-server
 and CLI checks without an upstream model service. The tests use an unavailable
 loopback provider and verify initial binding, empty-thread exclusion, stable
 identity through native navigation, saved continuation history, and effective
-resume permissions. They wait for native input persistence before interrupting
-an offline run. Set `PACT_CODEX_BINARY` to exercise a specific installed version.
+resume permissions. They exercise the adapter's prompted command translation
+and wait for native input persistence before interrupting an offline run.
+Set `PACT_CODEX_BINARY` to exercise a specific installed version.
 
 The operator also validated completed interactive and prompted continuation on
 Codex 0.163.0. Pact pins the container toolset in
