@@ -3,93 +3,18 @@ package session
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/nix"
+	container "github.com/alexghr/pact/internal/nix"
 	"github.com/alexghr/pact/internal/state"
 )
-
-func TestWorkspaceRemovalBoundariesAndOwnership(t *testing.T) {
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := OpenStore(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	create := func(workspace string) state.Session {
-		t.Helper()
-		launch, err := createRecord(t.Context(), store, Options{Workspace: workspace})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return launch
-	}
-	first, sibling, supplied := create(""), create(""), create(t.TempDir())
-	// Removal must retain every session and environment sharing the workspace.
-	alias := filepath.Join(t.TempDir(), "alias")
-	if err := os.Symlink(first.Workspace, alias); err != nil {
-		t.Fatal(err)
-	}
-	shared := create(alias)
-	if shared.WorkspaceID != first.WorkspaceID || shared.Storage.StateVolume == first.Storage.StateVolume {
-		t.Fatal("workspace alias lost its registration or private agent state")
-	}
-	if err := store.BindBackendRef(t.Context(), first.ID, "saved"); err != nil {
-		t.Fatal(err)
-	}
-	for _, launch := range []state.Session{first, sibling, supplied} {
-		if err := os.WriteFile(filepath.Join(launch.Workspace, "files"), []byte("retained"), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.Symlink(supplied.Workspace, filepath.Join(first.Workspace, "outside")); err != nil {
-		t.Fatal(err)
-	}
-	ctx := t.Context()
-	if err := RemoveWorkspace(ctx, store, first.WorkspaceID); err != nil {
-		t.Fatalf("workspace cleanup: %v", err)
-	}
-	if err := RemoveWorkspace(ctx, store, first.WorkspaceID); err != nil {
-		t.Fatalf("repeated cleanup: %v", err)
-	}
-	if _, err := os.Stat(first.Workspace); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("selected workspace remains: %v", err)
-	}
-	if err := RemoveWorkspace(ctx, store, supplied.WorkspaceID); err == nil {
-		t.Fatal("operator-owned directory was eligible for removal")
-	}
-	nested := filepath.Join(sibling.Workspace, "nested")
-	if err := os.Mkdir(nested, 0700); err != nil {
-		t.Fatal(err)
-	}
-	create(nested)
-	if err := RemoveWorkspace(ctx, store, sibling.WorkspaceID); err == nil {
-		t.Fatal("cleanup ignored an overlapping workspace registration")
-	}
-	for _, launch := range []state.Session{sibling, supplied} {
-		if data, err := os.ReadFile(filepath.Join(launch.Workspace, "files")); err != nil || string(data) != "retained" {
-			t.Fatalf("cleanup changed another directory: %q, %v", data, err)
-		}
-	}
-	for _, launch := range []state.Session{first, shared} {
-		session, err := store.Session(ctx, launch.ID)
-		if err != nil || session.WorkspaceStatus != "removed" || session.Storage != launch.Storage {
-			t.Fatalf("cleanup lost history/environment or removal reason: %+v, %v", session, err)
-		}
-	}
-	if saved, err := store.Session(ctx, first.ID); err != nil || saved.BackendRef != "saved" {
-		t.Fatalf("cleanup lost backend reference: %+v, %v", saved, err)
-	}
-}
 
 func TestSharedStorage(t *testing.T) {
 	if os.Getenv("PACT_TEST_DOCKER") != "1" {

@@ -103,8 +103,7 @@ DinD shares only the workspace and its private socket volume.
 The host catalogue stays outside every mounted workspace. Back up catalogue,
 workspace files, and private native volumes together. Missing established private
 state requires restoration; a missing shared package cache can be rebuilt.
-Managed workspace removal is explicit and preserves native state. See
-[workspaces](workspaces.md) and [Nix storage](nix-storage.md).
+See [workspaces](workspaces.md) and [Nix storage](nix-storage.md).
 
 ## Migration and validation
 

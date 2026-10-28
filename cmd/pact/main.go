@@ -55,8 +55,6 @@ func run(ctx context.Context, args []string) error {
 		switch args[0] {
 		case "sessions":
 			return manageSessions(ctx, args[1:], os.Stdout, os.Stderr)
-		case "workspaces":
-			return manageWorkspaces(ctx, args[1:], os.Stdout, os.Stderr)
 		case "resume":
 			return resumeSession(ctx, args[1:])
 		}
@@ -112,7 +110,6 @@ func parseArgs(args []string, output io.Writer) (runConfig, error) {
 
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
-		fmt.Fprintln(output, "       pact workspaces remove SESSION_ID [--yes]")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID")
 		fmt.Fprintln(output, "       pact resume SESSION_ID [--prompt TEXT] [--config PATH]")
 		flags.PrintDefaults()

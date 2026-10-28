@@ -35,13 +35,6 @@ containers and unfinished records: stop/remove stray resources manually with
 `docker rm -f` and `docker volume rm` before resuming. Pact does not lock writers
 or recover previous executions; interrupted prompts are not replayed.
 
-See [session management](docs/session-management.md) and
-[Nix storage](docs/nix-storage.md) for lifecycle and persistence details.
-Preview permanent workspace removal with `pact workspaces remove 42`, then
-repeat with `--yes` to delete its files after ownership checks. Native state,
-Nix storage, and catalogue history are retained. Stop containers using the
-workspace before removing it. See [managed workspaces](docs/workspaces.md).
-
 ## System skills
 
 The container includes [Graphene](https://github.com/alexghr/graphene) and its

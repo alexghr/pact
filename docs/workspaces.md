@@ -46,37 +46,3 @@ Pact does not lock workspaces, private state, provisioning, or reclamation.
 Avoid concurrent launches or maintenance against the same resources. After a
 launcher crash, manually stop/remove previous containers before resuming or
 removing their workspace; Pact does not recover them.
-
-## Explicit workspace removal
-
-`pact workspaces remove ID` previews the path and affected session IDs. To
-permanently delete that managed directory and all of its contents, run
-`pact workspaces remove ID --yes`. This includes untracked files, local commits,
-repositories, and build output. Review or copy anything you need first.
-There is no undo. Stopping a container, finishing a session, or archiving
-history does not authorize deletion.
-
-The operation retains the catalogue, native conversation volumes, private Nix
-roots, and shared Nix storage. Other workspaces remain intact, including paths
-reached by symlinks inside the selected directory. Retained artifacts and memory
-must also live outside this deletable directory when those features arrive.
-
-Only a completed managed allocation owned by the current operator is eligible.
-Pact checks the directory identity and location and refuses supplied paths,
-redirected/replaced directories, and overlapping workspace registrations.
-Removal does not check for running containers or serialize against launches.
-Stop containers using the directory before removing it. Files are
-removed through an open directory root so workspace symlinks cannot redirect
-deletion outside it. Catalogue intent becomes
-`cleanupPending` before removing files. Interrupted or failed deletion can leave
-only some files behind; inspection reports this status and all launches/resumes
-against the directory are blocked. Correct the reported filesystem or Docker
-problem and retry the same `remove ID --yes` command. If deletion finished before
-the launcher could record completion, retry records the missing directory as
-intentionally removed.
-
-Completed removal records `removed`, preserving the original path and history.
-Repeating removal is harmless while that path stays absent. A new directory at
-the old path is refused, and resume explains the intentional deletion instead of
-allocating a replacement. Start a new session for new work. Do not manually move
-or replace a workspace while Pact owns it.
