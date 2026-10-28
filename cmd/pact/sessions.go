@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,88 +16,152 @@ import (
 	"github.com/alexghr/pact/internal/session"
 )
 
-func manageSessions(args []string, output io.Writer) (runErr error) {
-	if len(args) == 0 {
-		return errors.New("usage: pact sessions list [--workspace PATH | --all] [--json] | show ID [--json]")
-	}
-	operation := args[0]
-	args = args[1:]
-	var id int64
-	if operation == "show" {
-		if len(args) == 0 {
-			return errors.New("a positive session ID is required")
+type listSessionsConfig struct {
+	workspace string
+	json      bool
+}
+
+type showSessionConfig struct {
+	sessionID int64
+	json      bool
+}
+
+func manageSessions(ctx context.Context, args []string, output, errOut io.Writer) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "list":
+			return listSessions(ctx, args[1:], output, errOut)
+		case "show":
+			return showSession(ctx, args[1:], output, errOut)
+		default:
+			return fmt.Errorf("unknown sessions command %q", args[0])
 		}
-		id, _ = strconv.ParseInt(args[0], 10, 64)
-		if id <= 0 {
-			return errors.New("a positive session ID is required")
-		}
-		args = args[1:]
-	} else if operation != "list" {
-		return fmt.Errorf("unknown sessions command %q", operation)
 	}
-	flags := flag.NewFlagSet("pact sessions "+operation, flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	jsonOutput := flags.Bool("json", false, "Print machine-readable JSON")
-	var workspace string
-	var all bool
-	if operation == "list" {
-		flags.StringVar(&workspace, "workspace", "", "Filter by host workspace (default: all workspaces)")
-		flags.BoolVar(&all, "all", false, "List sessions from all workspaces (the default)")
-	}
-	if err := flags.Parse(args); err != nil {
+
+	return errors.New("usage: pact sessions list [--workspace PATH | --all] [--json] | show ID [--json]")
+}
+
+func listSessions(ctx context.Context, args []string, output, errOut io.Writer) (runErr error) {
+	cfg, err := parseListSessionsArgs(args, errOut)
+	if err != nil {
 		return err
 	}
-	if flags.NArg() != 0 {
-		return fmt.Errorf("unexpected argument: %s", flags.Arg(0))
-	}
-	if all && workspace != "" {
-		return errors.New("--workspace and --all cannot be combined")
-	}
-	if operation == "list" && workspace != "" {
-		var err error
-		workspace, err = filepath.Abs(workspace)
-		if err != nil {
-			return err
-		}
-		workspace, err = filepath.EvalSymlinks(workspace)
-		if err != nil {
-			return fmt.Errorf("resolve workspace: %w", err)
-		}
-	}
-	ctx := context.Background()
+
 	store, err := session.OpenStore(ctx)
 	if err != nil {
 		return err
 	}
+
 	defer func() { runErr = errors.Join(runErr, store.Close()) }()
-	if operation == "list" {
-		sessions, err := store.Sessions(ctx, workspace)
-		if err != nil {
-			return err
-		}
-		if *jsonOutput {
-			return json.NewEncoder(output).Encode(sessions)
-		}
-		writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(writer, "SESSION\tSTATUS\tUPDATED\tTITLE")
-		for _, session := range sessions {
-			fmt.Fprintf(writer, "%d\t%s\t%s\t%s\n", session.ID, session.Status,
-				time.UnixMilli(session.UpdatedAt).UTC().Format(time.RFC3339), strings.Join(strings.Fields(session.Title), " "))
-		}
-		return writer.Flush()
-	}
-	session, err := store.Session(ctx, id)
+
+	sessions, err := store.Sessions(ctx, cfg.workspace)
 	if err != nil {
 		return err
 	}
-	if *jsonOutput {
+
+	if cfg.json {
+		return json.NewEncoder(output).Encode(sessions)
+	}
+
+	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(writer, "SESSION\tSTATUS\tUPDATED\tTITLE")
+	for _, session := range sessions {
+		fmt.Fprintf(writer, "%d\t%s\t%s\t%s\n", session.ID, session.Status,
+			time.UnixMilli(session.UpdatedAt).UTC().Format(time.RFC3339), strings.Join(strings.Fields(session.Title), " "))
+	}
+
+	return writer.Flush()
+}
+
+func showSession(ctx context.Context, args []string, output, errOut io.Writer) (runErr error) {
+	cfg, err := parseShowSessionArgs(args, errOut)
+	if err != nil {
+		return err
+	}
+
+	store, err := session.OpenStore(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer func() { runErr = errors.Join(runErr, store.Close()) }()
+
+	session, err := store.Session(ctx, cfg.sessionID)
+	if err != nil {
+		return err
+	}
+
+	if cfg.json {
 		return json.NewEncoder(output).Encode(session)
 	}
+
 	fmt.Fprintf(output, "Session: %d\nTitle: %s\nUpdated: %s\nWorkspace: %s\nBackend: %s\nBackend ref: %s\nStatus: %s\n",
 		session.ID, session.Title, time.UnixMilli(session.UpdatedAt).UTC().Format(time.RFC3339), session.Workspace, session.Backend, session.BackendRef, session.Status)
 	fmt.Fprintf(output, "Workspace managed: %t\nWorkspace status: %s\n", session.WorkspaceManaged, session.WorkspaceStatus)
+
 	if session.Error != "" {
 		fmt.Fprintln(output, "Last error:", session.Error)
 	}
+
 	return nil
+}
+
+func parseListSessionsArgs(args []string, output io.Writer) (listSessionsConfig, error) {
+	var cfg listSessionsConfig
+
+	flags := flag.NewFlagSet("pact sessions list", flag.ContinueOnError)
+	flags.SetOutput(output)
+	flags.BoolVar(&cfg.json, "json", false, "Print machine-readable JSON")
+	flags.StringVar(&cfg.workspace, "workspace", "", "Filter by host workspace (default: all workspaces)")
+
+	if err := flags.Parse(args); err != nil {
+		return cfg, err
+	}
+
+	if flags.NArg() != 0 {
+		return cfg, fmt.Errorf("unexpected argument: %s", flags.Arg(0))
+	}
+
+	if cfg.workspace != "" {
+		var err error
+		cfg.workspace, err = filepath.Abs(cfg.workspace)
+		if err != nil {
+			return cfg, err
+		}
+
+		cfg.workspace, err = filepath.EvalSymlinks(cfg.workspace)
+		if err != nil {
+			return cfg, fmt.Errorf("resolve workspace: %w", err)
+		}
+	}
+
+	return cfg, nil
+}
+
+func parseShowSessionArgs(args []string, output io.Writer) (showSessionConfig, error) {
+	var cfg showSessionConfig
+
+	if len(args) == 0 {
+		return cfg, errors.New("a session ID is required")
+	}
+
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil || id <= 0 {
+		return cfg, errors.New("a session ID is required")
+	}
+	cfg.sessionID = id
+
+	flags := flag.NewFlagSet("pact sessions show", flag.ContinueOnError)
+	flags.SetOutput(output)
+	flags.BoolVar(&cfg.json, "json", false, "Print machine-readable JSON")
+
+	if err := flags.Parse(args[1:]); err != nil {
+		return cfg, err
+	}
+
+	if flags.NArg() != 0 {
+		return cfg, fmt.Errorf("unexpected argument: %s", flags.Arg(0))
+	}
+
+	return cfg, nil
 }

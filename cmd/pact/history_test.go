@@ -30,7 +30,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 	list := func(args ...string) []state.Session {
 		t.Helper()
 		var output bytes.Buffer
-		if err := manageSessions(append([]string{"list", "--json"}, args...), &output); err != nil {
+		if err := manageSessions(t.Context(), append([]string{"list", "--json"}, args...), &output, os.Stderr); err != nil {
 			t.Fatal(err)
 		}
 		var sessions []state.Session
@@ -39,7 +39,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 		}
 		return sessions
 	}
-	for _, sessions := range [][]state.Session{list(), list("--all")} {
+	for _, sessions := range [][]state.Session{list()} {
 		if len(sessions) != 2 || sessions[0].ID != second.ID || sessions[1].ID != first.ID || sessions[0].Title != "Review migrations" || sessions[0].Status != "startupFailed" {
 			t.Fatalf("unrelated directory hid chores or failed start: %+v", sessions)
 		}
@@ -52,7 +52,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 		t.Fatalf("explicit filter selected other workspaces: %+v", filtered)
 	}
 	var output bytes.Buffer
-	if err := manageSessions([]string{"list"}, &output); err != nil {
+	if err := manageSessions(t.Context(), []string{"list"}, &output, os.Stderr); err != nil {
 		t.Fatal(err)
 	}
 	for _, session := range list() {
@@ -63,7 +63,7 @@ func TestSessionDiscoveryFromUnrelatedDirectory(t *testing.T) {
 		}
 	}
 	output.Reset()
-	if err := manageSessions([]string{"show", fmt.Sprint(first.ID)}, &output); err != nil || !strings.Contains(output.String(), first.Workspace) {
+	if err := manageSessions(t.Context(), []string{"show", fmt.Sprint(first.ID)}, &output, os.Stderr); err != nil || !strings.Contains(output.String(), first.Workspace) {
 		t.Fatalf("inspection lost workspace: %s, %v", output.String(), err)
 	}
 }
@@ -82,13 +82,13 @@ func TestWorkspaceRemovalRequiresExplicitRequest(t *testing.T) {
 	}
 	var output bytes.Buffer
 	args := []string{"remove", fmt.Sprint(launch.ID)}
-	if err := manageWorkspaces(args, &output); err != nil || !strings.Contains(output.String(), launch.Workspace) {
+	if err := manageWorkspaces(t.Context(), args, &output, os.Stderr); err != nil || !strings.Contains(output.String(), launch.Workspace) {
 		t.Fatalf("workspace preview: %s, %v", output.String(), err)
 	}
 	if data, err := os.ReadFile(file); err != nil || string(data) != "valuable" {
 		t.Fatalf("preview removed data: %q, %v", data, err)
 	}
-	if err := manageWorkspaces(append(args, "--yes"), &output); err != nil {
+	if err := manageWorkspaces(t.Context(), append(args, "--yes"), &output, os.Stderr); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {

@@ -40,25 +40,23 @@ type resumeConfig struct {
 }
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return
-		}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, os.Args[1:])
+	stop()
+
+	if err != nil && !errors.Is(err, flag.ErrHelp) {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(exitCode(err))
 	}
 }
 
-func run(args []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+func run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "sessions":
-			return manageSessions(args[1:], os.Stdout)
+			return manageSessions(ctx, args[1:], os.Stdout, os.Stderr)
 		case "workspaces":
-			return manageWorkspaces(args[1:], os.Stdout)
+			return manageWorkspaces(ctx, args[1:], os.Stdout, os.Stderr)
 		case "resume":
 			return resumeSession(ctx, args[1:])
 		}
@@ -164,7 +162,7 @@ func parseResumeArgs(args []string, output io.Writer) (resumeConfig, error) {
 
 	cfg.resumeID, _ = strconv.ParseInt(args[0], 10, 64)
 	if cfg.resumeID <= 0 {
-		return cfg, fmt.Errorf("resume requires a positive session ID")
+		return cfg, fmt.Errorf("resume requires a session ID")
 	}
 
 	flags := flag.NewFlagSet("pact resume", flag.ContinueOnError)
