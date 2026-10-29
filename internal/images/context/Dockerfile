@@ -1,6 +1,6 @@
 # Build from the repository root:
 #   ./shell p-harness-build
-#   docker build --tag pact-codex internal/nix/context
+#   docker build --tag pact-codex internal/images/context
 FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 ARG TARGETARCH

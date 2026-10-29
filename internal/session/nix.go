@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/images"
 )
 
 // Nix is runtime access to the shared daemon and store, independent of the catalogue.
@@ -81,7 +81,7 @@ func PrepareNix(ctx context.Context) (Nix, error) {
 }
 
 func (n Nix) prepare(ctx context.Context) error {
-	image, err := container.BuildDaemonImage(ctx)
+	image, err := images.BuildDaemonImage(ctx)
 	if err != nil {
 		return err
 	}

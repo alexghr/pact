@@ -7,13 +7,13 @@ import (
 	"os"
 
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/images"
 )
 
 // realiseTools always asks Nix for this Pact's pinned toolset. Nix reuses valid
 // outputs and atomically switches the shared profile only after a successful build.
 func realiseTools(ctx context.Context, daemon string) error {
-	files, err := fs.Sub(container.BuildContext, "tools")
+	files, err := fs.Sub(images.BuildContext, "tools")
 	if err != nil {
 		return err
 	}

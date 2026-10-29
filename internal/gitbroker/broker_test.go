@@ -22,7 +22,7 @@ import (
 
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/hostbridge"
-	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/images"
 )
 
 func runCommand(t *testing.T, dir string, env []string, program string, args ...string) string {
@@ -255,7 +255,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	if mounts := bridge.ContainerConfig().ReadOnlyMounts; len(mounts) > 0 {
 		endpoint = testRelay(t, mounts[0].Source)
 	}
-	identity, err := fs.ReadFile(container.BuildContext, "git-identity.sh")
+	identity, err := fs.ReadFile(images.BuildContext, "git-identity.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +501,7 @@ func testRelay(t *testing.T, socket string) string {
 	endpoint := probe.URL
 	probe.Close()
 	u, _ := url.Parse(endpoint)
-	script, err := fs.ReadFile(container.BuildContext, "host-relay.sh")
+	script, err := fs.ReadFile(images.BuildContext, "host-relay.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +640,7 @@ func TestKeyAddedAfterStartup(t *testing.T) {
 			defer server.Close()
 			bin := filepath.Join(host, "pact-git-sign")
 			runCommand(t, "../..", nil, "go", "build", "-o", bin, "./cmd/git-client")
-			identity, err := fs.ReadFile(container.BuildContext, "git-identity.sh")
+			identity, err := fs.ReadFile(images.BuildContext, "git-identity.sh")
 			if err != nil {
 				t.Fatal(err)
 			}

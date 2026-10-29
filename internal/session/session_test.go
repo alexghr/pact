@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/images"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -61,7 +61,7 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	image, err := container.BuildAgentImage(ctx)
+	image, err := images.BuildAgentImage(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

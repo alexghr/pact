@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/httpproxy"
-	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/images"
 )
 
 func TestRelayStreamingAndSessionLifetime(t *testing.T) {
@@ -124,7 +124,7 @@ func startRelay(t *testing.T, socket string) string {
 	t.Helper()
 	// Exercise the same relay script embedded in the container image. p-test
 	// supplies socat and curl; missing dependencies must fail this check.
-	script, err := fs.ReadFile(container.BuildContext, "host-relay.sh")
+	script, err := fs.ReadFile(images.BuildContext, "host-relay.sh")
 	if err != nil {
 		t.Fatal(err)
 	}

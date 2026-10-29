@@ -39,9 +39,9 @@ or recover previous executions; interrupted prompts are not replayed.
 
 The container includes [Graphene](https://github.com/alexghr/graphene) and its
 `graphene-stacked-prs` skill. Nix pins the CLI and skill to the same source revision
-in `internal/nix/context/tools/flake.lock`.
+in `internal/images/context/tools/flake.lock`.
 
-Bundled skills are listed in `internal/nix/context/tools/flake.nix` and exposed through
+Bundled skills are listed in `internal/images/context/tools/flake.nix` and exposed through
 `/etc/codex/skills`. To add or remove one, edit the `skills` list (and add any
 required tools to `pact-tools`), then rebuild the launcher with `./shell p-build`.
 Each launch asks Nix to realise the pinned toolset, reusing existing build outputs,

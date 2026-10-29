@@ -17,7 +17,7 @@ import (
 	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/hostbridge"
-	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/images"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -112,7 +112,7 @@ func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
 		case <-ctx.Done():
 		}
 	}()
-	image, err := container.BuildAgentImage(ctx)
+	image, err := images.BuildAgentImage(ctx)
 	if err != nil {
 		return err
 	}

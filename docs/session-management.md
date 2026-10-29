@@ -83,7 +83,7 @@ been removed.
 - `internal/hostbridge`: private HTTP transport, routing, access control, and
   listener lifetime. It does not interpret backend payloads.
 - `internal/gitbroker` and `internal/httpproxy`: host credential services.
-- `internal/docker` and `internal/nix`: Docker operations and embedded image inputs.
+- `internal/docker` and `internal/images`: Docker operations and embedded image inputs.
 
 The runtime holds one persisted session record, including its workspace, storage,
 and current execution ID. There is no separate launch bundle or environment

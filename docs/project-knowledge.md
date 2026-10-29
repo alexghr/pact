@@ -174,7 +174,7 @@ trusted developer instructions. Do not overwrite repository `AGENTS.md` files.
 Direct startup-context injection can be evaluated later if the pinned harness
 provides a suitable interface.
 
-Use the existing [entrypoint](../internal/nix/context/entrypoint.sh) for both
+Use the existing [entrypoint](../internal/images/context/entrypoint.sh) for both
 interactive and prompted launches. The fixed instruction must also cover a new
 task or resumed thread: fetch the current view rather than assuming old context
 is fresh. Validate native `/new`, `/fork`, resume, and compaction behavior against

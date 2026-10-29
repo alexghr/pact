@@ -1,5 +1,5 @@
-// Package container builds Pact's agent and Nix daemon images from embedded inputs.
-package container
+// Package images builds Pact's agent and Nix daemon images from embedded inputs.
+package images
 
 import (
 	"embed"

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/images"
 )
 
 func TestTCPAuthenticationAndLifetime(t *testing.T) {
@@ -73,7 +73,7 @@ func TestTCPAuthenticationAndLifetime(t *testing.T) {
 	if os.Getenv("PACT_TEST_DOCKER") == "1" {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 		defer cancel()
-		image, err := container.BuildAgentImage(ctx)
+		image, err := images.BuildAgentImage(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}

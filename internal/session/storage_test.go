@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/docker"
-	container "github.com/alexghr/pact/internal/nix"
+	"github.com/alexghr/pact/internal/images"
 	"github.com/alexghr/pact/internal/state"
 )
 
@@ -30,7 +30,7 @@ func TestSharedStorage(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 	// Use isolated real resources; never remove the operator's shared daemon.
 	nix := Nix{Container: "pact-test-nix-" + strings.ToLower(rand.Text()), Volume: "pact-test-store-" + strings.ToLower(rand.Text())}
-	image, err := container.BuildAgentImage(ctx)
+	image, err := images.BuildAgentImage(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
