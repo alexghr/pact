@@ -1,5 +1,5 @@
 /pact
-/internal/images/context/bin/
+/internal/images/context/agent/bin/
 /.devenv
 # git hooks managed by nix
 /.pre-commit-config.yaml

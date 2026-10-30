@@ -188,7 +188,7 @@ The executable name selects signing or SSH transport, respectively. Both command
 are on the agent's PATH and are configured by `git-identity.sh`.
 
 `./shell p-build` first runs `p-git-client`, which cross-compiles static Linux
-helpers for amd64 and arm64 into `internal/images/context/bin/`. The launcher embeds
+helpers for amd64 and arm64 into `internal/images/context/agent/bin/`. The launcher embeds
 the whole `internal/images/context/` directory. Docker selects the prebuilt helper
 using `TARGETARCH`, so image builds do not need Go or the helper's source code.
 This also works when the launcher is built on macOS. Generated helpers are ignored

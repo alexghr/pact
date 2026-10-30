@@ -90,7 +90,7 @@
 
       for arch in amd64 arm64; do
         CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-          -o "internal/images/context/bin/pact-git-client-linux-$arch" ./cmd/git-client
+          -o "internal/images/context/agent/bin/pact-git-client-linux-$arch" ./cmd/git-client
       done
     '';
 
@@ -99,7 +99,7 @@
 
       for arch in amd64 arm64; do
         CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-          -o "internal/images/context/bin/pact-agent-linux-$arch" ./cmd/pact-agent
+          -o "internal/images/context/agent/bin/pact-agent-linux-$arch" ./cmd/pact-agent
       done
     '';
 
