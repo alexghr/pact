@@ -5,15 +5,77 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
+)
+
+var (
+	ErrNotFound = errors.New("object not found")
 )
 
 type Streams struct {
 	Stdin          io.Reader
 	Stdout, Stderr io.Writer
+}
+
+// Info is an observation from Docker, without Pact-specific ownership policy.
+type Info struct {
+	ID, Image string
+	Labels    map[string]string
+	Config    struct {
+		Image  string
+		Labels map[string]string
+	}
+	State struct{ Running, Paused, Restarting bool }
+}
+
+// Inspect returns ErrNotFound if the object is missing
+func Inspect(ctx context.Context, kind, name string) (Info, error) {
+	data, err := output(ctx, kind, "inspect", "--format", "{{json .}}", name)
+	if err != nil {
+		exists, existsErr := Exists(ctx, kind, name)
+		if existsErr != nil {
+			return Info{}, errors.Join(err, existsErr)
+		}
+
+		if !exists {
+			return Info{}, fmt.Errorf("%s %s: %w", kind, name, ErrNotFound)
+		}
+
+		return Info{}, err
+	}
+
+	var info Info
+	if err := json.Unmarshal([]byte(data), &info); err != nil {
+		return Info{}, err
+	}
+	if kind == "container" {
+		info.Labels = info.Config.Labels
+	}
+	return info, nil
+}
+
+func Exists(ctx context.Context, kind, name string) (bool, error) {
+	var args []string
+
+	safeName := "^" + regexp.QuoteMeta(name) + "$"
+	switch kind {
+	case "container":
+		args = []string{"container", "ls", "--all", "--filter", "name=" + safeName, "--format", "{{.Names}}"}
+	default:
+		args = []string{kind, "ls", "--filter", "name=" + safeName, "--format", "{{.Name}}"}
+	}
+
+	out, err := output(ctx, args...)
+	if err != nil {
+		return false, err
+	}
+
+	return out != "", nil
 }
 
 func labelsArgs(labels map[string]string) []string {
@@ -36,42 +98,4 @@ func run(ctx context.Context, streams Streams, args ...string) error {
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = streams.Stdin, streams.Stdout, streams.Stderr
 	return cmd.Run()
-}
-
-// Info is an observation from Docker, without Pact-specific ownership policy.
-type Info struct {
-	ID, Image string
-	Labels    map[string]string
-	Config    struct {
-		Image  string
-		Labels map[string]string
-	}
-	State struct{ Running, Paused, Restarting bool }
-}
-
-// Inspect distinguishes absence from daemon failure before inspecting identity.
-func Inspect(ctx context.Context, kind, name string) (*Info, error) {
-	args := []string{kind, "ls", "--filter", "name=" + name, "--format", "{{.Name}}"}
-	if kind == "container" {
-		args = []string{"container", "ls", "--all", "--filter", "name=" + name, "--format", "{{.Names}}"}
-	}
-	names, err := output(ctx, args...)
-	if err != nil {
-		return nil, err
-	}
-	if !strings.Contains("\n"+names+"\n", "\n"+name+"\n") {
-		return nil, nil
-	}
-	data, err := output(ctx, kind, "inspect", "--format", "{{json .}}", name)
-	if err != nil {
-		return nil, err
-	}
-	var info Info
-	if err := json.Unmarshal([]byte(data), &info); err != nil {
-		return nil, err
-	}
-	if kind == "container" {
-		info.Labels = info.Config.Labels
-	}
-	return &info, nil
 }

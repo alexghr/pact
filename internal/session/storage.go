@@ -13,24 +13,19 @@ import (
 const ownershipLabel = "me.alexghr.pact.storage"
 const roots = "/nix/var/nix/gcroots/environments/"
 
-func exists(ctx context.Context, kind, name string) (bool, error) {
-	info, err := docker.Inspect(ctx, kind, name)
-	return info != nil, err
-}
-
 func owned(ctx context.Context, kind, name, owner string) error {
 	info, err := docker.Inspect(ctx, kind, name)
 	if err != nil {
 		return err
 	}
-	if info == nil || info.Labels[ownershipLabel] != owner {
+	if info.Labels[ownershipLabel] != owner {
 		return fmt.Errorf("refusing unowned Docker %s %s", kind, name)
 	}
 	return nil
 }
 
 func volume(ctx context.Context, name, owner string, provisioned bool) error {
-	found, err := exists(ctx, "volume", name)
+	found, err := docker.Exists(ctx, "volume", name)
 	if err != nil {
 		return err
 	}

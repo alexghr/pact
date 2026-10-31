@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -255,7 +254,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	if mounts := bridge.ContainerConfig().ReadOnlyMounts; len(mounts) > 0 {
 		endpoint = testRelay(t, mounts[0].Source)
 	}
-	identity, err := fs.ReadFile(images.BuildContext, "git-identity.sh")
+	identity, err := images.GetAgentFile("git-identity.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +500,7 @@ func testRelay(t *testing.T, socket string) string {
 	endpoint := probe.URL
 	probe.Close()
 	u, _ := url.Parse(endpoint)
-	script, err := fs.ReadFile(images.BuildContext, "host-relay.sh")
+	script, err := images.GetAgentFile("host-relay.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +639,7 @@ func TestKeyAddedAfterStartup(t *testing.T) {
 			defer server.Close()
 			bin := filepath.Join(host, "pact-git-sign")
 			runCommand(t, "../..", nil, "go", "build", "-o", bin, "./cmd/git-client")
-			identity, err := fs.ReadFile(images.BuildContext, "git-identity.sh")
+			identity, err := images.GetAgentFile("git-identity.sh")
 			if err != nil {
 				t.Fatal(err)
 			}

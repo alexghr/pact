@@ -3,6 +3,7 @@ package session
 import (
 	"bufio"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -60,7 +61,7 @@ func TestDINDStartCancellation(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(outputIDs)) != "" {
 		t.Fatalf("cancelled startup leaked container: %s, %v", outputIDs, err)
 	}
-	if info, err := docker.Inspect(ctx, "volume", volume); err != nil || info != nil {
+	if info, err := docker.Inspect(ctx, "volume", volume); !errors.Is(err, docker.ErrNotFound) {
 		t.Fatalf("cancelled startup leaked socket volume: %+v, %v", info, err)
 	}
 }

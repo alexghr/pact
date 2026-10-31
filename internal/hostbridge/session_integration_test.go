@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -124,7 +123,7 @@ func startRelay(t *testing.T, socket string) string {
 	t.Helper()
 	// Exercise the same relay script embedded in the container image. p-test
 	// supplies socat and curl; missing dependencies must fail this check.
-	script, err := fs.ReadFile(images.BuildContext, "host-relay.sh")
+	script, err := images.GetAgentFile("host-relay.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +135,7 @@ func startRelay(t *testing.T, socket string) string {
 	listener.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	cmd := exec.CommandContext(ctx, "bash", "-e", "-s", "--", socket, fmt.Sprint(port))
-	cmd.Stdin = strings.NewReader(string(script) + "\nstart_host_relay \"$1\" \"$2\"\necho ready\nwait \"$pact_host_relay_pid\"\n")
+	cmd.Stdin = strings.NewReader(script + "\nstart_host_relay \"$1\" \"$2\"\necho ready\nwait \"$pact_host_relay_pid\"\n")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = time.Second

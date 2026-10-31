@@ -46,11 +46,9 @@ func (n Nix) prepare(ctx context.Context) error {
 func startNixDaemon(ctx context.Context, nix Nix) error {
 	name := nix.Container
 	info, err := docker.Inspect(ctx, "container", name)
-	if err != nil {
-		return err
-	}
 
-	if info == nil {
+	switch {
+	case errors.Is(err, docker.ErrNotFound):
 		image, err := images.BuildNixImage(ctx)
 		if err != nil {
 			return err
@@ -70,12 +68,8 @@ func startNixDaemon(ctx context.Context, nix Nix) error {
 		if err != nil {
 			return err
 		}
-	}
-
-	// container not found even after starting it.
-	// TODO: change this to an ErrNotFound
-	if info == nil {
-		return fmt.Errorf("Nix daemon %s disappeared before start", name)
+	case err != nil:
+		return err
 	}
 
 	if info.Labels[ownershipLabel] != name {
@@ -96,7 +90,7 @@ func startNixDaemon(ctx context.Context, nix Nix) error {
 			return nil
 		}
 		info, err := docker.Inspect(readyCtx, "container", name)
-		if err != nil || info == nil || !info.State.Running {
+		if err != nil || !info.State.Running {
 			var logs strings.Builder
 			_ = docker.Logs(ctx, name, 20, docker.Streams{Stdout: &logs, Stderr: &logs})
 			return errors.Join(fmt.Errorf("Nix daemon failed to start: %s", logs.String()), err)

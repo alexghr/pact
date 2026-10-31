@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 
 	"github.com/alexghr/pact/internal/docker"
@@ -13,16 +12,12 @@ import (
 // realiseTools always asks Nix for this Pact's pinned toolset. Nix reuses valid
 // outputs and atomically switches the shared profile only after a successful build.
 func realiseTools(ctx context.Context, daemon string) error {
-	files, err := fs.Sub(images.BuildContext, "tools")
-	if err != nil {
-		return err
-	}
 	dir, err := os.MkdirTemp("", "pact-tools-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	if err := os.CopyFS(dir, files); err != nil {
+	if err := os.CopyFS(dir, images.ToolsBuildContext); err != nil {
 		return fmt.Errorf("extract toolset flake: %w", err)
 	}
 	if err := docker.CopyTo(ctx, dir+"/.", daemon, "/opt/pact/toolset"); err != nil {
