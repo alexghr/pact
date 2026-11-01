@@ -80,11 +80,6 @@ func Logs(ctx context.Context, id string, tail int, streams Streams) error {
 	return run(ctx, streams, append(args, id)...)
 }
 
-func CopyTo(ctx context.Context, source, id, target string) error {
-	_, err := output(ctx, "cp", source, id+":"+target)
-	return err
-}
-
 type AttachOptions struct {
 	Streams
 	Interactive, Interrupt bool

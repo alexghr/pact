@@ -8,5 +8,4 @@ fi
 if ! id "$HOST_UID" >/dev/null 2>&1; then
   printf 'pact-client:x:%s:%s:Pact client:/tmp:/bin/sh\n' "$HOST_UID" "$HOST_GID" >> /etc/passwd
 fi
-mkdir -p /nix/var/nix/gcroots/environments
 exec nix-daemon

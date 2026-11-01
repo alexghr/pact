@@ -35,7 +35,7 @@ backend adapter. Interactive sessions use the native terminal UI.
 `Cleanup` removes the agent container, private DinD container/socket volume,
 bridge, broker temporary files, and login snapshot, then records the outcome.
 It tolerates partial startup and repeated calls. Persistent workspace files,
-private agent state, Nix roots, and the shared daemon remain available.
+private agent state and the shared daemon remain available.
 
 `running` describes attached process startup. Outcomes are `succeeded`, `failed`,
 `startupFailed`, or `interrupted`. Cleanup and final bookkeeping have bounded

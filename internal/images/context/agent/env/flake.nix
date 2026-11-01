@@ -27,6 +27,7 @@
           pkgs = import nixpkgs { inherit system; };
           agentPackages = agents.packages.${system};
           graphenePackage = pkgs.callPackage "${graphene}/package.nix" { };
+
           # Add or remove bundled skills here, then rebuild Pact and its image.
           skills = pkgs.linkFarm "pact-skills" [
             {
@@ -34,9 +35,17 @@
               path = "${graphene}/skills/graphene-stacked-prs";
             }
           ];
+
+          # agent entrypoint
+          start = pkgs.writeShellScriptBin "pact-start" ''
+            exec ${pkgs.bash}/bin/bash ${./start.sh} \
+              ${skills}/share/pact/skills ${./host-relay.sh} ${./git-identity.sh} "$@"
+          '';
+
           tools = pkgs.buildEnv {
             name = "pact-tools";
             paths = with pkgs; [
+              start
               nix
               devenv
               agentPackages.codex

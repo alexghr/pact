@@ -35,10 +35,7 @@ func (n Nix) prepare(ctx context.Context) error {
 	if err := volume(ctx, n.Volume, n.Volume, false); err != nil {
 		return err
 	}
-	if err := startNixDaemon(ctx, n); err != nil {
-		return err
-	}
-	return realiseTools(ctx, n.Container)
+	return startNixDaemon(ctx, n)
 }
 
 // startNixDaemon reuses or creates the shared daemon on an existing volume.

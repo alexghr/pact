@@ -63,5 +63,5 @@ Set `PACT_CODEX_BINARY` to exercise a specific installed version.
 
 The operator also validated completed interactive and prompted continuation on
 Codex 0.163.0. Pact pins the container toolset in
-`internal/images/context/tools/flake.lock`; protocol compatibility should be checked
+`internal/images/context/agent/env/flake.lock`; protocol compatibility should be checked
 when that pin changes.

@@ -12,8 +12,6 @@ import (
 var contextFiles embed.FS
 
 var (
-	// TODO: this should be private. We should expose a "BuildTools" function here.
-	ToolsBuildContext, _ = fs.Sub(contextFiles, "context/tools")
 	// Context necessary to build the Docker image the agent runs in. Frequently changes
 	agentBuildContext, _ = fs.Sub(contextFiles, "context/agent")
 	// The build context for the centralised Nix store. Changes very infrequently

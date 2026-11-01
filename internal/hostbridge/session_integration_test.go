@@ -123,7 +123,7 @@ func startRelay(t *testing.T, socket string) string {
 	t.Helper()
 	// Exercise the same relay script embedded in the container image. p-test
 	// supplies socat and curl; missing dependencies must fail this check.
-	script, err := images.GetAgentFile("host-relay.sh")
+	script, err := images.GetAgentFile("env/host-relay.sh")
 	if err != nil {
 		t.Fatal(err)
 	}

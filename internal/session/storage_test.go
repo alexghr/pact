@@ -52,11 +52,15 @@ func TestSharedStorage(t *testing.T) {
 		}
 		_, _ = dockerOutput(cleanupCtx, "volume", "rm", nix.Volume)
 	})
+	nix.Image, err = images.GetNixImageName(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	prepare := func(env state.Storage) error {
 		if err := nix.prepare(ctx); err != nil {
 			return err
 		}
-		return prepareStorage(ctx, store, env, nix)
+		return prepareStorage(ctx, store, env)
 	}
 	for _, env := range environments {
 		if err := prepare(env); err != nil {
@@ -64,87 +68,37 @@ func TestSharedStorage(t *testing.T) {
 		}
 	}
 	client := func(env state.Storage, script string) (string, error) {
-		config := docker.ContainerConfig{Image: image, Remove: true, Entrypoint: "/bin/bash",
+		config := docker.ContainerConfig{Image: image, Remove: true,
 			Mounts: []docker.Mount{{Type: "volume", Source: env.StateVolume, Target: "/home/pact/.codex"}},
-			Env:    []string{"HOME=/home/pact", "HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid())},
-			Command: []string{"-euc",
-				`usermod --non-unique --uid "$HOST_UID" --gid "$HOST_GID" pact; chown -R pact /home/pact; exec gosu pact /bin/bash -euc "$1"`,
-				"test-client", `export PATH=/opt/pact/tools/bin:$PATH; ` + script},
+			Env: []string{"HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid()),
+				"PACT_AGENT_STATE_DIR=/home/pact/.codex", "PACT_TEST_STATE=" + env.Key},
+			Command: []string{"bash", "-euc", script},
 		}
-		configureStorage(env, nix, &config)
+		configureStorage(nix, &config)
 		var output strings.Builder
 		err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &output})
 		return strings.TrimSpace(output.String()), err
 	}
-	// An already-running container must see new tools through the stable profile.
-	live := shared + "-live"
-	liveConfig := docker.ContainerConfig{Name: live, Image: image, Detach: true,
-		User:       strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
-		Entrypoint: "/bin/bash", Command: []string{"-ec", "exec sleep infinity"}}
-	configureStorage(environments[0], nix, &liveConfig)
-	if err := docker.RunContainer(ctx, liveConfig, docker.Streams{}); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stop()
-		_, _ = dockerOutput(cleanupCtx, "rm", "--force", live)
-	})
-	liveCommand := func(script string) (string, error) {
-		return dockerOutput(ctx, "exec", live, "/bin/bash", "-ec", "export PATH=/opt/pact/tools/bin:$PATH; "+script)
-	}
-	if _, err := liveCommand("test -r /etc/codex/skills/graphene-stacked-prs/SKILL.md; ! command -v pact-live-tool"); err != nil {
-		t.Fatal(err)
-	}
-	// Build a real additional toolset, keeping the existing commands available.
-	cmd := exec.CommandContext(ctx, "docker", "exec", "--interactive", shared, "nix", "--store", "daemon", "build",
-		"--impure", "--file", "-", "--no-link", "--profile", "/nix/var/nix/profiles/pact-tools")
-	cmd.Stdin = strings.NewReader(`
-let tools = builtins.storePath /nix/var/nix/profiles/pact-tools; in
-builtins.derivation {
-  name = "pact-live-tools";
-  system = builtins.currentSystem;
-  builder = "${tools}/bin/bash";
-  args = [ "-ec" ''
-    ${tools}/bin/mkdir -p "$out/bin"
-    ${tools}/bin/ln -s ${tools}/bin/* "$out/bin/"
-    printf '#!${tools}/bin/bash\nprintf live\n' > "$out/bin/pact-live-tool"
-    ${tools}/bin/chmod +x "$out/bin/pact-live-tool"
-  '' ];
-}`)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build live toolset: %v: %s", err, output)
-	}
-	if output, err := liveCommand("pact-live-tool"); err != nil || output != "live" {
-		t.Fatalf("running agent did not see the new tool: %v: %s", err, output)
-	}
-	if _, err := dockerOutput(ctx, "exec", shared, "ln", "-s", "/nix/var/nix/pact-skills/graphene-stacked-prs", "/nix/var/nix/pact-skills/pact-stale"); err != nil {
-		t.Fatal(err)
-	}
-	if err := prepare(environments[1]); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := liveCommand("! command -v pact-live-tool; test ! -e /etc/codex/skills/pact-stale; codex --version"); err != nil {
-		t.Fatalf("launch did not reconcile its pinned toolset: %v", err)
-	}
-	if _, err := dockerOutput(ctx, "rm", "--force", live); err != nil {
-		t.Fatal(err)
-	}
 	build := `
 if test -e /home/pact/.codex/history; then
-  test "$(cat /home/pact/.codex/history)" = "$PACT_NIX_ROOTS"
+  test "$(cat /home/pact/.codex/history)" = "$PACT_TEST_STATE"
 fi
-printf '%s' "$PACT_NIX_ROOTS" > /home/pact/.codex/history
+printf '%s' "$PACT_TEST_STATE" > /home/pact/.codex/history
+test -r /etc/codex/skills/graphene-stacked-prs/SKILL.md
+codex --version >&2
 if touch /nix/store/forbidden 2>/dev/null; then exit 1; fi
+if touch /nix/var/nix/gcroots/forbidden 2>/dev/null; then exit 1; fi
+export PACT_TEST_TOOLS="$(dirname "$(dirname "$(command -v bash)")")"
 mkdir -p /tmp/project
 cd /tmp/project
-printf shared > message
+mkdir src
+printf shared > src/message
 cat > default.nix <<'NIX'
-let tools = builtins.storePath /opt/pact/tools; in
+let tools = builtins.storePath (builtins.getEnv "PACT_TEST_TOOLS"); in
 builtins.derivation {
   name = "pact-source-check";
   system = builtins.currentSystem;
-  src = ./.;
+  src = ./src;
   builder = "${tools}/bin/bash";
   args = [ "-ec" ''
     if ${tools}/bin/touch /nix/var/nix/gcroots/forbidden 2>/dev/null; then exit 1; fi
@@ -154,9 +108,8 @@ builtins.derivation {
   '' ];
 }
 NIX
-nix build --impure --file default.nix --out-link "$PACT_NIX_ROOTS/package" >&2
-"$PACT_NIX_ROOTS/package/bin/hello"
-readlink -f "$PACT_NIX_ROOTS/package"
+nix shell --impure --file default.nix --command hello
+nix build --impure --file default.nix --no-link --print-out-paths
 `
 	type result struct {
 		output string
@@ -179,12 +132,8 @@ readlink -f "$PACT_NIX_ROOTS/package"
 		t.Fatalf("no output store path: %s", output)
 		return ""
 	}
-	packagePath := path(first.output)
-	if packagePath != path(second.output) || !strings.Contains(first.output, "shared\n") {
+	if path(first.output) != path(second.output) || !strings.Contains(first.output, "shared\n") {
 		t.Fatalf("clients did not reuse and execute one package: %s\n%s", first.output, second.output)
-	}
-	if _, err := dockerOutput(ctx, "exec", shared, "nix-store", "--store", "daemon", "--gc"); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := dockerOutput(ctx, "rm", "--force", shared); err != nil {
 		t.Fatal(err)
@@ -193,9 +142,9 @@ readlink -f "$PACT_NIX_ROOTS/package"
 		if err := prepare(env); err != nil {
 			t.Fatal(err)
 		}
-		output, err := client(env, `test "$(cat /home/pact/.codex/history)" = "$PACT_NIX_ROOTS"; "$PACT_NIX_ROOTS/package/bin/hello"`)
-		if err != nil || !strings.Contains(output, "shared") {
-			t.Fatalf("state/root lost after container replacement and GC: %v: %s", err, output)
+		output, err := client(env, build)
+		if err != nil || path(output) != path(first.output) {
+			t.Fatalf("state or cached build lost after container replacement: %v: %s", err, output)
 		}
 	}
 	// A service revision mismatch must leave the existing daemon untouched.
@@ -240,7 +189,7 @@ readlink -f "$PACT_NIX_ROOTS/package"
 		if err := prepare(env); err != nil {
 			t.Fatalf("missing shared cache was not recreated: %v", err)
 		}
-		if _, err := client(env, `test "$(cat /home/pact/.codex/history)" = "$PACT_NIX_ROOTS"; test ! -e "$PACT_NIX_ROOTS/package"; codex --version`); err != nil {
+		if _, err := client(env, `test "$(cat /home/pact/.codex/history)" = "$PACT_TEST_STATE"; codex --version`); err != nil {
 			t.Fatalf("cache recovery lost private state or tools: %v", err)
 		}
 		if _, err := client(env, build); err != nil {

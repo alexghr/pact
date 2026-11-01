@@ -68,7 +68,7 @@ func Restore(ctx context.Context, store *state.Store, nix Nix, id int64, configP
 
 func prepare(ctx context.Context, store *state.Store, nix Nix, record state.Session, configPath string) (*Session, error) {
 	s := &Session{store: store, Record: record, nix: nix, configPath: configPath}
-	if err := prepareStorage(ctx, store, record.Storage, nix); err != nil {
+	if err := prepareStorage(ctx, store, record.Storage); err != nil {
 		s.runErr = err
 		return nil, fmt.Errorf("prepare session %d: %w", record.ID, errors.Join(err, s.Cleanup()))
 	}
@@ -126,7 +126,7 @@ func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
 			"PACT_GIT_URL=" + s.bridge.AgentURL() + gitbroker.HandlerPath,
 			"PACT_BINDING_URL=" + s.bridge.AgentURL() + "/harness/binding"},
 	}
-	configureStorage(s.Record.Storage, s.nix, &agent)
+	configureStorage(s.nix, &agent)
 	bridgeConfig := s.bridge.ContainerConfig()
 	for _, mount := range bridgeConfig.ReadOnlyMounts {
 		agent.Mounts = append(agent.Mounts, docker.Mount{Type: "bind", Source: mount.Source, Target: mount.Target, ReadOnly: true})
@@ -187,7 +187,7 @@ func (s *Session) runContainer(ctx context.Context, config docker.ContainerConfi
 }
 
 // Cleanup releases temporary resources and records the outcome. Persistent
-// workspace files, agent state, Nix roots, and the shared service are retained.
+// workspace files, agent state, and the shared service are retained.
 func (s *Session) Cleanup() error {
 	if s.closed {
 		return s.cleanupErr

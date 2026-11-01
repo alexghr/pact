@@ -7,7 +7,10 @@ Pact is an agent isolation solution using your existing ChatGPT subscription.
 Run `pact` for an interactive session in a fresh managed workspace, or
 `pact -p 'Investigate deployment errors'` to start with a prompt. Use
 `pact -w PATH` to supply an existing directory. Pact retains workspace files,
-private agent state, launch settings, and Nix roots between runs.
+private agent state, and launch settings between runs. Pact uses Nix shells
+behind the scense to give agents access to all the tools they need to achieve
+their tasks. The Nix store is shared between all Pact sessions so that storage
+space is used efficiently.
 
 Each new session prints its Pact ID. Find sessions from any directory with
 `pact sessions list`, or inspect one with `pact sessions show 42`. Both accept
@@ -39,17 +42,14 @@ or recover previous executions; interrupted prompts are not replayed.
 
 The container includes [Graphene](https://github.com/alexghr/graphene) and its
 `graphene-stacked-prs` skill. Nix pins the CLI and skill to the same source revision
-in `internal/images/context/tools/flake.lock`.
+in `internal/images/context/agent/env/flake.lock`.
 
-Bundled skills are listed in `internal/images/context/tools/flake.nix` and exposed through
+Bundled skills are listed in `internal/images/context/agent/env/flake.nix` and exposed through
 `/etc/codex/skills`. To add or remove one, edit the `skills` list (and add any
 required tools to `pact-tools`), then rebuild the launcher with `./shell p-build`.
-Each launch asks Nix to realise the pinned toolset, reusing existing build outputs,
-then updates the shared tools profile. Running containers see newly added commands
-without restarting. Skills are published from that profile into the stable
-`/etc/codex/skills` directory so Codex can detect additions and removals.
-Already-running programs keep their existing version; upgrading Codex itself
-requires restarting its process. Tools and skills do not change the daemon image.
+Each agent starts in a Nix shell using its pinned toolset. Sessions share cached
+package outputs, while each container keeps its own tools and skills. Tool updates
+apply to newly started containers and do not change the daemon image.
 
 Project skills in `.agents/skills` inside the Git clone remain available through
 Codex's normal skill discovery.

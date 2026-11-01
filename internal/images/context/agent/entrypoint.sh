@@ -2,12 +2,6 @@
 set -euo pipefail
 
 if [[ "$(id -u)" == "0" ]]; then
-  # optional setup
-  if [[ -f /opt/pact/setup.sh ]]; then
-    echo "==> Running setup script as root..." >&2
-    /bin/bash /opt/pact/setup.sh >&2
-  fi
-
   # remap container uid/gid to host to avoid sudo issues on the host
   if [[ -n "${HOST_UID:-}" ]]; then
     host_gid="${HOST_GID:-$HOST_UID}"
@@ -20,7 +14,7 @@ if [[ "$(id -u)" == "0" ]]; then
   fi
 
   pact_group="$(id --group --name pact)"
-  chown pact:"$pact_group" /home/pact
+  chown pact:"$pact_group" /home/pact /etc/codex
   if [[ -n "${PACT_AGENT_STATE_DIR:-}" ]]; then
     mkdir -p "$PACT_AGENT_STATE_DIR"
     chown pact:"$pact_group" "$PACT_AGENT_STATE_DIR"
@@ -36,24 +30,4 @@ if [[ "$(id -u)" == "0" ]]; then
   exec gosu pact "$0" "$@"
 fi
 
-export PATH="/opt/pact/tools/bin:$PATH"
-if [[ -z "${PACT_NIX_ROOTS:-}" || ! -d "$PACT_NIX_ROOTS" ]]; then
-  echo 'Error: missing session Nix roots; restart the Pact session to prepare its storage.' >&2
-  exit 1
-fi
-# Profiles must resolve to the same path in the daemon's filesystem namespace.
-mkdir -p "$PACT_NIX_ROOTS/profiles" "$HOME/.local/state/nix"
-ln -sfn "$PACT_NIX_ROOTS/profiles" "$HOME/.local/state/nix/profiles"
-ln -sfn "$PACT_NIX_ROOTS/profiles/profile" "$HOME/.nix-profile"
-
-if [[ -n "${PACT_MCP_SOCKET:-}" ]]; then
-  source /opt/pact/host-relay.sh
-  start_host_relay "$PACT_MCP_SOCKET" 8765
-fi
-
-if [[ -n "${PACT_GIT_NAME:-}${PACT_GIT_EMAIL:-}${PACT_GIT_URL:-}" ]]; then
-  source /opt/pact/git-identity.sh
-fi
-
-cd /home/pact/workspace
-exec "$@"
+exec nix shell path:/opt/pact/toolset#pact-tools --no-update-lock-file --command pact-start "$@"
