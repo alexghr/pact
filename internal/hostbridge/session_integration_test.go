@@ -35,7 +35,7 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 		ended <- struct{}{}
 	}))
 	defer upstream.Close()
-	proxy, err := mcpproxy.New(upstream.URL+"/mcp", nil, []string{"^stream$"})
+	proxy, err := mcpproxy.New(upstream.URL+"/mcp", nil, mcpproxy.Policy{AllowedTools: []string{"^stream$"}})
 	if err != nil {
 		t.Fatal(err)
 	}

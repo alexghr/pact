@@ -37,28 +37,33 @@ Pact registers each server under its map key. Omit an entry to disable it.
 `allowedTools` is an allow-list of Go regular expressions for that server's
 upstream tool names, without a server or client-added prefix. A `tools/call`
 request is forwarded only if its `params.name` matches at least one pattern.
+Tools matching `approvalTools` instead require an external approval decision,
+even if they also match `allowedTools`. See [the approval protocol](approval-protocol.md)
+for configuration and the wire contract.
 Matching is case-sensitive by default and uses normal regex substring matching;
 use `^` and `$` to match a whole name. For example, `^get_issue$` allows exactly
 `get_issue`, and `^(get|list)_.*$` allows names beginning with `get_` or `list_`.
 
-An omitted or empty `allowedTools` denies every tool call, including for existing
-server entries. To explicitly allow every tool, set `"allowedTools": [".*"]`.
+Calls matching neither list are denied. Omitting both lists denies every tool
+call, including for existing server entries. To explicitly allow every tool,
+set `"allowedTools": [".*"]` and omit `approvalTools`.
 Invalid regexes prevent session startup and identify the server and pattern index.
 Permissions are read when a session starts or resumes; restart the run to apply
 config edits. Token files continue to be read on every forwarded request.
 
 Denied calls receive HTTP 403 with a JSON-RPC error identifying Pact's policy
 rejection and preserving the request ID. They never reach the upstream server.
-There are no approval prompts. `tools/list` remains unchanged, so clients can
+Pact delegates approval UI and persistent rules to the external service.
+`tools/list` remains unchanged, so clients can
 still discover tools they cannot call. These rules restrict tool names only:
 tool arguments and other MCP methods (including resources and prompts) are not
 restricted by this allow-list.
 
 POST bodies must be single, uncompressed JSON message objects, limited to 1 MiB.
-The proxy uses ordinary JSON unmarshalling to inspect the method and tool name;
-invalid JSON and JSON-RPC batches are rejected before forwarding. Other HTTP
-methods pass through unchanged, including GET for streaming and DELETE for
-session cleanup.
+The proxy matches JSON field names case-sensitively when inspecting the method,
+tool name, and arguments. Invalid JSON, duplicate object names, invalid UTF-8,
+and JSON-RPC batches are rejected before forwarding. Other HTTP methods pass
+through unchanged, including GET for streaming and DELETE for session cleanup.
 
 ## HTTP infrastructure
 

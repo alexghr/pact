@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/alexghr/pact/internal/approval"
 	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/docker"
@@ -91,7 +92,19 @@ func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
 	if err != nil {
 		return err
 	}
-	servers, err := mcpServers(settings.MCP)
+	var approvals *approval.Client
+	var approvalTimeout int
+	if settings.Approvals.Socket != "" {
+		approvals, err = approval.New(settings.Approvals, approval.Session{
+			ID: s.Record.ID, Key: s.Record.Storage.Key, ExecutionID: s.Record.ExecutionID, Title: s.Record.Title,
+			Workspace: s.Record.Workspace, Backend: s.Record.Backend,
+		})
+		if err != nil {
+			return err
+		}
+		approvalTimeout = int(approvals.Timeout.Seconds())
+	}
+	servers, err := mcpServers(settings.MCP, approvals)
 	if err != nil {
 		return err
 	}
@@ -152,7 +165,7 @@ func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
 	}
 	s.backendCleanup, err = codex.PrepareContainer(&agent, s.Record.Storage.StateVolume, harness.Options{
 		Prompt: prompt, Model: s.Record.Settings.Model, Effort: s.Record.Settings.Effort,
-		BackendRef: s.Record.BackendRef, MCP: mcp,
+		BackendRef: s.Record.BackendRef, MCP: mcp, MCPApprovalTimeoutSeconds: approvalTimeout,
 	})
 	if err != nil {
 		return err

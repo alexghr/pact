@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,12 +10,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/alexghr/pact/internal/approval"
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/mcpproxy"
 )
 
-func mcpServers(settings map[string]config.MCPServer) ([]hostbridge.Server, error) {
+func mcpServers(settings map[string]config.MCPServer, approvals *approval.Client) ([]hostbridge.Server, error) {
 	names := make([]string, 0, len(settings))
 	for name := range settings {
 		names = append(names, name)
@@ -22,7 +24,7 @@ func mcpServers(settings map[string]config.MCPServer) ([]hostbridge.Server, erro
 	slices.Sort(names)
 	servers := make([]hostbridge.Server, 0, len(names))
 	for _, name := range names {
-		proxy, err := mcpProxy(settings[name])
+		proxy, err := mcpProxy(name, settings[name], approvals)
 		if err != nil {
 			return nil, fmt.Errorf("mcp.%s: %w", name, err)
 		}
@@ -31,7 +33,7 @@ func mcpServers(settings map[string]config.MCPServer) ([]hostbridge.Server, erro
 	return servers, nil
 }
 
-func mcpProxy(server config.MCPServer) (http.Handler, error) {
+func mcpProxy(name string, server config.MCPServer, approvals *approval.Client) (http.Handler, error) {
 	if (server.Token == "") == (server.TokenFile == "") {
 		return nil, errors.New("requires exactly one of token or tokenFile")
 	}
@@ -50,7 +52,13 @@ func mcpProxy(server config.MCPServer) (http.Handler, error) {
 		}
 		return http.Header{"Authorization": {"Bearer " + token}}, nil
 	}
-	proxy, err := mcpproxy.New(server.URL, headers, server.AllowedTools)
+	policy := mcpproxy.Policy{AllowedTools: server.AllowedTools, ApprovalTools: server.ApprovalTools}
+	if approvals != nil {
+		policy.Approve = func(ctx context.Context, tool string, arguments jsontext.Value, rule string) (bool, error) {
+			return approvals.Approve(ctx, approval.ToolCall{Server: name, Tool: tool, Arguments: arguments, Rule: rule})
+		}
+	}
+	proxy, err := mcpproxy.New(server.URL, headers, policy)
 	if err != nil {
 		return nil, err
 	}

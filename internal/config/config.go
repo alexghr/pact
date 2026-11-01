@@ -11,15 +11,22 @@ import (
 )
 
 type Config struct {
-	Git Git                  `json:"git,omitzero"`
-	MCP map[string]MCPServer `json:"mcp,omitempty"`
+	Git       Git                  `json:"git,omitzero"`
+	MCP       map[string]MCPServer `json:"mcp,omitempty"`
+	Approvals Approvals            `json:"approvals,omitzero"`
 }
 
 type MCPServer struct {
-	URL          string   `json:"url"`
-	Token        string   `json:"token,omitempty"`
-	TokenFile    string   `json:"tokenFile,omitempty"`
-	AllowedTools []string `json:"allowedTools,omitempty"`
+	URL           string   `json:"url"`
+	Token         string   `json:"token,omitempty"`
+	TokenFile     string   `json:"tokenFile,omitempty"`
+	AllowedTools  []string `json:"allowedTools,omitempty"`
+	ApprovalTools []string `json:"approvalTools,omitempty"`
+}
+
+type Approvals struct {
+	Socket         string `json:"socket"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
 }
 
 type Git struct {
@@ -77,6 +84,12 @@ func Load(path string) (Config, error) {
 		cfg.Git.KnownHosts, err = resolvePath(path, cfg.Git.KnownHosts)
 		if err != nil {
 			return Config{}, fmt.Errorf("resolve git.knownHosts: %w", err)
+		}
+	}
+	if cfg.Approvals.Socket != "" {
+		cfg.Approvals.Socket, err = resolvePath(path, cfg.Approvals.Socket)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve approvals.socket: %w", err)
 		}
 	}
 	for name, server := range cfg.MCP {

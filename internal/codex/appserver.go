@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/coder/websocket"
-	"net"
 	"net/http"
 	"sync"
+
+	"github.com/alexghr/pact/internal/unixhttp"
+	"github.com/coder/websocket"
 )
 
 type rpcResponse struct {
@@ -34,9 +35,7 @@ type Client struct {
 }
 
 func Dial(ctx context.Context, socket string) (*Client, error) {
-	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	}}
+	transport := &http.Transport{DialContext: unixhttp.Dialer(socket, nil)}
 	defer transport.CloseIdleConnections()
 	conn, _, err := websocket.Dial(ctx, "ws://localhost/", &websocket.DialOptions{
 		HTTPClient: &http.Client{Transport: transport},

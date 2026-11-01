@@ -58,6 +58,10 @@ func configArgs(options harness.Options, instructions string) []string {
 	}
 	for _, name := range slices.Sorted(maps.Keys(options.MCP)) {
 		args = append(args, "--config", fmt.Sprintf("mcp_servers.%s={url=%s}", name, quote(options.MCP[name])))
+		if options.MCPApprovalTimeoutSeconds > 0 {
+			// Leave Codex's usual 60 seconds for the upstream after user approval.
+			args = append(args, "--config", fmt.Sprintf("mcp_servers.%s.tool_timeout_sec=%d", name, options.MCPApprovalTimeoutSeconds+60))
+		}
 	}
 	return args
 }
