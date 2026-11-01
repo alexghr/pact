@@ -84,4 +84,5 @@ is safe to repeat and requires no restart.
 ## MCP
 
 Configure MCP forwarding with named entries under `mcp` in your Pact config. See
-[the MCP bridge documentation](docs/mcp-bridge.md) for `url`, `token`, and `tokenFile`.
+[the MCP bridge documentation](docs/mcp-bridge.md) for endpoints, credentials, and
+`allowedTools` regexes. Tool calls are denied unless they match a server's allow-list.

@@ -11,7 +11,7 @@ import (
 
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/hostbridge"
-	"github.com/alexghr/pact/internal/httpproxy"
+	"github.com/alexghr/pact/internal/mcpproxy"
 )
 
 func mcpServers(settings map[string]config.MCPServer) ([]hostbridge.Server, error) {
@@ -50,9 +50,9 @@ func mcpProxy(server config.MCPServer) (http.Handler, error) {
 		}
 		return http.Header{"Authorization": {"Bearer " + token}}, nil
 	}
-	proxy, err := httpproxy.NewHTTP(server.URL, headers)
+	proxy, err := mcpproxy.New(server.URL, headers, server.AllowedTools)
 	if err != nil {
-		return nil, fmt.Errorf("url: %w", err)
+		return nil, err
 	}
 	if _, err := headers(context.Background()); err != nil {
 		return nil, err

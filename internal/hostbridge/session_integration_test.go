@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexghr/pact/internal/httpproxy"
 	"github.com/alexghr/pact/internal/images"
+	"github.com/alexghr/pact/internal/mcpproxy"
 )
 
 func TestRelayStreamingAndSessionLifetime(t *testing.T) {
@@ -35,7 +35,7 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 		ended <- struct{}{}
 	}))
 	defer upstream.Close()
-	proxy, err := httpproxy.NewHTTP(upstream.URL+"/mcp", nil)
+	proxy, err := mcpproxy.New(upstream.URL+"/mcp", nil, []string{"^stream$"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,10 +56,15 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 	defer client.CloseIdleConnections()
 	request := func(ctx context.Context, method string) *http.Response {
 		t.Helper()
-		r, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+		var body io.Reader
+		if method == http.MethodPost {
+			body = strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stream"}}`)
+		}
+		r, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 		if err != nil {
 			t.Fatal(err)
 		}
+		r.Header.Set("Content-Type", "application/json")
 		res, err := client.Do(r)
 		if err != nil {
 			t.Fatal(err)
@@ -85,7 +90,7 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	res := request(ctx, http.MethodGet)
+	res := request(ctx, http.MethodPost)
 	readEvent(res)
 	// A long-lived stream must not prevent another MCP request from completing.
 	deleted := request(context.Background(), http.MethodDelete)

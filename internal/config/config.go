@@ -16,9 +16,10 @@ type Config struct {
 }
 
 type MCPServer struct {
-	URL       string `json:"url"`
-	Token     string `json:"token,omitempty"`
-	TokenFile string `json:"tokenFile,omitempty"`
+	URL          string   `json:"url"`
+	Token        string   `json:"token,omitempty"`
+	TokenFile    string   `json:"tokenFile,omitempty"`
+	AllowedTools []string `json:"allowedTools,omitempty"`
 }
 
 type Git struct {

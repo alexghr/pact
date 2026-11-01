@@ -13,7 +13,8 @@ Add named Streamable HTTP MCP endpoints to your Pact `config.json`:
   "mcp": {
     "forgejo": {
       "url": "http://127.0.0.1:3000/mcp",
-      "tokenFile": "forgejo-token"
+      "tokenFile": "forgejo-token",
+      "allowedTools": ["^get_.*$", "^list_.*$"]
     }
   }
 }
@@ -29,8 +30,35 @@ Keep the config and token file outside the mounted workspace.
 
 `mcp` is a map of server names to configurations. Add any number of servers using
 the same fields; names may contain letters, digits, underscores, or hyphens.
-Pact registers each server under its map key and forwards all tools without
-filtering. Omit an entry to disable it.
+Pact registers each server under its map key. Omit an entry to disable it.
+
+### Tool permissions
+
+`allowedTools` is an allow-list of Go regular expressions for that server's
+upstream tool names, without a server or client-added prefix. A `tools/call`
+request is forwarded only if its `params.name` matches at least one pattern.
+Matching is case-sensitive by default and uses normal regex substring matching;
+use `^` and `$` to match a whole name. For example, `^get_issue$` allows exactly
+`get_issue`, and `^(get|list)_.*$` allows names beginning with `get_` or `list_`.
+
+An omitted or empty `allowedTools` denies every tool call, including for existing
+server entries. To explicitly allow every tool, set `"allowedTools": [".*"]`.
+Invalid regexes prevent session startup and identify the server and pattern index.
+Permissions are read when a session starts or resumes; restart the run to apply
+config edits. Token files continue to be read on every forwarded request.
+
+Denied calls receive HTTP 403 with a JSON-RPC error identifying Pact's policy
+rejection and preserving the request ID. They never reach the upstream server.
+There are no approval prompts. `tools/list` remains unchanged, so clients can
+still discover tools they cannot call. These rules restrict tool names only:
+tool arguments and other MCP methods (including resources and prompts) are not
+restricted by this allow-list.
+
+POST bodies must be single, uncompressed JSON message objects, limited to 1 MiB.
+The proxy uses ordinary JSON unmarshalling to inspect the method and tool name;
+invalid JSON and JSON-RPC batches are rejected before forwarding. Other HTTP
+methods pass through unchanged, including GET for streaming and DELETE for
+session cleanup.
 
 ## HTTP infrastructure
 
@@ -38,10 +66,11 @@ filtering. Omit an entry to disable it.
 control, path routing, and cleanup. Register handlers with
 `hostbridge.Server`. `internal/httpproxy` provides `NewHTTP` to forward requests
 to a fixed upstream endpoint and apply host-held credentials. Neither package
-interprets MCP.
-`internal/session/mcp.go` adapts MCP configuration into these HTTP handlers; the launcher
-advertises only configured MCP servers to Codex. The Git broker uses the same
-bridge as an ordinary HTTP handler.
+interprets MCP. `internal/mcpproxy` inspects client messages and enforces tool
+permissions before delegating to the HTTP proxy.
+`internal/session/mcp.go` adapts MCP configuration into these handlers; the
+launcher advertises only configured MCP servers to Codex. The Git broker uses
+the same bridge as an ordinary HTTP handler.
 
 Configured MCP servers use `/mcp/<name>`. Container helpers use `/harness/git`
 for Git brokering and `/harness/binding` for the initial backend reference. The wrapper
@@ -70,10 +99,11 @@ The Git broker is always registered, even with no configured MCP servers.
 
 The proxy sends requests to the exact registered endpoint, including its path
 and query. It discards client authorization and cookies, applies host headers,
-and forwards MCP traffic without parsing messages or filtering tools. Streaming,
-session headers, and request cancellation are preserved. Upstream credentials are never
-included in generated container configuration or proxy error messages. Upstream
-responses are passed through, so upstream servers must not echo credentials.
+and forwards permitted MCP traffic. Response bodies, including tool discovery,
+are passed through unchanged. Streaming, session headers, and request
+cancellation are preserved. Upstream credentials are never included in generated
+container configuration or proxy error messages. Upstream servers must not echo
+credentials in their responses.
 
 ## Supported environment
 
