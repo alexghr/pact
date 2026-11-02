@@ -1,4 +1,4 @@
-// Package approval sends individual MCP calls to an external approval service.
+// Package approval exchanges per-call MCP decisions over a host Unix socket.
 package approval
 
 import (

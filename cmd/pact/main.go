@@ -53,6 +53,8 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "approvals":
+			return serveApprovals(ctx, args[1:])
 		case "sessions":
 			return manageSessions(ctx, args[1:], os.Stdout, os.Stderr)
 		case "resume":
@@ -112,6 +114,7 @@ func parseArgs(args []string, output io.Writer) (runConfig, error) {
 		fmt.Fprintln(output, "Usage: pact [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID")
 		fmt.Fprintln(output, "       pact resume SESSION_ID [--prompt TEXT] [--config PATH]")
+		fmt.Fprintln(output, "       pact approvals [--socket PATH]")
 		flags.PrintDefaults()
 	}
 

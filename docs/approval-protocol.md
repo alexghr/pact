@@ -2,8 +2,35 @@
 
 Pact sends approval-required MCP calls to an external service and waits for a
 per-call decision before using host credentials to forward the original request.
-The service owns its UI and any persistent rules. Pact provides the protocol
-client; an approval app or daemon must be supplied separately.
+The service owns its UI and any persistent rules. Pact includes a minimal terminal
+service for trying the flow; other apps or daemons can use the same protocol.
+
+## Terminal proof of concept
+
+After setting `approvals.socket` in the default Pact config below, run this on
+the host in a separate terminal before starting a Pact session:
+
+```sh
+mkdir -p -m 700 ~/.config/pact
+pact approvals
+```
+
+The command uses `approvals.socket` from `$XDG_CONFIG_HOME/pact/config.json`,
+defaulting to `~/.config/pact/config.json`. Relative socket paths resolve against
+the config directory; `~/` uses your home directory. Use `--socket PATH` to
+override the socket or run without a config file.
+
+The command prints each complete request, including session context and tool
+arguments. Enter `y` to approve or `n` to reject, followed by Enter. Other input
+repeats the prompt. Each answer applies to one call; decisions are not saved.
+
+Prompts run one at a time. If the caller disconnects or the request expires
+while a prompt is waiting, the command cancels the input read and dismisses
+the prompt automatically. No Enter or answer is needed before the next prompt.
+Queued requests retain their original expiry.
+Ctrl+C stops the listener; EOF at a prompt also stops it. Pending calls fail
+without approval. The command creates a mode-0600 socket, removes it on exit,
+and refuses to replace an existing path. Keep its parent directory private.
 
 ## Configuration
 
@@ -165,4 +192,4 @@ another MCP call gets a new approval ID and may repeat an earlier side effect.
 Pact stores neither decisions nor grants. To implement "always approve this
 action in this session", the service stores its own rule, evaluates subsequent
 requests against it, and returns an ordinary per-call `approve`. Durable client
-rules, rule UI, and client implementation are separate from Pact's protocol client.
+rules and rule UI are separate from the terminal proof of concept.
