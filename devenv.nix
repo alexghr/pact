@@ -18,13 +18,14 @@
       in
       { pkgs, ... }:
       {
-        languages.go.enable = true;
-
         packages = [
+          pkgs.go_1_27
+          pkgs.gopls
           pkgs.docker-client
           pkgs.git
           agents.codex
         ];
+        env.GOTOOLCHAIN = "local";
 
         git-hooks.hooks = {
           format = {
@@ -38,9 +39,8 @@
       };
 
     ci.module = { pkgs, ... }: {
-      # languages.go.enable brings in a bunch of tools which don't matter in CI (e.g. gopls)
       packages = [
-        pkgs.go
+        pkgs.go_1_27
       ];
       env.GOTOOLCHAIN = "local";
     };
@@ -52,7 +52,7 @@
         pkgs.git
         pkgs.findutils
         pkgs.nixfmt
-        pkgs.go
+        pkgs.go_1_27
       ];
       exec = ''
         set -euo pipefail
