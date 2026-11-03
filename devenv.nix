@@ -114,15 +114,19 @@
     p-host-build.exec = ''
       set -euo pipefail
 
-      go build ./cmd/pact
+      go build "$@" ./cmd/pact
     '';
 
-    p-build.exec = ''
-      set -euo pipefail
+    p-build = {
+      packages = [ pkgs.git ];
+      exec = ''
+        set -euo pipefail
 
-      p-harness-build
-      p-host-build
-    '';
+        version="$(git rev-parse --abbrev-ref HEAD)-$(git rev-parse --short HEAD)"
+        p-harness-build
+        p-host-build -ldflags "-X=github.com/alexghr/pact/internal/version.Version=$version"
+      '';
+    };
 
     p-test = {
       packages = [

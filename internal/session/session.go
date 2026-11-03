@@ -20,6 +20,7 @@ import (
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/images"
 	"github.com/alexghr/pact/internal/state"
+	"github.com/alexghr/pact/internal/version"
 )
 
 type Capabilities = state.Capabilities
@@ -134,7 +135,7 @@ func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
 		Mounts: []docker.Mount{
 			{Type: "bind", Source: s.Record.Workspace, Target: "/home/pact/workspace"},
 		},
-		Env: []string{"HOST_UID=" + uid, "HOST_GID=" + gid,
+		Env: []string{"HOST_UID=" + uid, "HOST_GID=" + gid, "PACT_VERSION=" + version.Version,
 			"PACT_GIT_NAME=" + settings.Git.Name, "PACT_GIT_EMAIL=" + settings.Git.Email,
 			"PACT_GIT_URL=" + s.bridge.AgentURL() + gitbroker.HandlerPath,
 			"PACT_BINDING_URL=" + s.bridge.AgentURL() + "/harness/binding"},

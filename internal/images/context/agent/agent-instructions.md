@@ -2,6 +2,8 @@ Follow repository AGENTS.md and project conventions over the general defaults be
 
 # Environment
 
+The running Pact launcher's version is available in `PACT_VERSION`.
+
 You are running in a Pact Ubuntu container as the host-mapped, non-root user.
 Nix, devenv, Git, Bash, ripgrep, curl, and standard Unix tools are available.
 Use the project's development wrappers for tests and builds. If none are provided

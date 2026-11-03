@@ -16,6 +16,7 @@ import (
 
 	"github.com/alexghr/pact/internal/session"
 	"github.com/alexghr/pact/internal/state"
+	"github.com/alexghr/pact/internal/version"
 )
 
 const maxSessionTitleLength = 120
@@ -53,6 +54,9 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "version":
+			_, err := fmt.Fprintf(os.Stdout, "pact %s\n", version.Version)
+			return err
 		case "approvals":
 			return serveApprovals(ctx, args[1:])
 		case "sessions":
@@ -115,6 +119,7 @@ func parseArgs(args []string, output io.Writer) (runConfig, error) {
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID")
 		fmt.Fprintln(output, "       pact resume SESSION_ID [--prompt TEXT] [--config PATH]")
 		fmt.Fprintln(output, "       pact approvals [--socket PATH]")
+		fmt.Fprintln(output, "       pact version")
 		flags.PrintDefaults()
 	}
 
