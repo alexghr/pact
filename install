@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+./shell p-build && mv ./pact ~/.local/bin
