@@ -87,7 +87,6 @@ Configure MCP forwarding with named entries under `mcp` in your Pact config. See
 [the MCP bridge documentation](docs/mcp-bridge.md) for endpoints, credentials, and
 tool permission regexes. Use `allowedTools` for automatic allowance and
 `approvalTools` for per-call decisions from an external service over a host Unix
-socket. Other tool calls are denied. Try the terminal proof of concept with
-`pact approvals`, then enter `y` or `n` for each call. It uses `approvals.socket`
-from the default Pact config; `--socket PATH` overrides it. See
-[the approval protocol](docs/approval-protocol.md) for setup.
+socket. Other tool calls are denied.
+
+See [the approval protocol](docs/approval-protocol.md) for setup.

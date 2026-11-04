@@ -115,6 +115,9 @@
       set -euo pipefail
 
       go build "$@" ./cmd/pact
+      ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+        go build "$@" ./cmd/pact-approvals
+      ''}
     '';
 
     p-build = {

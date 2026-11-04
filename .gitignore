@@ -1,4 +1,5 @@
 /pact
+/pact-approvals
 /internal/images/context/agent/bin/
 /.devenv
 # git hooks managed by nix

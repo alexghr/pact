@@ -2,8 +2,46 @@
 
 Pact sends approval-required MCP calls to an external service and waits for a
 per-call decision before using host credentials to forward the original request.
-The service owns its UI and any persistent rules. Pact includes a minimal terminal
-service for trying the flow; other apps or daemons can use the same protocol.
+The service owns its UI and rules. Pact includes terminal and macOS dialog
+services; other apps or daemons can use the same protocol.
+
+## macOS dialogs
+
+Build with `./shell p-build`, then run the companion on your Mac:
+
+```sh
+mkdir -p -m 700 ~/.config/pact
+./pact-approvals --socket ~/.config/pact/approval.sock
+```
+
+Omit `--socket` to use `approvals.socket` from the default Pact config, with
+the same path resolution as `pact approvals` below. Run either service on a
+given socket. For Pact running on another machine, use the SSH forwarding
+example under [Transport](#transport).
+
+Each native dialog shows the host, session, tool, expiry, and complete request
+in a scrollable text view. Its four actions are:
+
+- **Approve:** allow this call once.
+- **Approve server/tool for session N:** allow that exact tool, with any
+  arguments, for the session.
+- **Approve server/* for session N:** allow every tool under that MCP server
+  for the session.
+- **Deny:** reject this call. Return and Escape also deny.
+
+Grants are held only in memory. They use the hostname and stable session key,
+so they survive session resumes while the service runs. Restart the service
+to clear all grants. There is no session-end notification in the protocol;
+grants remain until the service exits.
+
+Requests are handled one at a time, checking remembered grants before showing
+a dialog. Queued calls keep their original expiry. Disconnecting, expiry, or
+Ctrl+C dismisses the active dialog. The default approval timeout is 60 seconds;
+set `approvals.timeoutSeconds` on the Pact host if you want more time.
+
+The companion runs as a regular host process in your logged-in macOS desktop.
+It uses the built-in `osascript` and AppKit; it needs no application bundle,
+extra dependencies, or persistent rule storage.
 
 ## Terminal proof of concept
 
