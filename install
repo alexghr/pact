@@ -2,4 +2,8 @@
 
 set -euo pipefail
 
-./shell p-build && mv ./pact ~/.local/bin
+./shell p-build
+mv ./pact ~/.local/bin
+if [[ -f ./pact-approvals ]]; then
+  mv ./pact-approvals ~/.local/bin
+fi
