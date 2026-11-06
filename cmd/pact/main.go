@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -71,7 +72,7 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	sr, err := newSessionRuntime(ctx, 0, cfg.configPath, cfg.newSessionConfig)
+	sr, err := newSessionRuntime(ctx, nil, cfg.configPath, cfg.newSessionConfig)
 	if err != nil {
 		return err
 	}
@@ -86,7 +87,7 @@ func resumeSession(ctx context.Context, args []string) error {
 		return err
 	}
 
-	sr, err := newSessionRuntime(ctx, cfg.resumeID, cfg.configPath, newSessionConfig{})
+	sr, err := newSessionRuntime(ctx, &cfg.resumeID, cfg.configPath, newSessionConfig{})
 	if err != nil {
 		return err
 	}
@@ -117,7 +118,7 @@ func parseArgs(args []string, output io.Writer) (runConfig, error) {
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID")
-		fmt.Fprintln(output, "       pact resume SESSION_ID [--prompt TEXT] [--config PATH]")
+		fmt.Fprintln(output, "       pact resume [SESSION_ID] [--prompt TEXT] [--config PATH]")
 		fmt.Fprintln(output, "       pact approvals [--socket PATH]")
 		fmt.Fprintln(output, "       pact version")
 		flags.PrintDefaults()
@@ -161,13 +162,13 @@ func parseArgs(args []string, output io.Writer) (runConfig, error) {
 
 func parseResumeArgs(args []string, output io.Writer) (resumeConfig, error) {
 	var cfg resumeConfig
-	if len(args) == 0 {
-		return cfg, fmt.Errorf("usage: pact resume SESSION_ID [--prompt TEXT] [--config PATH]")
-	}
-
-	cfg.resumeID, _ = strconv.ParseInt(args[0], 10, 64)
-	if cfg.resumeID <= 0 {
-		return cfg, fmt.Errorf("resume requires a session ID")
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil || id <= 0 {
+			return cfg, fmt.Errorf("session ID must be a positive integer")
+		}
+		cfg.resumeID = id
+		args = args[1:]
 	}
 
 	flags := flag.NewFlagSet("pact resume", flag.ContinueOnError)
@@ -175,8 +176,13 @@ func parseResumeArgs(args []string, output io.Writer) (resumeConfig, error) {
 	flags.StringVar(&cfg.configPath, "config", "", "Config file (default: current host Pact config)")
 	flags.StringVar(&cfg.prompt, "prompt", "", "Continue the saved conversation with a prompt")
 	flags.StringVar(&cfg.prompt, "p", "", "Alias for --prompt")
+	flags.Usage = func() {
+		fmt.Fprintln(output, "Usage: pact resume [SESSION_ID] [--prompt TEXT] [--config PATH]")
+		fmt.Fprintln(output, "Omit SESSION_ID to resume the last used Pact session.")
+		flags.PrintDefaults()
+	}
 
-	if err := flags.Parse(args[1:]); err != nil {
+	if err := flags.Parse(args); err != nil {
 		return cfg, err
 	}
 
@@ -228,7 +234,8 @@ type sessionRuntime struct {
 	session *session.Session
 }
 
-func newSessionRuntime(ctx context.Context, maybeSessionID int64, configPath string, cfg newSessionConfig) (sessionRuntime, error) {
+// A nil resumeID starts a new session; zero resumes the last used session.
+func newSessionRuntime(ctx context.Context, resumeID *int64, configPath string, cfg newSessionConfig) (sessionRuntime, error) {
 	var runtime sessionRuntime
 	var err error
 
@@ -237,13 +244,24 @@ func newSessionRuntime(ctx context.Context, maybeSessionID int64, configPath str
 		return runtime, err
 	}
 
+	if resumeID != nil && *resumeID == 0 {
+		last, err := runtime.store.LastSession(ctx)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				err = errors.New("no sessions to resume")
+			}
+			return sessionRuntime{}, errors.Join(err, runtime.store.Close())
+		}
+		resumeID = &last.ID
+	}
+
 	nix, err := session.PrepareNix(ctx)
 	if err != nil {
 		return sessionRuntime{}, errors.Join(err, runtime.store.Close())
 	}
 
-	if maybeSessionID > 0 {
-		runtime.session, err = session.Restore(ctx, runtime.store, nix, maybeSessionID, configPath)
+	if resumeID != nil {
+		runtime.session, err = session.Restore(ctx, runtime.store, nix, *resumeID, configPath)
 	} else {
 		runtime.session, err = session.New(ctx, runtime.store, nix, session.Options{
 			Workspace:    cfg.workspace,

@@ -56,10 +56,13 @@ status after user input. Empty TUI threads do not become resume targets. Later
 native `/new` or `/resume` navigation stays within Codex and leaves Pact's binding
 unchanged. See [Codex integration](codex-discovery.md).
 
-`pact resume ID` resumes the stored reference. With `--prompt` it uses prompted
-continuation; otherwise it opens the native TUI. An empty reference starts the
-session's first conversation. A missing or unavailable saved reference produces
-a backend error, rather than selecting another native conversation.
+`pact resume [ID]` resumes the stored reference. Omitting the ID selects the Pact
+session most recently created or resumed across all workspaces, ordered by
+execution ID rather than finish time. An empty catalogue reports an error.
+With `--prompt` it uses prompted continuation; otherwise it opens the native TUI.
+An empty reference starts the session's first conversation. A missing or
+unavailable saved reference produces a backend error, rather than selecting
+another native conversation.
 
 `pact sessions list` shows Pact IDs, initial titles, execution outcomes, and
 catalogue update times. `show ID` also exposes the backend and saved reference.

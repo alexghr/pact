@@ -57,6 +57,15 @@ func (s *Store) Session(ctx context.Context, id int64) (Session, error) {
 	return session, nil
 }
 
+// LastSession returns the session most recently created or resumed.
+func (s *Store) LastSession(ctx context.Context) (Session, error) {
+	session, err := scanSession(s.db.QueryRowContext(ctx, sessionQuery+" ORDER BY x.id DESC, s.id DESC LIMIT 1"))
+	if err != nil {
+		return Session{}, fmt.Errorf("read last session: %w", err)
+	}
+	return session, nil
+}
+
 // Sessions filters by the canonical host workspace; empty means all workspaces.
 func (s *Store) Sessions(ctx context.Context, workspace string) ([]Session, error) {
 	query := sessionQuery

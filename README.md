@@ -18,18 +18,19 @@ Each new session prints its Pact ID. Find sessions from any directory with
 The catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
 `~/.local/state/pact/sessions.db`.
 
-A Pact session binds once to the agent's initial native conversation. Resume it
-interactively with `pact resume 42`, or continue with a prompt using
-`pact resume 42 -p 'Continue the investigation'`. Both reuse its saved model,
+A Pact session binds once to the agent's initial native conversation. Run
+`pact resume` to resume the last used Pact session from any directory, or
+`pact resume 42` to select a session. Continue with a prompt using
+`pact resume 42 -p 'Continue the investigation'`. Resuming reuses its saved model,
 reasoning effort, Docker-in-Docker and host-network capabilities, workspace, and
 private state. Git and MCP connections use current host configuration;
 `--config PATH` selects another config file.
 
 Codex is currently the supported backend. Native `/new` and `/resume` navigation
 does not change the Pact session's saved backend reference. Pact does not list
-native threads or select whichever was most recently used. A session with no
-backend reference starts its first conversation on its next run. An unavailable
-saved conversation causes a native resume error.
+native threads or select the most recently used native conversation. A session
+with no backend reference starts its first conversation on its next run. An
+unavailable saved conversation causes a native resume error.
 
 The launcher records execution outcomes and removes temporary agent/DinD
 containers and socket volumes on exit or handled cancellation. Shared Nix
