@@ -18,6 +18,18 @@ Use the project's devenv environment:
 - Run checks with `./shell p-ci`.
 - Build the launcher with `./shell p-build`.
 
+`p-ci` runs every check sequentially, continues after failures, and exits nonzero
+if any check fails. `./shell p-ci --report FILE` also writes the completed results
+as JSON. Checks are registered in `scripts/ci.sh`; Forgejo derives its reporting
+jobs from those results. Their full logs are in the **Run checks** job.
+Branch protection should require `CI / result (pull_request)`, which checks both
+the suite's exit status and completion of the reporting jobs.
+
+`p-deps` rejects new direct or indirect module paths and remote replacement
+modules in `go.mod`; version updates are allowed. It compares against the merge
+base with `origin/main`, or `PACT_CI_BASE` when set. Fetch the base before running
+locally. CI supplies the PR base or the previous push's commit.
+
 Relevant integration checks are opt-in and are not enabled by `p-ci`:
 
 - Real SSH, when an unprivileged SSH daemon can run:

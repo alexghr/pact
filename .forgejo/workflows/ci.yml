@@ -7,15 +7,66 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint-test-build:
+  run-ci:
+    name: Run checks
     runs-on: nix
     env:
       DEVENV_PROFILE: ci
+      PACT_CI_BASE: ${{ forgejo.event.pull_request.base.sha || forgejo.event.before }}
+    outputs:
+      outcome: ${{ steps.checks.outcome }}
+      checks: ${{ steps.report.outputs.checks }}
+      results: ${{ steps.report.outputs.results }}
     steps:
       - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           github-server-url: https://forge.alexghr.me
           persist-credentials: false
+          fetch-depth: 0
 
-      - name: Lint, test, and build
-        run: ./shell p-ci
+      - name: Run all checks
+        id: checks
+        # Result jobs carry check failures; a missing report fails this job.
+        continue-on-error: true
+        run: ./shell p-ci --report "$RUNNER_TEMP/ci-results.json"
+
+      - name: Publish results
+        id: report
+        run: ./shell p-ci-report "$RUNNER_TEMP/ci-results.json" >> "$GITHUB_OUTPUT"
+
+  report:
+    name: check
+    needs: run-ci
+    runs-on: nix
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(needs.run-ci.outputs.checks) }}
+    steps:
+      - name: Report result
+        env:
+          CHECK_STATUS: ${{ fromJSON(needs.run-ci.outputs.results)[matrix.check].status }}
+          CHECK_REASON: ${{ fromJSON(needs.run-ci.outputs.results)[matrix.check].reason }}
+        run: |
+          printf '%s: %s\n' "$CHECK_STATUS" "$CHECK_REASON"
+          case "$CHECK_STATUS" in
+            success|warning) exit 0 ;;
+            *) exit 1 ;;
+          esac
+
+  result:
+    name: result
+    if: ${{ always() }}
+    needs: [run-ci, report]
+    runs-on: nix
+    steps:
+      - name: Require successful checks and reporting
+        env:
+          RUN_RESULT: ${{ needs.run-ci.result }}
+          CHECKS_OUTCOME: ${{ needs.run-ci.outputs.outcome }}
+          REPORT_RESULT: ${{ needs.report.result }}
+        run: |
+          printf 'Execution: %s\nChecks: %s\nReporting: %s\n' "$RUN_RESULT" "$CHECKS_OUTCOME" "$REPORT_RESULT"
+          test "$RUN_RESULT" = success
+          test "$CHECKS_OUTCOME" = success
+          test "$REPORT_RESULT" = success

@@ -1,11 +1,12 @@
 {
   pkgs,
-  lib,
   config,
   inputs,
   ...
 }:
 {
+  imports = [ ./scripts ];
+
   # go-sqlite3 compiles its bundled SQLite into the host executable through CGO.
   packages = [ pkgs.stdenv.cc ];
   env.CGO_ENABLED = "1";
@@ -44,119 +45,5 @@
       ];
       env.GOTOOLCHAIN = "local";
     };
-  };
-
-  scripts = {
-    p-fmt = {
-      packages = [
-        pkgs.git
-        pkgs.findutils
-        pkgs.nixfmt
-        pkgs.go_1_27
-      ];
-      exec = ''
-        set -euo pipefail
-
-        source_files() {
-          git ls-files -z --cached --others --exclude-standard --deduplicate "$1" |
-            while IFS= read -r -d "" file; do
-              if [[ -f "$file" ]]; then
-                printf '%s\0' "$file"
-              fi
-            done
-        }
-
-        if [[ $# -eq 0 ]]; then
-          source_files '*.nix' | xargs -0 -r nixfmt
-          source_files '*.go' | xargs -0 -r gofmt -w
-          exit 0
-        fi
-        if [[ $# -ne 1 || "$1" != --check ]]; then
-          printf 'Usage: p-fmt [--check]\n' >&2
-          exit 2
-        fi
-
-        source_files '*.nix' | xargs -0 -r nixfmt --check
-        unformatted=$(source_files '*.go' | xargs -0 -r gofmt -l)
-        if [[ -n "$unformatted" ]]; then
-          printf 'Go files need formatting:\n%s\n' "$unformatted" >&2
-          exit 1
-        fi
-      '';
-    };
-
-    p-git-client.exec = ''
-      set -euo pipefail
-
-      for arch in amd64 arm64; do
-        CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-          -o "internal/images/context/agent/bin/pact-git-client-linux-$arch" ./cmd/git-client
-      done
-    '';
-
-    p-agent.exec = ''
-      set -euo pipefail
-
-      for arch in amd64 arm64; do
-        CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-          -o "internal/images/context/agent/bin/pact-agent-linux-$arch" ./cmd/pact-agent
-      done
-    '';
-
-    p-harness-build.exec = ''
-      set -euo pipefail
-
-      p-git-client
-      p-agent
-    '';
-
-    # The launcher embeds the prepared container inputs, including its helpers.
-    p-host-build.exec = ''
-      set -euo pipefail
-
-      go build "$@" ./cmd/pact
-      ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-        go build "$@" ./cmd/pact-approvals
-      ''}
-    '';
-
-    p-build = {
-      packages = [ pkgs.git ];
-      exec = ''
-        set -euo pipefail
-
-        version="$(git rev-parse --abbrev-ref HEAD)-$(git rev-parse --short HEAD)"
-        p-harness-build
-        p-host-build -ldflags "-X=github.com/alexghr/pact/internal/version.Version=$version"
-      '';
-    };
-
-    p-test = {
-      packages = [
-        pkgs.bash
-        pkgs.coreutils
-        pkgs.curl
-        pkgs.git
-        pkgs.openssh
-        pkgs.socat
-      ];
-      exec = ''
-        go test ./...
-      '';
-    };
-
-    p-lint.exec = ''
-      go vet ./...
-    '';
-
-    p-ci.exec = ''
-      set -euo pipefail
-
-      p-fmt --check
-      p-lint
-      p-test
-      p-build
-    '';
-
   };
 }
