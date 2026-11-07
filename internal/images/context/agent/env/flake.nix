@@ -34,6 +34,22 @@
               name = "share/pact/skills/graphene-stacked-prs";
               path = "${graphene}/skills/graphene-stacked-prs";
             }
+            {
+              name = "share/pact/skills/review-pr";
+              path = ./skills/review-pr;
+            }
+            {
+              name = "share/pact/skills/review-design";
+              path = ./skills/review-design;
+            }
+            {
+              name = "share/pact/skills/review-tests";
+              path = ./skills/review-tests;
+            }
+            {
+              name = "share/pact/skills/review-docs";
+              path = ./skills/review-docs;
+            }
           ];
 
           # agent entrypoint

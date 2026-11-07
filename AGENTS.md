@@ -12,6 +12,13 @@ operator and Pact changes. Do not put internal docs in the README.
 
 For major features write documentation for humans and agents in `./docs/`.
 
+## Code review
+
+For reviews of the Pact codebase, use `.agents/skills/pact-review/SKILL.md`.
+It supplies project-specific patterns and examples from our PR history to the
+bundled `review-pr` workflow. These patterns do not govern other repositories
+running inside Pact. See `docs/code-review.md` for usage and evaluation.
+
 ## Development
 
 Use the project's devenv environment:

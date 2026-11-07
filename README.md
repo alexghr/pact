@@ -55,6 +55,12 @@ apply to newly started containers and do not change the daemon image.
 Project skills in `.agents/skills` inside the Git clone remain available through
 Codex's normal skill discovery.
 
+To review a PR, start a session with
+`pact -p 'Use $review-pr to review https://forge.example.com/team/project/pulls/123'`.
+The bundled review skills use the target repository's review policy. Include
+“publish findings” to post a review through your configured forge connection.
+See [code review](docs/code-review.md) for policy setup and review behavior.
+
 ## Git
 
 Configure a Git identity in `~/.config/pact/config.json`. Pact keeps the private
