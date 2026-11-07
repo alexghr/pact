@@ -19,7 +19,7 @@ trap 'rm -rf "$work"' EXIT
 results='[]'
 failed=0
 # This is the check list for both local runs and the CI reporting matrix.
-for check in lint build test deps layout; do
+for check in lint build test deps layout config-naming; do
   printf '\nRunning %s\n' "$check"
   status=success
   reason=

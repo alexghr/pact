@@ -33,6 +33,9 @@ locally. CI supplies the PR base or the previous push's commit.
 `p-layout` requires executable Go packages under `cmd/` and implementation
 packages under `internal/`. Review check scripts live in `scripts/review/`.
 
+`p-config-naming` requires camelCase JSON tag names in `internal/config/`.
+External protocol types are outside this check.
+
 Relevant integration checks are opt-in and are not enabled by `p-ci`:
 
 - Real SSH, when an unprivileged SSH daemon can run:

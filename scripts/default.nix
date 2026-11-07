@@ -92,6 +92,11 @@
       exec = builtins.readFile ./review/layout.sh;
     };
 
+    p-config-naming = {
+      packages = [ pkgs.git ];
+      exec = builtins.readFile ./review/config-naming.sh;
+    };
+
     p-ci = {
       packages = [
         pkgs.jq
