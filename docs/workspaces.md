@@ -27,20 +27,21 @@ build output alongside the private agent state. It does not retain running
 processes or a previous Docker-in-Docker daemon's contents.
 
 Pact records allocation intent, session storage and execution before
-creating a managed directory. After creation it records the directory's device
-and inode identity and marks it ready. Allocation errors name the session and
+creating a managed directory. After creation it marks the workspace ready.
+Allocation errors name the session and
 path and record a startup failure. An abrupt launcher exit may leave an
 `allocating` workspace and a `starting` execution; inspect the saved session
 before recovery. Pact never removes a partial allocation automatically.
 
-A missing directory, redirected path, or replaced managed directory blocks
-resume and new launches against that registration. Restore the original
-directory at its recorded location; creating an empty replacement is not
-recovery. An incomplete allocation needs explicit operator investigation. Keep
+A missing directory or redirected path blocks resume and new launches against
+that registration. Restore the workspace files at the recorded location.
+Pact does not track directory device or inode numbers, so restoring files from
+a backup does not require preserving the original directory identity.
+An incomplete allocation needs explicit operator investigation. Keep
 the catalogue, directories, and private state volumes together in backups.
 The runtime uses a bind mount that refuses missing sources rather than creating
-an empty host directory. A directory must not be moved or replaced while Pact
-owns it.
+an empty host directory. Do not move or replace a directory while a session is
+running.
 
 Pact does not lock workspaces, private state, provisioning, or reclamation.
 Avoid concurrent launches or maintenance against the same resources. After a

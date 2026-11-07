@@ -49,8 +49,8 @@ func (s *Store) CreateSession(ctx context.Context, workspace Workspace, session 
 	defer tx.Rollback()
 	now := time.Now().UnixMilli()
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO workspaces(path, owner, created_at, managed, status, identity) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(path) DO NOTHING",
-		workspace.Path, workspace.Owner, now, workspace.Managed, workspace.Status, workspace.Identity,
+		"INSERT INTO workspaces(path, owner, created_at, managed, status) VALUES(?, ?, ?, ?, ?) ON CONFLICT(path) DO NOTHING",
+		workspace.Path, workspace.Owner, now, workspace.Managed, workspace.Status,
 	); err != nil {
 		return Session{}, fmt.Errorf("register workspace: %w", err)
 	}

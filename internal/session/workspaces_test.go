@@ -108,12 +108,6 @@ func TestManagedWorkspaceLifecycle(t *testing.T) {
 	if _, err := restoreRecord(t.Context(), store, a.ID); err == nil {
 		t.Fatal("resume replaced a missing retained directory")
 	}
-	if err := os.Mkdir(a.Workspace, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := restoreRecord(t.Context(), store, a.ID); err == nil {
-		t.Fatal("resume accepted a replacement directory")
-	}
 }
 
 func TestManagedAllocationFailureIsRetained(t *testing.T) {
