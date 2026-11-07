@@ -2,6 +2,30 @@
 
 Pact is an agent isolation solution using your existing ChatGPT subscription. 
 
+## Experimental daemon attachment
+
+Build with `./shell p-build`, then run `./pact daemon` in a separate terminal
+(or as a background process). In another terminal:
+
+```sh
+./pact start                  # Create and attach to an interactive session
+# Enter a prompt, then press Ctrl-] to detach while it works.
+./pact attach 42              # Reattach using the printed Pact session ID
+./pact start -d              # Create a session without attaching yet (--detach)
+```
+
+`start` accepts the usual workspace, model, effort, config, DinD and host-network
+flags. Enter prompts in the native TUI; `start -p` is not supported yet.
+Ctrl-C reaches Codex. Ctrl-] only disconnects the terminal.
+
+This prototype keeps live sessions in memory and replays up to 1 MiB of raw
+terminal output on attachment. Screen restoration, especially after a resize,
+is experimental. One terminal can attach to each session. Build and startup
+diagnostics appear in the daemon terminal. Stopping the daemon stops its agent
+containers; workspace files and saved conversations remain. There is no crash
+recovery. Existing `pact`, `pact -p`, and `pact resume` still use the foreground
+launcher; use `attach` for a live daemon session.
+
 ## Sessions
 
 Run `pact` for an interactive session in a fresh managed workspace, or

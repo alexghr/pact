@@ -64,6 +64,12 @@ func run(ctx context.Context, args []string) error {
 			return manageSessions(ctx, args[1:], os.Stdout, os.Stderr)
 		case "resume":
 			return resumeSession(ctx, args[1:])
+		case "daemon":
+			return serveDaemon(ctx, args[1:])
+		case "start":
+			return startDaemonSession(ctx, args[1:])
+		case "attach":
+			return attachSession(ctx, args[1:])
 		}
 	}
 
@@ -81,44 +87,21 @@ func run(ctx context.Context, args []string) error {
 	return sr.Run(ctx, cfg.prompt)
 }
 
-func resumeSession(ctx context.Context, args []string) error {
-	cfg, err := parseResumeArgs(args, os.Stderr)
-	if err != nil {
-		return err
-	}
-
-	sr, err := newSessionRuntime(ctx, &cfg.resumeID, cfg.configPath, newSessionConfig{})
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintf(os.Stderr, "Pact resumed session %d\n", sr.session.Record.ID)
-	return sr.Run(ctx, cfg.prompt)
-}
-
 func parseArgs(args []string, output io.Writer) (runConfig, error) {
-	cfg := runConfig{
-		newSessionConfig: newSessionConfig{model: "gpt-6.1-sol"},
-	}
+	var cfg runConfig
 
 	flags := flag.NewFlagSet("pact", flag.ContinueOnError)
 	flags.SetOutput(output)
-	flags.BoolVar(&cfg.dind, "dind", false, "Give the agent a dedicated Docker-in-Docker daemon")
-	flags.BoolVar(&cfg.hostNet, "hostnet", false, "Run the container on the host's network")
-	flags.StringVar(&cfg.workspace, "workspace", "", "Use an existing workspace directory (default: a fresh managed workspace)")
-	flags.StringVar(&cfg.workspace, "w", "", "Alias for --workspace")
+	addNewSessionFlags(flags, &cfg.newSessionConfig)
 	flags.StringVar(&cfg.prompt, "prompt", "", "Prompt to run (omit for an interactive session)")
 	flags.StringVar(&cfg.prompt, "p", "", "Alias for --prompt")
-	flags.StringVar(&cfg.model, "model", cfg.model, "Model to use")
-	flags.StringVar(&cfg.model, "m", cfg.model, "Alias for --model")
-	flags.StringVar(&cfg.effort, "effort", cfg.effort, "Reasoning effort (omit to use the model default)")
-	flags.StringVar(&cfg.effort, "e", cfg.effort, "Alias for --effort")
 	flags.StringVar(&cfg.configPath, "config", "", "Config file (default: $XDG_CONFIG_HOME/pact/config.json or ~/.config/pact/config.json)")
 
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT] [--config PATH]")
 		fmt.Fprintln(output, "       pact sessions list | show SESSION_ID")
 		fmt.Fprintln(output, "       pact resume [SESSION_ID] [--prompt TEXT] [--config PATH]")
+		fmt.Fprintln(output, "       pact daemon | start [--detach] [OPTIONS] | attach SESSION_ID")
 		fmt.Fprintln(output, "       pact approvals [--socket PATH]")
 		fmt.Fprintln(output, "       pact version")
 		flags.PrintDefaults()
@@ -134,30 +117,62 @@ func parseArgs(args []string, output io.Writer) (runConfig, error) {
 		return cfg, fmt.Errorf("unexpected argument: %s", flags.Arg(0))
 	}
 
-	if cfg.workspace == "" {
-		return cfg, nil
+	var err error
+	cfg.workspace, err = resolveWorkspace(cfg.workspace)
+	return cfg, err
+}
+
+func addNewSessionFlags(flags *flag.FlagSet, cfg *newSessionConfig) {
+	flags.BoolVar(&cfg.dind, "dind", false, "Give the agent a dedicated Docker-in-Docker daemon")
+	flags.BoolVar(&cfg.hostNet, "hostnet", false, "Run the container on the host's network")
+	flags.StringVar(&cfg.workspace, "workspace", "", "Use an existing workspace directory (default: a fresh managed workspace)")
+	flags.StringVar(&cfg.workspace, "w", "", "Alias for --workspace")
+	flags.StringVar(&cfg.model, "model", "gpt-6.1-sol", "Model to use")
+	flags.StringVar(&cfg.model, "m", cfg.model, "Alias for --model")
+	flags.StringVar(&cfg.effort, "effort", "", "Reasoning effort (omit to use the model default)")
+	flags.StringVar(&cfg.effort, "e", cfg.effort, "Alias for --effort")
+}
+
+func resolveWorkspace(workspace string) (string, error) {
+	if workspace == "" {
+		return "", nil
 	}
 
-	workspace, err := filepath.Abs(cfg.workspace)
+	workspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return cfg, err
+		return "", err
 	}
 
-	cfg.workspace, err = filepath.EvalSymlinks(workspace)
+	workspace, err = filepath.EvalSymlinks(workspace)
 	if err != nil {
-		return cfg, fmt.Errorf("resolve workspace: %w", err)
+		return "", fmt.Errorf("resolve workspace: %w", err)
 	}
 
-	info, err := os.Stat(cfg.workspace)
+	info, err := os.Stat(workspace)
 	if err != nil {
-		return cfg, err
+		return "", err
 	}
 
 	if !info.IsDir() {
-		return cfg, errors.New("workspace must be a directory")
+		return "", errors.New("workspace must be a directory")
 	}
 
-	return cfg, nil
+	return workspace, nil
+}
+
+func resumeSession(ctx context.Context, args []string) error {
+	cfg, err := parseResumeArgs(args, os.Stderr)
+	if err != nil {
+		return err
+	}
+
+	sr, err := newSessionRuntime(ctx, &cfg.resumeID, cfg.configPath, newSessionConfig{})
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "Pact resumed session %d\n", sr.session.Record.ID)
+	return sr.Run(ctx, cfg.prompt)
 }
 
 func parseResumeArgs(args []string, output io.Writer) (resumeConfig, error) {

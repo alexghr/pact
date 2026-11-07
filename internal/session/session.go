@@ -26,13 +26,19 @@ import (
 type Capabilities = state.Capabilities
 
 type Options struct {
-	Workspace    string
-	Title        string
-	Backend      string
-	Model        string
-	Effort       string
-	ConfigPath   string
-	Capabilities Capabilities
+	Workspace    string       `json:"workspace,omitempty"`
+	Title        string       `json:"title"`
+	Backend      string       `json:"backend,omitempty"`
+	Model        string       `json:"model"`
+	Effort       string       `json:"effort,omitempty"`
+	ConfigPath   string       `json:"configPath,omitempty"`
+	Capabilities Capabilities `json:"capabilities"`
+}
+
+type Terminal struct {
+	docker.Streams
+	Size  docker.TerminalSize
+	Ready func(string)
 }
 
 // Session represents one foreground use of retained Pact state. Cleanup removes
@@ -79,6 +85,14 @@ func prepare(ctx context.Context, store *state.Store, nix Nix, record state.Sess
 }
 
 func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
+	return s.start(ctx, prompt, nil)
+}
+
+func (s *Session) StartTerminal(ctx context.Context, terminal Terminal) error {
+	return s.start(ctx, "", &terminal)
+}
+
+func (s *Session) start(ctx context.Context, prompt string, terminal *Terminal) (runErr error) {
 	if s.closed || s.containerID != "" {
 		return errors.New("session run has already started or ended")
 	}
@@ -177,7 +191,21 @@ func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
 			return codex.ConsumeExec(input, s.bind, os.Stdout, os.Stderr, s.Record.BackendRef)
 		}
 	}
-	return s.runContainer(ctx, agent, consume)
+	if terminal == nil {
+		return s.runContainer(ctx, agent, consume)
+	}
+	s.containerID, err = docker.CreateContainer(ctx, agent)
+	if err != nil {
+		return err
+	}
+	s.started, err = docker.AttachTerminal(ctx, s.containerID, terminal.Streams, terminal.Size, func() error {
+		if err := s.store.StartExecution(ctx, s.Record.ExecutionID); err != nil {
+			return err
+		}
+		terminal.Ready(s.containerID)
+		return nil
+	})
+	return err
 }
 
 func (s *Session) bind(ref string) error {

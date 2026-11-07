@@ -37,6 +37,16 @@ type Git struct {
 	AllowedRemotes []string `json:"allowedRemotes,omitempty"`
 }
 
+// RuntimeDir selects Pact's per-user directory under XDG_RUNTIME_DIR, falling
+// back to the host temporary directory. Callers create and validate it as needed.
+func RuntimeDir() string {
+	root := os.Getenv("XDG_RUNTIME_DIR")
+	if root == "" {
+		root = os.TempDir()
+	}
+	return filepath.Join(root, fmt.Sprintf("pact-%d", os.Getuid()))
+}
+
 // Path returns an absolute config path, using the host's default when empty.
 func Path(path string) (string, error) {
 	if path == "" {

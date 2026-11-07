@@ -43,6 +43,30 @@ contexts independent of cancellation. A hard crash leaves resources and possibly
 unfinished execution records for manual intervention. There are no writer locks,
 resource journal, automatic recovery, or automatic prompt replay.
 
+## Experimental daemon attachment
+
+`pact daemon` runs an opt-in foreground supervisor. `pact start` provisions a
+normal managed session and attaches the terminal; `pact start -d` (or `--detach`)
+only prints its ID. `pact attach ID` joins the same running native TUI. Ctrl-] detaches
+without cancelling the execution. The original launch and resume paths remain
+independent of the supervisor.
+
+`internal/daemon` owns an in-memory registry, input pipes, a bounded raw output
+history, and one client connection per session. Session-owned input delivery
+keeps a stalled native stdin from hiding a client disconnect. Its Unix socket is
+under
+`$XDG_RUNTIME_DIR/pact-UID/`, falling back to the host temporary directory.
+`session.StartTerminal` reuses normal provisioning and cleanup. Docker allocates
+the container PTY; `internal/docker` uses HTTP attach/resize requests over
+`docker system dial-stdio`, retaining Docker's context/socket selection without
+requiring a host PTY or a Docker SDK.
+
+Daemon cancellation ends its executions and waits for cleanup. There is no
+restart recovery or terminal screen model. Reattachment replays at most 1 MiB
+of raw output, so restoration across different terminal sizes is experimental.
+This slice supports interactive executions only and adds no writer exclusion,
+durable input queue, or catalogue schema. See the README for trial commands.
+
 ## Backend binding
 
 Each session starts with an empty `BackendRef`. The adapter reports the first
