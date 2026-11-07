@@ -51,7 +51,8 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 			t.Fatalf("private socket permissions for %s: %v, %v", path, info, err)
 		}
 	}
-	endpoint := startRelay(t, socketPath) + "/mcp/example"
+	endpoint, _ := startRelay(t, socketPath)
+	endpoint += "/mcp/example"
 	client := &http.Client{Timeout: 10 * time.Second}
 	defer client.CloseIdleConnections()
 	request := func(ctx context.Context, method string) *http.Response {
@@ -124,7 +125,7 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 	}
 }
 
-func startRelay(t *testing.T, socket string) string {
+func startRelay(t *testing.T, socket string) (string, string) {
 	t.Helper()
 	// Exercise the same relay script embedded in the container image. p-test
 	// supplies socat and curl; missing dependencies must fail this check.
@@ -144,7 +145,14 @@ func startRelay(t *testing.T, socket string) string {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = time.Second
-	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	diagnostics, err := os.CreateTemp(t.TempDir(), "stderr-")
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { diagnostics.Close() })
+	cmd.Stderr = diagnostics
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -162,5 +170,90 @@ func startRelay(t *testing.T, socket string) string {
 	if err != nil || line != "ready\n" {
 		t.Fatalf("relay did not become ready: %q, %v", line, err)
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d", port)
+	return fmt.Sprintf("http://127.0.0.1:%d", port), diagnostics.Name()
+}
+
+func TestRelayResetDiagnostics(t *testing.T) {
+	ended := make(chan struct{})
+	bridge, err := startUnix([]Server{{Path: "/harness/stream", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(ended)
+		data := make([]byte, 64*1024)
+		for {
+			if _, err := w.Write(data); err != nil {
+				return
+			}
+			w.(http.Flusher).Flush()
+		}
+	})}}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close()
+	endpoint, diagnostics := startRelay(t, bridge.socketPath)
+	conn, err := net.Dial("tcp4", strings.TrimPrefix(endpoint, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, "GET /harness/stream HTTP/1.1\r\nHost: localhost\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	// Reset a live stream, reproducing the socat error seen over the TUI.
+	if err := conn.(*net.TCPConn).SetLinger(0); err != nil {
+		t.Fatal(err)
+	}
+	conn.Close()
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reset did not end the upstream stream")
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	defer client.CloseIdleConnections()
+	res, err := client.Get(endpoint + "/_pact/health")
+	if err != nil {
+		t.Fatalf("relay stopped serving after reset: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("relay health after reset: %s", res.Status)
+	}
+	output, err := os.ReadFile(diagnostics)
+	if err != nil || len(output) != 0 {
+		t.Fatalf("relay diagnostics leaked to terminal: %s, %v", output, err)
+	}
+}
+
+func TestRelayStartupDiagnostics(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "host.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	occupied, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	script, err := images.GetAgentFile("env/host-relay.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "-e", "-s", "--", socket, fmt.Sprint(occupied.Addr().(*net.TCPAddr).Port))
+	cmd.Env = append(os.Environ(), "TMPDIR="+t.TempDir())
+	cmd.Stdin = strings.NewReader(script + "\nstart_host_relay \"$1\" \"$2\"\n")
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), occupied.Addr().String()) {
+		t.Fatalf("startup failure lost diagnostics: %s, %v", output, err)
+	}
 }
