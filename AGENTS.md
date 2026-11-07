@@ -1,6 +1,7 @@
 # Project guidance
 
-Prefer small, concise code that a human can read and understand.
+Prefer code a human can understand on the first read. Keep it concise by
+removing unnecessary logic and making each remaining step explicit.
 Keep changes focused. Every abstraction, dependency, and test should
 justify the complexity it adds.
 
@@ -67,6 +68,10 @@ be helper skills loaded in your environment to work with stacked branches. Use t
 
 - Prefer straightforward control flow: ordinary loops, early returns,
   and shallow nesting.
+- When selecting behavior from named cases of one value, prefer a switch
+  with each supported case explicit. Assign each case's result within that
+  case, including zero values.
+- Separate logical steps with blank lines. Keep related operations together.
 - Use the standard library before adding dependencies or custom machinery.
 - Use modern Go idioms and APIs supported by `go.mod` when they simplify
   the code, such as `slices`, `strings.Cut`, and `errors.AsType`.
@@ -81,8 +86,12 @@ be helper skills loaded in your environment to work with stacked branches. Use t
   context where it helps diagnose a failure; preserve error identity.
 - Make ownership and cleanup clear for goroutines, listeners, processes,
   and temporary resources. Propagate cancellation and bound cleanup.
-- Comments should explain intent, constraints, and non-obvious wiring.
+- Comments should explain intent, constraints, and non-obvious API details
+  or wiring, such as why `CommandContext`'s executable is argument 1.
   Include a small data example when a protocol or payload is hard to infer.
+
+For a small example of explicit case handling and visual grouping, see
+`dockerCommand` in `cmd/check-docker-boundary/main.go`.
 
 ## Testing
 
