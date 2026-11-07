@@ -97,6 +97,11 @@
       exec = builtins.readFile ./review/config-naming.sh;
     };
 
+    p-docker-boundary = {
+      packages = [ pkgs.git ];
+      exec = builtins.readFile ./review/docker-boundary.sh;
+    };
+
     p-ci = {
       packages = [
         pkgs.jq

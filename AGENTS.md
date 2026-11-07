@@ -36,6 +36,12 @@ packages under `internal/`. Review check scripts live in `scripts/review/`.
 `p-config-naming` requires camelCase JSON tag names in `internal/config/`.
 External protocol types are outside this check.
 
+`p-docker-boundary` rejects `Command` and `CommandContext` selector calls with
+Docker executable literals outside `internal/docker/`, in files importing
+`os/exec`. It checks production Go files under `cmd/` and `internal/`; tests and
+`testdata/` are excluded. It matches names without resolving types or tracing
+executable variables and shell commands.
+
 Relevant integration checks are opt-in and are not enabled by `p-ci`:
 
 - Real SSH, when an unprivileged SSH daemon can run:
