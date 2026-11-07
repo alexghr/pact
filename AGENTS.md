@@ -30,6 +30,9 @@ modules in `go.mod`; version updates are allowed. It compares against the merge
 base with `origin/main`, or `PACT_CI_BASE` when set. Fetch the base before running
 locally. CI supplies the PR base or the previous push's commit.
 
+`p-layout` requires executable Go packages under `cmd/` and implementation
+packages under `internal/`. Review check scripts live in `scripts/review/`.
+
 Relevant integration checks are opt-in and are not enabled by `p-ci`:
 
 - Real SSH, when an unprivileged SSH daemon can run:

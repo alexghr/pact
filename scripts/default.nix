@@ -84,7 +84,12 @@
         pkgs.jq
         pkgs.coreutils
       ];
-      exec = builtins.readFile ./deps.sh;
+      exec = builtins.readFile ./review/deps.sh;
+    };
+
+    p-layout = {
+      packages = [ pkgs.git ];
+      exec = builtins.readFile ./review/layout.sh;
     };
 
     p-ci = {
