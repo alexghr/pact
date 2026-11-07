@@ -93,3 +93,26 @@ exposed different member selection by the old parser and the upstream. Trace
 the message in `internal/mcpproxy/proxy.go` through `Policy.Approve` and the
 forwarded body. Determine which value each side uses at this revision; do not
 assume the historical bypass still exists.
+
+## PACT-DESIGN-006: Order declarations for a top-to-bottom read
+
+For changed files, start at the entrypoints and read through their operations in
+source order. Keep entrypoints together, followed by the helpers that explain
+them; place lower-level details after the operations they support. Group related
+types and methods where they help the reader understand that flow. Avoid making
+a reader skip unrelated helpers before reaching the implementation of the
+operation they just encountered.
+
+Source: [entrypoints before their shared implementation](https://forge.alexghr.me/ag/pact/pulls/127#issuecomment-1115).
+
+Pattern from PR 127: `Start` and `Attach` in `internal/daemon/client.go` both
+immediately call `connect`. Keep `connect` after those entrypoints and terminal
+helpers below it, so the main connection flow is visible before its details.
+Likewise, storage preparation reads as `prepareStorage` → `volume` → `owned` in
+`internal/session/storage.go`.
+
+This is a readability judgment, not a strict call-graph sort. Shared helpers,
+recursive calls, interface methods, and coherent groups may warrant a different
+order. A finding should name the reader's entrypoint, the declaration that
+interrupts the explanation, and a focused reorder that reduces jumping. Do not
+request repository-wide sorting or move declarations merely to satisfy a rule.

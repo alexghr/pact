@@ -10,15 +10,16 @@ import (
 
 const ownershipLabel = "me.alexghr.pact.storage"
 
-func owned(ctx context.Context, kind, name, owner string) error {
-	info, err := docker.Inspect(ctx, kind, name)
+// prepareStorage creates only persistent resources; startup failures retain them.
+func prepareStorage(ctx context.Context, store *state.Store, storage state.Storage) error {
+	current, err := store.Storage(ctx, storage.Key)
 	if err != nil {
 		return err
 	}
-	if info.Labels[ownershipLabel] != owner {
-		return fmt.Errorf("refusing unowned Docker %s %s", kind, name)
+	if err := volume(ctx, current.StateVolume, current.Key, current.Provisioned); err != nil {
+		return err
 	}
-	return nil
+	return store.ProvisionSessionStorage(ctx, current.Key)
 }
 
 func volume(ctx context.Context, name, owner string, provisioned bool) error {
@@ -37,16 +38,15 @@ func volume(ctx context.Context, name, owner string, provisioned bool) error {
 	return owned(ctx, "volume", name, owner)
 }
 
-// prepareStorage creates only persistent resources; startup failures retain them.
-func prepareStorage(ctx context.Context, store *state.Store, storage state.Storage) error {
-	current, err := store.Storage(ctx, storage.Key)
+func owned(ctx context.Context, kind, name, owner string) error {
+	info, err := docker.Inspect(ctx, kind, name)
 	if err != nil {
 		return err
 	}
-	if err := volume(ctx, current.StateVolume, current.Key, current.Provisioned); err != nil {
-		return err
+	if info.Labels[ownershipLabel] != owner {
+		return fmt.Errorf("refusing unowned Docker %s %s", kind, name)
 	}
-	return store.ProvisionSessionStorage(ctx, current.Key)
+	return nil
 }
 
 // configureStorage keeps store writes behind the shared daemon.

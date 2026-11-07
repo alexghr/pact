@@ -32,24 +32,6 @@ type grant struct {
 
 type grants map[grant]bool
 
-func (g grants) allows(r Request) bool {
-	key := grant{r.Hostname, r.Session.Key, r.Call.Server, r.Call.Tool}
-	if g[key] {
-		return true
-	}
-
-	key.tool = "" // An empty tool grants the entire server.
-	return g[key]
-}
-
-func (g grants) remember(r Request, group bool) {
-	key := grant{r.Hostname, r.Session.Key, r.Call.Server, r.Call.Tool}
-	if group {
-		key.tool = ""
-	}
-	g[key] = true
-}
-
 func ServeMacOS(ctx context.Context, socket string, output io.Writer) error {
 	rules := make(grants)
 
@@ -87,6 +69,24 @@ func ServeMacOS(ctx context.Context, socket string, output io.Writer) error {
 			return false, fmt.Errorf("unexpected dialog action %q", action)
 		}
 	})
+}
+
+func (g grants) allows(r Request) bool {
+	key := grant{r.Hostname, r.Session.Key, r.Call.Server, r.Call.Tool}
+	if g[key] {
+		return true
+	}
+
+	key.tool = "" // An empty tool grants the entire server.
+	return g[key]
+}
+
+func (g grants) remember(r Request, group bool) {
+	key := grant{r.Hostname, r.Session.Key, r.Call.Server, r.Call.Tool}
+	if group {
+		key.tool = ""
+	}
+	g[key] = true
 }
 
 type button struct {
