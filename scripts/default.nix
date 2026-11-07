@@ -102,6 +102,11 @@
       exec = builtins.readFile ./review/docker-boundary.sh;
     };
 
+    p-cmd-tests = {
+      packages = [ pkgs.git ];
+      exec = builtins.readFile ./review/cmd-tests.sh;
+    };
+
     p-ci = {
       packages = [
         pkgs.jq

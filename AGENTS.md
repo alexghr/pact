@@ -26,6 +26,11 @@ jobs from those results. Their full logs are in the **Run checks** job.
 Branch protection should require `CI / result (pull_request)`, which checks both
 the suite's exit status and completion of the reporting jobs.
 
+Checks own their policy and diagnostics. The shared exit-code contract is
+0 for success, 10 for a warning, and any other nonzero code for failure.
+`p-ci` records the exit code and captures non-success output as the reason;
+keep it free of check-specific decisions and messages.
+
 `p-deps` rejects new direct or indirect module paths and remote replacement
 modules in `go.mod`; version updates are allowed. It compares against the merge
 base with `origin/main`, or `PACT_CI_BASE` when set. Fetch the base before running
@@ -42,6 +47,11 @@ Docker executable literals outside `internal/docker/`, in files importing
 `os/exec`. It checks production Go files under `cmd/` and `internal/`; tests and
 `testdata/` are excluded. It matches names without resolving types or tracing
 executable variables and shell commands.
+
+`p-cmd-tests` warns about added `cmd/**/*_test.go` paths using the same baseline
+as `p-deps`, including files moved into `cmd/`. Existing paths are not reported.
+Findings use exit 10, so they warn without failing the suite. Operational errors
+still fail CI.
 
 Relevant integration checks are opt-in and are not enabled by `p-ci`:
 
@@ -108,6 +118,9 @@ Before adding a test:
 3. Choose the smallest test that exercises the real behavior.
 
 - Do not add tests solely for coverage or one test file per module.
+- Keep unit tests for application logic under `internal/`. Tests under `cmd/`
+  need a concrete executable-boundary reason, such as exit status, signals, or
+  standard streams that internal tests cannot cover. Explain it in the PR.
 - Do not add tests that merely restate constants, YAML/JSON declarations,
   straightforward file reads or parsing, argument forwarding, command
   construction, or expected flag lists. Test config handling when it contains
@@ -135,6 +148,8 @@ Before adding a test:
   packages unless the user explicitly requests a public Go API.
 - Keep executable entrypoints under `cmd/` and container build inputs
   under `internal/images/context/`. Use the existing build scripts.
+- Keep `cmd/` thin: process setup, delegation to `internal/`, and final error or
+  exit handling. Put application logic in internal packages.
 - Reuse upstream Nix packaging instead of maintaining duplicate recipes.
 - Use camelCase JSON fields consistently. Keep configuration, errors,
   documentation, and examples aligned.

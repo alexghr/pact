@@ -17,28 +17,31 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 results='[]'
-failed=0
 # This is the check list for both local runs and the CI reporting matrix.
-for check in lint build test deps layout config-naming docker-boundary; do
+for check in lint build test deps layout config-naming docker-boundary cmd-tests; do
   printf '\nRunning %s\n' "$check"
-  status=success
-  reason=
   if "p-$check" 2>&1 | tee "$work/output"; then
-    :
+    code=0
   else
     code=$?
-    status=error
-    failed=1
-    reason="p-$check exited with status $code"
+  fi
+
+  # All checks use the same exit-code contract.
+  case "$code" in
+    0) status=success ;;
+    10) status=warning ;;
+    *) status=error ;;
+  esac
+
+  reason=
+  if [[ "$code" -ne 0 ]]; then
     # Keep the matrix small; full output remains in the execution job's log.
-    detail=$(tail -c 2000 "$work/output")
-    if [[ -n "$detail" ]]; then
-      reason+=$'\n'"$detail"
-    fi
+    reason=$(tail -c 2000 "$work/output")
   fi
   results=$(jq -cn --argjson results "$results" \
-    --arg name "$check" --arg status "$status" --arg reason "$reason" \
-    '$results + [{name: $name, status: $status, reason: $reason}]')
+    --arg name "$check" --argjson exitCode "$code" \
+    --arg status "$status" --arg reason "$reason" \
+    '$results + [{name: $name, exitCode: $exitCode, status: $status, reason: $reason}]')
 done
 
 printf '\nCI results\n'
@@ -46,4 +49,4 @@ jq -r '.[] | "\(.name): \(.status)"' <<< "$results"
 if [[ -n "$report" ]]; then
   printf '%s\n' "$results" > "$report"
 fi
-exit "$failed"
+jq -e 'all(.[]; .status != "error")' <<< "$results" > /dev/null

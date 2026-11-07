@@ -45,12 +45,14 @@ jobs:
     steps:
       - name: Report result
         env:
+          CHECK_EXIT_CODE: ${{ fromJSON(needs.run-ci.outputs.results)[matrix.check].exitCode }}
           CHECK_STATUS: ${{ fromJSON(needs.run-ci.outputs.results)[matrix.check].status }}
           CHECK_REASON: ${{ fromJSON(needs.run-ci.outputs.results)[matrix.check].reason }}
         run: |
-          printf '%s: %s\n' "$CHECK_STATUS" "$CHECK_REASON"
+          printf '%s (exit %s): %s\n' "$CHECK_STATUS" "$CHECK_EXIT_CODE" "$CHECK_REASON"
           case "$CHECK_STATUS" in
-            success|warning) exit 0 ;;
+            success) exit 0 ;;
+            warning) printf '::warning::%s\n' "$CHECK_REASON" ;;
             *) exit 1 ;;
           esac
 
