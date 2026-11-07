@@ -112,9 +112,14 @@ Before adding a test:
 - Test the resulting behavior instead, e.g. a signed commit verifies,
   credentials cannot be overridden or exposed, a stream is cancelled,
   or a forbidden request cannot start a host process.
-- Do not use mocks, fakes, stubs, or other test doubles. This includes
-  scripts or binaries that impersonate external tools, such as a fake
-  `docker` placed on `PATH`.
+- Do not use mocks, fakes, stubs, or other test doubles, except for the
+  minimal protocol endpoints described below. This includes scripts or
+  binaries that impersonate external tools, such as a fake `docker` on `PATH`.
+- Minimal protocol test endpoints are permitted when they exercise Pact's
+  real client or proxy over HTTP or sockets. Keep handlers focused on the
+  requests, responses, and failures needed by the test, using the standard
+  library or existing production dependencies. Do not add dependencies solely
+  for tests or build full replacement services, such as an OAuth2 server.
 - Use real components, temporary files and repositories, sockets, and
   subprocesses. If the actual components are too complicated, heavy, or
   unavailable, discuss the test with the user before writing it. Do not

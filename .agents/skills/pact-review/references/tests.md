@@ -19,11 +19,18 @@ placement; this rule assesses the behavior tested.
 
 ## PACT-TEST-002: Exercise real components
 
-Use actual files, repositories, sockets, subprocesses, and services instead of
-test doubles. A fake Docker executable on PATH remains a double. If real
-components are too heavy or unavailable, follow `AGENTS.md` and discuss the test
-instead of substituting a mock. Removing an unnecessary test can be the right
-outcome; do not demand an integration test without a concrete failure to protect.
+Use actual files, repositories, sockets, subprocesses, and services. Minimal
+protocol endpoints are permitted by `AGENTS.md`: a small HTTP handler can return
+controlled replies while exercising Pact's real client or proxy. Do not flag
+such an endpoint merely because the test controls its responses. Check that it
+stays focused and introduces no dependencies solely for tests; adding or building
+a full OAuth2 server to test an MCP integration is excessive.
+
+A fake Docker executable on PATH remains a forbidden double. For other cases
+where real components are too heavy or unavailable, follow `AGENTS.md` and
+discuss the test instead of substituting a mock. Removing an unnecessary test
+can be the right outcome; do not demand an integration test without a concrete
+failure to protect.
 
 Sources: [fake Docker test rejected](https://forge.alexghr.me/ag/pact/pulls/28#issuecomment-172),
 [operator review on mocks/fakes](https://forge.alexghr.me/ag/pact/pulls/2#issuecomment-9).
