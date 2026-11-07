@@ -143,6 +143,63 @@ stream_max_retries = 0
 	return home
 }
 
+// The real client's version command exits without a terminal. Server logs must
+// stay off stderr on success, while startup failures must retain diagnostics.
+func TestInteractiveDiagnostics(t *testing.T) {
+	if os.Getenv("PACT_TEST_CODEX") != "1" {
+		t.Skip("set PACT_TEST_CODEX=1 for the real Codex app-server")
+	}
+	for _, test := range []struct {
+		name         string
+		serverConfig []string
+		wantLog      string
+	}{
+		{name: "successful exit"},
+		{name: "startup failure", serverConfig: []string{"-c", "model=42"}, wantLog: "expected a string"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			t.Setenv("CODEX_HOME", offlineCodexHome(t))
+			t.Setenv("NO_PROXY", "127.0.0.1")
+			t.Setenv("RUST_LOG", "codex_app_server=trace")
+			// Native startup warnings belong to the client and may reach stderr.
+			var nativeLogs bytes.Buffer
+			command := exec.CommandContext(ctx, "codex", "--version")
+			command.Stderr = &nativeLogs
+			if err := command.Run(); err != nil {
+				t.Fatal(err)
+			}
+			diagnostics, err := os.CreateTemp(t.TempDir(), "stderr-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer diagnostics.Close()
+			stderr := os.Stderr
+			os.Stderr = diagnostics
+			defer func() { os.Stderr = stderr }()
+
+			err = runInteractive(ctx, test.serverConfig, []string{"--version"}, "", func(context.Context, string) error {
+				t.Error("version command unexpectedly started a conversation")
+				return nil
+			})
+			if (err != nil) != (test.wantLog != "") {
+				t.Fatalf("interactive result: %v", err)
+			}
+			logs, err := os.ReadFile(diagnostics.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.wantLog == "" && !bytes.Equal(logs, nativeLogs.Bytes()) {
+				t.Fatalf("server output leaked to the terminal: %s", logs)
+			}
+			if !strings.Contains(string(logs), test.wantLog) {
+				t.Fatalf("startup diagnostics missing %q: %s", test.wantLog, logs)
+			}
+		})
+	}
+}
+
 // An unavailable provider still persists accepted user turns. Exercise native
 // exec resume and the subsequent remote-TUI handshake against that real store.
 func TestExecResumeRetainsContext(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-func runInteractive(ctx context.Context, serverConfig, native []string, backendRef string, bind func(context.Context, string) error) error {
+func runInteractive(ctx context.Context, serverConfig, native []string, backendRef string, bind func(context.Context, string) error) (err error) {
 	// Catch Ctrl-C without inheriting an ignored disposition into the TUI.
 	// Its app-server lives in a separate process group and must stay running.
 	interrupts := make(chan os.Signal, 1)
@@ -24,10 +25,17 @@ func runInteractive(ctx context.Context, serverConfig, native []string, backendR
 		return err
 	}
 	defer os.RemoveAll(dir)
+
+	logs, err := os.Create(filepath.Join(dir, "app-server.log"))
+	if err != nil {
+		return fmt.Errorf("create Codex app-server log: %w", err)
+	}
+	defer logs.Close()
+
 	socket := filepath.Join(dir, "app-server.sock")
 	serverArgs := append(slices.Clone(serverConfig), "app-server", "--listen", "unix://"+socket)
 	server := exec.Command("codex", serverArgs...)
-	server.Stdout, server.Stderr = os.Stderr, os.Stderr
+	server.Stdout, server.Stderr = logs, logs
 	// The server must not consume terminal input or receive the TUI's Ctrl-C.
 	server.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := server.Start(); err != nil {
@@ -39,7 +47,14 @@ func runInteractive(ctx context.Context, serverConfig, native []string, backendR
 		serverErr = server.Wait()
 		close(serverDone)
 	}()
-	defer stopServer(server, serverDone)
+	defer func() {
+		stopServer(server, serverDone)
+		// Later defers reap the TUI before any diagnostics reach its terminal.
+		if err != nil {
+			_, _ = logs.Seek(0, io.SeekStart)
+			_, _ = io.Copy(os.Stderr, logs)
+		}
+	}()
 	client, err := connect(ctx, socket, serverDone)
 	if err != nil {
 		return err
