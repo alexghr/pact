@@ -19,39 +19,16 @@ Use the project's devenv environment:
 - Run checks with `./shell p-ci`.
 - Build the launcher with `./shell p-build`.
 
-`p-ci` runs every check sequentially, continues after failures, and exits nonzero
-if any check fails. `./shell p-ci --report FILE` also writes the completed results
-as JSON. Checks are registered in `scripts/ci.sh`; Forgejo derives its reporting
-jobs from those results. Their full logs are in the **Run checks** job.
-Branch protection should require `CI / result (pull_request)`, which checks both
-the suite's exit status and completion of the reporting jobs.
+`p-ci` runs every check sequentially, continues after failures and exits
+nonzero if any check fails.
+
+`./shell p-ci --report FILE` also writes the completed results as JSON.
+Checks are registered in `scripts/ci.sh`.
 
 Checks own their policy and diagnostics. The shared exit-code contract is
-0 for success, 10 for a warning, and any other nonzero code for failure.
-`p-ci` records the exit code and captures non-success output as the reason;
-keep it free of check-specific decisions and messages.
-
-`p-deps` rejects new direct or indirect module paths and remote replacement
-modules in `go.mod`; version updates are allowed. It compares against the merge
-base with `origin/main`, or `PACT_CI_BASE` when set. Fetch the base before running
-locally. CI supplies the PR base or the previous push's commit.
-
-`p-layout` requires executable Go packages under `cmd/` and implementation
-packages under `internal/`. Review check scripts live in `scripts/review/`.
-
-`p-config-naming` requires camelCase JSON tag names in `internal/config/`.
-External protocol types are outside this check.
-
-`p-docker-boundary` rejects `Command` and `CommandContext` selector calls with
-Docker executable literals outside `internal/docker/`, in files importing
-`os/exec`. It checks production Go files under `cmd/` and `internal/`; tests and
-`testdata/` are excluded. It matches names without resolving types or tracing
-executable variables and shell commands.
-
-`p-cmd-tests` warns about added `cmd/**/*_test.go` paths using the same baseline
-as `p-deps`, including files moved into `cmd/`. Existing paths are not reported.
-Findings use exit 10, so they warn without failing the suite. Operational errors
-still fail CI.
+0 for success and nonzero code for failure. `p-ci` records the exit code
+and captures non-success output as the reason; keep it free of check-specific
+decisions and messages.
 
 Relevant integration checks are opt-in and are not enabled by `p-ci`:
 

@@ -5,34 +5,44 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
 
-func main() {
+// ensure any calls to docker are handled by internal/docker
+type dockerPackageCmds struct{}
+
+func (d dockerPackageCmds) Check(out io.Writer) (bool, error) {
 	positions := token.NewFileSet()
 	failed := false
+
+	// scripts/checks/layout.sh enforces all go code lives in cmd/ or internal/
 	for _, root := range []string{"cmd", "internal"} {
 		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
+
 			if entry.IsDir() {
-				if path == "internal/docker" || entry.Name() == "testdata" {
+				if path == "internal/docker" {
 					return filepath.SkipDir
 				}
 				return nil
 			}
+
 			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
+
 			file, err := parser.ParseFile(positions, path, nil, parser.SkipObjectResolution)
 			if err != nil {
 				return err
 			}
+
+			// identify all modules which import os/exec
 			usesExec := false
 			for _, spec := range file.Imports {
 				importPath, err := strconv.Unquote(spec.Path.Value)
@@ -44,29 +54,31 @@ func main() {
 					break
 				}
 			}
+
 			if !usesExec {
 				return nil
 			}
+
 			for node := range ast.Preorder(file) {
 				call, ok := node.(*ast.CallExpr)
-				if ok && dockerCommand(call) {
-					fmt.Fprintf(os.Stderr, "%s: Docker commands must use internal/docker\n", positions.Position(call.Pos()))
+				if ok && callsDocker(call) {
+					fmt.Fprintf(out, "%s: Docker commands must use internal/docker\n", positions.Position(call.Pos()))
 					failed = true
 				}
 			}
+
 			return nil
 		})
+
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			failed = true
+			return failed, err
 		}
 	}
-	if failed {
-		os.Exit(1)
-	}
+
+	return failed, nil
 }
 
-func dockerCommand(call *ast.CallExpr) bool {
+func callsDocker(call *ast.CallExpr) bool {
 	function, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return false

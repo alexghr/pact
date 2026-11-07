@@ -84,27 +84,22 @@
         pkgs.jq
         pkgs.coreutils
       ];
-      exec = builtins.readFile ./review/deps.sh;
+      exec = builtins.readFile ./checks/deps.sh;
     };
 
     p-layout = {
       packages = [ pkgs.git ];
-      exec = builtins.readFile ./review/layout.sh;
+      exec = builtins.readFile ./checks/layout.sh;
     };
 
-    p-config-naming = {
+    p-cmd = {
       packages = [ pkgs.git ];
-      exec = builtins.readFile ./review/config-naming.sh;
+      exec = builtins.readFile ./checks/cmd.sh;
     };
 
-    p-docker-boundary = {
+    p-src = {
       packages = [ pkgs.git ];
-      exec = builtins.readFile ./review/docker-boundary.sh;
-    };
-
-    p-cmd-tests = {
-      packages = [ pkgs.git ];
-      exec = builtins.readFile ./review/cmd-tests.sh;
+      exec = builtins.readFile ./checks/src.sh;
     };
 
     p-ci = {

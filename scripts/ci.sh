@@ -17,19 +17,16 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 results='[]'
-# This is the check list for both local runs and the CI reporting matrix.
-for check in lint build test deps layout config-naming docker-boundary cmd-tests; do
-  printf '\nRunning %s\n' "$check"
+for check in lint build test deps layout cmd src; do
+  printf 'Running %s\n' "$check"
   if "p-$check" 2>&1 | tee "$work/output"; then
     code=0
   else
     code=$?
   fi
 
-  # All checks use the same exit-code contract.
   case "$code" in
     0) status=success ;;
-    10) status=warning ;;
     *) status=error ;;
   esac
 

@@ -15,4 +15,4 @@ if [[ -z "$added" ]]; then
 fi
 
 printf 'New tests under cmd/ need justification; prefer testing application logic in internal/:\n%s\n' "$added" >&2
-exit 10 # Advisory finding under the shared CI exit-code contract.
+exit 1

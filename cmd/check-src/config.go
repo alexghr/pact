@@ -5,8 +5,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -14,21 +14,28 @@ import (
 	"strings"
 )
 
-func main() {
+// ensure all config fields in internal/config use camelCase
+type configCamelCase struct{}
+
+func (c configCamelCase) Check(out io.Writer) (bool, error) {
 	positions := token.NewFileSet()
 	camelCase := regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
 	failed := false
+
 	err := filepath.WalkDir("internal/config", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+
 		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
+
 		file, err := parser.ParseFile(positions, path, nil, parser.SkipObjectResolution)
 		if err != nil {
 			return err
 		}
+
 		for node := range ast.Preorder(file) {
 			field, ok := node.(*ast.Field)
 			if !ok || field.Tag == nil {
@@ -44,17 +51,12 @@ func main() {
 			}
 			name, _, _ := strings.Cut(jsonTag, ",")
 			if !camelCase.MatchString(name) {
-				fmt.Fprintf(os.Stderr, "%s: config JSON name must be camelCase: %q\n", positions.Position(field.Tag.Pos()), name)
+				fmt.Fprintf(out, "%s: config JSON name must be camelCase: %q\n", positions.Position(field.Tag.Pos()), name)
 				failed = true
 			}
 		}
 		return nil
 	})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		failed = true
-	}
-	if failed {
-		os.Exit(1)
-	}
+
+	return failed, err
 }
