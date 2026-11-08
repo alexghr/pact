@@ -33,7 +33,7 @@ func PrepareContainer(config *docker.ContainerConfig, stateVolume string, option
 	)
 	config.Env = append(config.Env, "CODEX_HOME="+stateDir,
 		"PACT_AGENT_STATE_DIR="+stateDir, "PACT_AGENT_AUTH_FILE="+stateDir+"/auth.json")
-	config.TTY, config.Interactive = options.Prompt == "", options.Prompt == ""
+	config.TTY, config.Interactive = true, true
 	config.Command = []string{"pact-agent", "codex", string(request)}
 	return func() error { return os.Remove(authFile) }, nil
 }

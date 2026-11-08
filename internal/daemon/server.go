@@ -1,8 +1,9 @@
-// Package daemon implements the experimental in-memory session supervisor.
+// Package daemon owns live sessions and their terminal attachments.
 package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,14 +15,17 @@ import (
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/session"
+	"github.com/alexghr/pact/internal/state"
 )
 
 type request struct {
-	Options   *session.Options    `json:"options,omitempty"`
-	SessionID int64               `json:"sessionId,omitempty"`
-	Detach    bool                `json:"detach,omitempty"`
-	Data      []byte              `json:"data,omitempty"`
-	Size      docker.TerminalSize `json:"size"`
+	Options    *session.Options    `json:"options,omitempty"`
+	SessionID  int64               `json:"sessionId,omitempty"`
+	ResumeID   *int64              `json:"resumeId,omitempty"`
+	ConfigPath string              `json:"configPath,omitempty"`
+	Detach     bool                `json:"detach,omitempty"`
+	Data       []byte              `json:"data,omitempty"`
+	Size       docker.TerminalSize `json:"size"`
 }
 
 type response struct {
@@ -31,8 +35,7 @@ type response struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// Serve owns all live sessions until cancellation. Existing foreground launch
-// commands remain independent of this experimental service.
+// Serve owns all live sessions until cancellation.
 func Serve(ctx context.Context, cfg config.HostConfig) error {
 	socket, err := socketPath(true)
 	if err != nil {
@@ -78,16 +81,38 @@ func Serve(ctx context.Context, cfg config.HostConfig) error {
 			if err := decoder.Decode(&req); err != nil {
 				return
 			}
+			if req.ResumeID != nil && req.Options != nil {
+				_ = encoder.Encode(response{Error: "cannot start and resume a session together"})
+				return
+			}
+			configPath := req.ConfigPath
+			if req.Options != nil {
+				configPath = req.Options.ConfigPath
+			}
+			if req.Options != nil || req.ResumeID != nil {
+				if err := validateSessionConfig(cfg, configPath); err != nil {
+					_ = encoder.Encode(response{Error: err.Error()})
+					return
+				}
+			}
 			// Serialize provisioning; the actual executions run independently.
 			mu.Lock()
-			current := sessions[req.SessionID]
 			var err error
-			if req.Options != nil {
+			current := sessions[req.SessionID]
+			if req.ResumeID != nil {
+				req.SessionID, current, err = resumeTarget(ctx, store, sessions, *req.ResumeID)
+			}
+			restore := req.ResumeID != nil && current == nil
+			if err == nil && (req.Options != nil || restore) {
 				var nix session.Nix
 				nix, err = session.PrepareNix(ctx)
 				if err == nil {
 					var run *session.Session
-					run, err = session.New(ctx, store, nix, cfg.WorkspaceRoot, *req.Options)
+					if restore {
+						run, err = session.Restore(ctx, store, nix, req.SessionID, req.ConfigPath)
+					} else {
+						run, err = session.New(ctx, store, nix, cfg.WorkspaceRoot, *req.Options)
+					}
 					if err == nil {
 						current = newLiveSession()
 						req.SessionID = run.Record.ID
@@ -112,6 +137,44 @@ func Serve(ctx context.Context, cfg config.HostConfig) error {
 			}
 		})
 	}
+}
+
+func validateSessionConfig(daemon config.HostConfig, path string) error {
+	requested, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	if requested.DatabasePath != daemon.DatabasePath || requested.WorkspaceRoot != daemon.WorkspaceRoot {
+		return fmt.Errorf("daemon storage differs from %s; restart it with pact --config %q daemon", path, path)
+	}
+	return nil
+}
+
+// The caller serializes target selection with provisioning so concurrent resume
+// requests reuse the same live run instead of restoring duplicate executions.
+func resumeTarget(ctx context.Context, store *state.Store, sessions map[int64]*liveSession, id int64) (int64, *liveSession, error) {
+	var saved state.Session
+	var err error
+	if id == 0 {
+		saved, err = store.LastSession(ctx)
+		if errors.Is(err, sql.ErrNoRows) {
+			err = errors.New("no sessions to resume")
+		}
+	} else {
+		saved, err = store.Session(ctx, id)
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	current := sessions[saved.ID]
+	if current != nil {
+		select {
+		case <-current.done:
+			current = nil
+		default:
+		}
+	}
+	return saved.ID, current, nil
 }
 
 type liveSession struct {

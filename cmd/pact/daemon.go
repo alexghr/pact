@@ -35,19 +35,35 @@ func startDaemonSession(ctx context.Context, args []string, configPath string) e
 	if err != nil {
 		return err
 	}
+	return startSession(ctx, cfg, configPath)
+}
+
+func startSession(ctx context.Context, cfg startConfig, configPath string) error {
+	workspace, err := resolveWorkspace(cfg.workspace)
+	if err != nil {
+		return err
+	}
 	return daemon.Start(ctx, session.Options{
-		Workspace: cfg.workspace, Title: cfg.title, Model: cfg.model, Effort: cfg.effort,
+		Workspace: workspace, Title: "Interactive session", Model: cfg.model, Effort: cfg.effort,
 		ConfigPath: configPath, Capabilities: session.Capabilities{DIND: cfg.dind, HostNetwork: cfg.hostNet},
 	}, cfg.detach)
+}
+
+func addStartFlags(flags *flag.FlagSet, cfg *startConfig) {
+	addNewSessionFlags(flags, &cfg.newSessionConfig)
+	addDetachFlags(flags, &cfg.detach)
+}
+
+func addDetachFlags(flags *flag.FlagSet, detach *bool) {
+	flags.BoolVar(detach, "detach", false, "Return without attaching")
+	flags.BoolVar(detach, "d", false, "Alias for --detach")
 }
 
 func parseStartArgs(args []string, output io.Writer) (startConfig, error) {
 	var cfg startConfig
 	flags := flag.NewFlagSet("pact start", flag.ContinueOnError)
 	flags.SetOutput(output)
-	addNewSessionFlags(flags, &cfg.newSessionConfig)
-	flags.BoolVar(&cfg.detach, "detach", false, "Return without attaching")
-	flags.BoolVar(&cfg.detach, "d", false, "Alias for --detach")
+	addStartFlags(flags, &cfg)
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: pact [--config PATH] start [--detach] [--workspace PATH] [--model MODEL] [--effort EFFORT]")
 		fmt.Fprintln(output, "Enter prompts in the native TUI; detach with Ctrl-].")
@@ -61,10 +77,7 @@ func parseStartArgs(args []string, output io.Writer) (startConfig, error) {
 		return cfg, fmt.Errorf("unexpected argument: %s", flags.Arg(0))
 	}
 
-	cfg.title = sessionTitle("")
-	var err error
-	cfg.workspace, err = resolveWorkspace(cfg.workspace)
-	return cfg, err
+	return cfg, nil
 }
 
 func attachSession(ctx context.Context, args []string) error {

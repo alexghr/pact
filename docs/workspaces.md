@@ -1,9 +1,9 @@
 # Managed workspaces
 
-Plain `pact` and `pact -p 'Investigate deployment errors'` allocate a new empty
+`pact` and `pact start` allocate a new empty
 directory under the configured `workspaceRoot`, defaulting to
 `~/.local/state/pact/workspaces` (`$XDG_STATE_HOME/pact/workspaces` when set). Each launch
-gets its own directory and private Codex state volume. The foreground launcher prints the session ID; use
+gets its own directory and private Codex state volume. The client prints the session ID; use
 `pact sessions show ID` to find its workspace and `pact resume ID` to return to it.
 
 For a fresh managed session, only its directory is mounted as
@@ -23,6 +23,9 @@ ownership.
 ## Layout configuration
 
 `workspaceRoot` and `databasePath` are independent settings in Pact's config.
+Select the config when starting the daemon with `pact --config PATH daemon`.
+Start and resume clients must use the same storage paths; mismatches report an
+error and require restarting the daemon with the intended config.
 Both accept absolute paths, `~/` paths, or paths relative to the config directory.
 Config loading resolves symlinks and checks that the managed root contains
 neither the database nor the Pact config directory or file. New directories and
@@ -31,7 +34,7 @@ configured root, not individual supplied or saved workspaces.
 
 Changing `workspaceRoot` affects newly allocated workspaces. Existing sessions
 resume at their recorded paths; Pact does not move them. Restart the daemon to
-apply a new root to `pact start` sessions.
+apply a new root to newly started sessions.
 
 The previous defaults were `~/.local/state/pact/sessions.db` and
 `~/.local/state/pact/workspaces`. To keep using them, set:
@@ -53,7 +56,7 @@ processes or a previous Docker-in-Docker daemon's contents.
 Pact records allocation intent, session storage and execution before
 creating a managed directory. After creation it marks the workspace ready.
 Allocation errors name the session and
-path and record a startup failure. An abrupt launcher exit may leave an
+path and record a startup failure. An abrupt daemon exit may leave an
 `allocating` workspace and a `starting` execution; inspect the saved session
 before recovery. Pact never removes a partial allocation automatically.
 
@@ -69,5 +72,5 @@ running.
 
 Pact does not lock workspaces, private state, provisioning, or reclamation.
 Avoid concurrent launches or maintenance against the same resources. After a
-launcher crash, manually stop/remove previous containers before resuming or
+daemon crash, manually stop/remove previous containers before resuming or
 removing their workspace; Pact does not recover them.

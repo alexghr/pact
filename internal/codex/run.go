@@ -1,3 +1,4 @@
+// Package codex adapts Pact runs to native authentication, invocation, and protocols.
 package codex
 
 import (
@@ -6,32 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"os/exec"
 	"slices"
-	"syscall"
 
 	"github.com/alexghr/pact/internal/harness"
 )
 
 // Run translates Pact's intent and runs the native CLI inside the container.
-// Prompted execution replaces this process; interactive execution supervises it.
 func Run(ctx context.Context, options harness.Options, instructions string, bind func(context.Context, string) error) error {
 	if err := exec.CommandContext(ctx, "codex", "login", "status").Run(); err != nil {
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
 		}
 		return errors.New("the host Codex login snapshot is unusable; renew the host's ChatGPT login with Codex CLI, then retry")
-	}
-	if options.Prompt != "" {
-		binary, err := exec.LookPath("codex")
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return syscall.Exec(binary, append([]string{"codex"}, execArgs(options, instructions)...), os.Environ())
 	}
 	server := configArgs(options, instructions)
 	native := slices.Clone(server)
@@ -64,16 +52,4 @@ func configArgs(options harness.Options, instructions string) []string {
 		}
 	}
 	return args
-}
-
-func execArgs(options harness.Options, instructions string) []string {
-	args := append(configArgs(options, instructions), "exec")
-	if options.BackendRef != "" {
-		args = append(args, "resume", "--dangerously-bypass-approvals-and-sandbox")
-	}
-	args = append(args, "--json", "--skip-git-repo-check", "--ignore-user-config", "--")
-	if options.BackendRef != "" {
-		args = append(args, options.BackendRef)
-	}
-	return append(args, options.Prompt)
 }

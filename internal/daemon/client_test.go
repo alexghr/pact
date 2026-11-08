@@ -8,7 +8,24 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alexghr/pact/internal/session"
 )
+
+func TestMissingDaemonHint(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	for _, createDirectory := range []bool{false, true} {
+		if createDirectory {
+			if _, err := socketPath(true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		err := Start(t.Context(), session.Options{}, false)
+		if err == nil || !strings.Contains(err.Error(), "start it with pact daemon") {
+			t.Fatalf("missing daemon error (directory=%t): %v", createDirectory, err)
+		}
+	}
+}
 
 func TestRestoreTerminalModes(t *testing.T) {
 	tmux, err := exec.LookPath("tmux")

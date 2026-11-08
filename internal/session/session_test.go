@@ -91,7 +91,22 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	})
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	ready := make(chan struct{})
+	output, sink := io.Pipe()
+	defer output.Close()
+	defer sink.Close()
+	observed := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(output)
+		line, err := reader.ReadString('\n')
+		if err != nil || strings.TrimSpace(line) != "ready" {
+			observed <- fmt.Errorf("runtime did not become ready: %q, %v", line, err)
+			stop()
+			return
+		}
+		stop()
+		_, err = io.Copy(io.Discard, reader)
+		observed <- err
+	}()
 	type result struct {
 		started bool
 		err     error
@@ -100,18 +115,13 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 	go func() {
 		err := current.runContainer(runCtx, docker.ContainerConfig{
 			Image: image, Labels: map[string]string{"me.alexghr.pact.test": strings.TrimPrefix(label, "me.alexghr.pact.test=")},
+			TTY: true, Interactive: true,
 			Network: "none", Entrypoint: "/bin/bash", Command: []string{"-euc", "printf 'ready\\n'; exec sleep infinity"},
-		}, func(input io.Reader) error {
-			reader := bufio.NewReader(input)
-			line, err := reader.ReadString('\n')
-			if err != nil || line != "ready\n" {
-				return fmt.Errorf("runtime did not become ready: %q, %v", line, err)
-			}
-			close(ready)
-			stop()
-			_, err = io.Copy(io.Discard, reader)
-			return err
+		}, Terminal{
+			Stdin: strings.NewReader(""), Stdout: sink, Stderr: sink,
+			Size: docker.TerminalSize{Rows: 24, Cols: 80}, Ready: func(string) {},
 		})
+		_ = sink.Close()
 		current.runErr, current.interrupted = err, runCtx.Err() != nil
 		cleanupErr := current.Cleanup()
 		finished <- result{current.started, errors.Join(err, cleanupErr)}
@@ -122,12 +132,15 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 			t.Fatalf("interrupted runtime: started %v, %v", result.started, result.err)
 		}
 	case <-ctx.Done():
-		t.Fatal("cancelled runtime did not release its event stream")
+		t.Fatal("cancelled runtime did not release its terminal stream")
 	}
 	select {
-	case <-ready:
-	default:
-		t.Fatal("runtime exited before the readiness event")
+	case err := <-observed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("terminal output reader did not stop")
 	}
 	if ids, err := containers(ctx); err != nil || ids != "" {
 		t.Fatalf("container survived cancellation: %q, %v", ids, err)

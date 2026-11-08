@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,30 +15,25 @@ import (
 	"syscall"
 
 	"github.com/alexghr/pact/internal/config"
-	"github.com/alexghr/pact/internal/session"
-	"github.com/alexghr/pact/internal/state"
+	"github.com/alexghr/pact/internal/daemon"
 	"github.com/alexghr/pact/internal/version"
 )
-
-const maxSessionTitleLength = 120
 
 type newSessionConfig struct {
 	hostNet, dind bool
 	workspace     string
-	title         string
 	model, effort string
 }
 
-// flags that can be passed to the binary without a command in the first place
+// Flags accepted without an explicit start command.
 type runConfig struct {
-	newSessionConfig
+	startConfig
 	configPath string
-	prompt     string
 }
 
 type resumeConfig struct {
-	prompt   string
 	resumeID int64
+	detach   bool
 }
 
 func main() {
@@ -78,7 +72,7 @@ func run(ctx context.Context, args []string) error {
 		case "sessions":
 			return manageSessions(ctx, args[1:], os.Stdout, os.Stderr, hostCfg)
 		case "resume":
-			return resumeSession(ctx, args[1:], cfg.configPath, hostCfg)
+			return resumeSession(ctx, args[1:], cfg.configPath)
 		case "daemon":
 			return serveDaemon(ctx, args[1:], hostCfg)
 		case "start":
@@ -90,19 +84,7 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 
-	cfg.title = sessionTitle(cfg.prompt)
-	cfg.workspace, err = resolveWorkspace(cfg.workspace)
-	if err != nil {
-		return err
-	}
-
-	sr, err := newSessionRuntime(ctx, nil, cfg.configPath, cfg.newSessionConfig, hostCfg)
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintf(os.Stderr, "Pact session %d\n", sr.session.Record.ID)
-	return sr.Run(ctx, cfg.prompt)
+	return startSession(ctx, cfg.startConfig, cfg.configPath)
 }
 
 func parseArgs(args []string, output io.Writer) (runConfig, []string, error) {
@@ -112,15 +94,13 @@ func parseArgs(args []string, output io.Writer) (runConfig, []string, error) {
 	flags := flag.NewFlagSet("pact", flag.ContinueOnError)
 	flags.SetOutput(output)
 
-	addNewSessionFlags(flags, &cfg.newSessionConfig)
-	flags.StringVar(&cfg.prompt, "prompt", "", "Prompt to run (omit for an interactive session)")
-	flags.StringVar(&cfg.prompt, "p", "", "Alias for --prompt")
+	addStartFlags(flags, &cfg.startConfig)
 	flags.StringVar(&cfg.configPath, "config", "", "Config file (default: $XDG_CONFIG_HOME/pact/config.json or ~/.config/pact/config.json)")
 
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pact [--config PATH] [--workspace PATH] [--prompt TEXT] [--model MODEL] [--effort EFFORT]")
+		fmt.Fprintln(output, "Usage: pact [--config PATH] [--detach] [--workspace PATH] [--model MODEL] [--effort EFFORT]")
 		fmt.Fprintln(output, "       pact [--config PATH] sessions list | show SESSION_ID")
-		fmt.Fprintln(output, "       pact [--config PATH] resume [SESSION_ID] [--prompt TEXT]")
+		fmt.Fprintln(output, "       pact [--config PATH] resume [SESSION_ID] [--detach]")
 		fmt.Fprintln(output, "       pact [--config PATH] daemon | start [--detach] [OPTIONS] | attach SESSION_ID")
 		fmt.Fprintln(output, "       pact [--config PATH] approvals [--socket PATH]")
 		fmt.Fprintln(output, "       pact [--config PATH] version")
@@ -180,19 +160,13 @@ func resolveWorkspace(workspace string) (string, error) {
 	return workspace, nil
 }
 
-func resumeSession(ctx context.Context, args []string, configPath string, hostCfg config.HostConfig) error {
+func resumeSession(ctx context.Context, args []string, configPath string) error {
 	cfg, err := parseResumeArgs(args, os.Stderr)
 	if err != nil {
 		return err
 	}
 
-	sr, err := newSessionRuntime(ctx, &cfg.resumeID, configPath, newSessionConfig{}, hostCfg)
-	if err != nil {
-		return err
-	}
-
-	fmt.Fprintf(os.Stderr, "Pact resumed session %d\n", sr.session.Record.ID)
-	return sr.Run(ctx, cfg.prompt)
+	return daemon.Resume(ctx, cfg.resumeID, configPath, cfg.detach)
 }
 
 func parseResumeArgs(args []string, output io.Writer) (resumeConfig, error) {
@@ -208,10 +182,9 @@ func parseResumeArgs(args []string, output io.Writer) (resumeConfig, error) {
 
 	flags := flag.NewFlagSet("pact resume", flag.ContinueOnError)
 	flags.SetOutput(output)
-	flags.StringVar(&cfg.prompt, "prompt", "", "Continue the saved conversation with a prompt")
-	flags.StringVar(&cfg.prompt, "p", "", "Alias for --prompt")
+	addDetachFlags(flags, &cfg.detach)
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pact [--config PATH] resume [SESSION_ID] [--prompt TEXT]")
+		fmt.Fprintln(output, "Usage: pact [--config PATH] resume [SESSION_ID] [--detach]")
 		fmt.Fprintln(output, "Omit SESSION_ID to resume the last used Pact session.")
 		flags.PrintDefaults()
 	}
@@ -222,17 +195,6 @@ func parseResumeArgs(args []string, output io.Writer) (resumeConfig, error) {
 
 	if flags.NArg() != 0 {
 		return cfg, fmt.Errorf("unexpected argument: %s", flags.Arg(0))
-	}
-
-	promptFlagExists := false
-	flags.Visit(func(f *flag.Flag) {
-		if f.Name == "prompt" || f.Name == "p" {
-			promptFlagExists = true
-		}
-	})
-
-	if promptFlagExists && strings.TrimSpace(cfg.prompt) == "" {
-		return cfg, fmt.Errorf("--prompt requires nonempty text")
 	}
 
 	return cfg, nil
@@ -248,76 +210,4 @@ func exitCode(err error) int {
 	}
 
 	return 1
-}
-
-func sessionTitle(prompt string) string {
-	if prompt == "" {
-		return "Interactive session"
-	}
-
-	title := []rune(strings.Join(strings.Fields(prompt), " "))
-	if len(title) > maxSessionTitleLength {
-		return string(title[:maxSessionTitleLength]) + "…"
-	}
-
-	return string(title)
-}
-
-type sessionRuntime struct {
-	store   *state.Store
-	session *session.Session
-}
-
-// A nil resumeID starts a new session; zero resumes the last used session.
-func newSessionRuntime(ctx context.Context, resumeID *int64, configPath string, cfg newSessionConfig, hostCfg config.HostConfig) (sessionRuntime, error) {
-	var runtime sessionRuntime
-	var err error
-
-	runtime.store, err = session.OpenStore(ctx, hostCfg.DatabasePath)
-	if err != nil {
-		return runtime, err
-	}
-
-	if resumeID != nil && *resumeID == 0 {
-		last, err := runtime.store.LastSession(ctx)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				err = errors.New("no sessions to resume")
-			}
-			return sessionRuntime{}, errors.Join(err, runtime.store.Close())
-		}
-		resumeID = &last.ID
-	}
-
-	nix, err := session.PrepareNix(ctx)
-	if err != nil {
-		return sessionRuntime{}, errors.Join(err, runtime.store.Close())
-	}
-
-	if resumeID != nil {
-		runtime.session, err = session.Restore(ctx, runtime.store, nix, *resumeID, configPath)
-	} else {
-		runtime.session, err = session.New(ctx, runtime.store, nix, hostCfg.WorkspaceRoot, session.Options{
-			Workspace: cfg.workspace,
-			Title:     cfg.title,
-			Model:     cfg.model,
-			Effort:    cfg.effort,
-			// TODO this should not take a path to the config
-			ConfigPath:   configPath,
-			Capabilities: session.Capabilities{DIND: cfg.dind, HostNetwork: cfg.hostNet},
-		})
-	}
-
-	if err != nil {
-		return sessionRuntime{}, errors.Join(err, runtime.store.Close())
-	}
-
-	return runtime, nil
-}
-
-func (sr sessionRuntime) Run(ctx context.Context, prompt string) (runErr error) {
-	defer func() {
-		runErr = errors.Join(runErr, sr.session.Cleanup(), sr.store.Close())
-	}()
-	return sr.session.Start(ctx, prompt)
 }

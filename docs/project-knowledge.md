@@ -174,8 +174,8 @@ trusted developer instructions. Do not overwrite repository `AGENTS.md` files.
 Direct startup-context injection can be evaluated later if the pinned harness
 provides a suitable interface.
 
-Use the existing [entrypoint](../internal/images/context/entrypoint.sh) for both
-interactive and prompted launches. The fixed instruction must also cover a new
+Use the existing [entrypoint](../internal/images/context/agent/entrypoint.sh) for
+agent launches. The fixed instruction must also cover a new
 task or resumed thread: fetch the current view rather than assuming old context
 is fresh. Validate native `/new`, `/fork`, resume, and compaction behavior against
 the pinned harness; do not assume a container launch hook runs for each of them.
@@ -334,7 +334,7 @@ reviewable:
 1. **Durable knowledge and inspection.** Add scoped entries, source references,
    revision/history behavior, and the host CLI using the existing SQLite layer.
 2. **Runtime access and startup.** Add the scoped bridge/helper, fixed startup
-   instruction, and bounded boot view for both interactive and prompted agents.
+   instruction, and bounded boot view for agents.
    Verify persistence across container replacement and actual startup reads.
 3. **Generated index.** Add runtime inventory and Go extraction, atomic refresh,
    stale-source handling, and bounded lookup. No CI producer is needed.

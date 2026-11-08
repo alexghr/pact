@@ -3,13 +3,8 @@ package docker
 import (
 	"context"
 	"encoding/csv"
-	"errors"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
 	"strings"
-	"time"
 )
 
 type ContainerConfig struct {
@@ -78,62 +73,6 @@ func Logs(ctx context.Context, id string, tail int, streams Streams) error {
 		args = append(args, "--tail", fmt.Sprint(tail))
 	}
 	return run(ctx, streams, append(args, id)...)
-}
-
-type AttachOptions struct {
-	Streams
-	Interactive, Interrupt bool
-	OnStart                func() error
-	Consume                func(io.Reader) error
-}
-
-// Attach owns the attached Docker client and its output pipe. The caller owns
-// the container and must remove it even if cancellation ends only the client.
-func Attach(ctx context.Context, id string, options AttachOptions) (started bool, err error) {
-	args := []string{"start", "--attach"}
-	if options.Interactive {
-		args = append(args, "--interactive")
-	}
-	cmd := exec.CommandContext(ctx, "docker", append(args, id)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = options.Stdin, options.Stdout, options.Stderr
-	if options.Interrupt {
-		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
-	}
-	cmd.WaitDelay = 5 * time.Second
-	var events, writer *os.File
-	if options.Consume != nil {
-		var err error
-		events, writer, err = os.Pipe()
-		if err != nil {
-			return false, err
-		}
-		defer events.Close()
-		defer writer.Close()
-		cmd.Stdout = writer
-	}
-	err = cmd.Start()
-	if writer != nil {
-		// The child has its own descriptor; our copy must not delay EOF.
-		_ = writer.Close()
-	}
-	started = err == nil
-	if started {
-		if options.OnStart != nil {
-			err = options.OnStart()
-		}
-		if err == nil && options.Consume != nil {
-			err = options.Consume(events)
-		}
-		if err != nil {
-			_ = cmd.Process.Kill()
-		}
-		err = errors.Join(err, cmd.Wait())
-	}
-	// Preserve Docker's reserved startup-failure exit codes.
-	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() >= 125 && exitErr.ExitCode() <= 127 {
-		started = false
-	}
-	return started, err
 }
 
 type Mount struct {

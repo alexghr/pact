@@ -83,7 +83,7 @@ func (s *Store) CreateSession(ctx context.Context, workspace Workspace, session 
 	return session, nil
 }
 
-// CreateExecution records another foreground run of an existing session.
+// CreateExecution records another run of an existing session.
 func (s *Store) CreateExecution(ctx context.Context, sessionID int64, settings Settings) (int64, error) {
 	encoded, err := json.Marshal(settings)
 	if err != nil {
@@ -97,7 +97,7 @@ func (s *Store) CreateExecution(ctx context.Context, sessionID int64, settings S
 	return result.LastInsertId()
 }
 
-// StartExecution records the foreground runtime process, not a model turn.
+// StartExecution records runtime process startup, not a model turn.
 func (s *Store) StartExecution(ctx context.Context, id int64) error {
 	result, err := s.db.ExecContext(ctx,
 		"UPDATE executions SET status = 'running', started_at = ? WHERE id = ?",

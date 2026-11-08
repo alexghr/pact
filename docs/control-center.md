@@ -145,13 +145,13 @@ flowchart TD
 
 The supervisor owns containers, bridges, sidecars, credential snapshots, and
 cleanup. Their lifetime follows the execution, including after a submitting
-client disconnects. The current foreground launcher owns these resources;
-detaching a process without transferring their ownership is insufficient.
+client disconnects. The Pact daemon currently owns these resources and keeps
+executions running when their terminal clients detach.
 
 Execution ownership and crash recovery are already tracked by
 [#8](https://forge.alexghr.me/ag/pact/issues/8). Reuse that work rather than
-creating another ownership implementation. It covers the foreground launch
-boundary; detached supervision and a durable queue build on it later.
+creating another ownership implementation. The daemon supplies in-memory
+supervision; durable ownership, recovery, and a queue build on it later.
 
 Acquire exclusive environment and workspace ownership before execution. All
 launch paths, including the existing CLI and native resume, must honor it.
@@ -177,21 +177,22 @@ side effects after a crash.
 
 ### Native TUI handoff
 
-Keep native Codex as the interactive interface. The existing flow is sufficient:
-stop the automated execution, then run `pact resume <N>` in a terminal to enter
-that session interactively against the same workspace and private state. The
-operator has already exercised prompted execution followed by interactive
-resume. Preserve this behavior; seamless live attachment is optional.
+Keep native Codex as the interactive interface. `pact attach <N>` and
+`pact resume <N>` join a live daemon session. Once an execution has ended,
+`pact resume <N>` starts another execution against the same workspace and private
+state. Command line prompted execution is currently unavailable; future
+automation must use the same supervision and ownership boundary.
 
-The new supervision work must make stopping the automated execution and
-releasing its ownership reliable so the existing resume path can take over.
+Future automated execution must release its ownership reliably when a separate
+execution needs to take over.
 An orderly takeover stops the previous agent and its tools, settles or cancels
 pending operations, and refreshes saved thread metadata. Preserve uncommitted
 files and unfinished Git state. Resolve the conversation within the requested
 session, using an explicit thread ID when needed, rather than choosing a
 globally latest conversation. An interrupted handoff remains recoverable.
 
-The handoff preserves files and conversation history, not running processes or
+Live attachment preserves the running execution. A handoff that restarts an
+execution preserves files and conversation history, not running processes or
 an in-memory turn. Later returning to automated execution uses the same ownership
 rules. Future live app-server attachment requires validation against the pinned
 Codex version and must retain Pact's control over writers.
@@ -464,9 +465,9 @@ Use this proposal to create small implementation tasks after design review.
 These are capability boundaries, not a pre-created issue list or fixed schema:
 
 1. **Reliable ownership and supervision.** Complete the ownership/recovery
-   foundation tracked by [#8](https://forge.alexghr.me/ag/pact/issues/8), then
-   extend runtime lifetime beyond the foreground CLI for supervised work. Reuse
-   the existing `pact resume <N>` flow after stopping an automated execution.
+   foundation tracked by [#8](https://forge.alexghr.me/ag/pact/issues/8), building
+   on the daemon's execution lifetime beyond a terminal client. Reuse live
+   attachment and `pact resume <N>` for native TUI access.
 2. **Prompt-to-session workflow.** Allocate private directories, accept loose
    aims, let agents acquire authorized repositories, retain outputs, and support
    detached follow-ups. Preserve existing operator-supplied workspaces.

@@ -1,11 +1,10 @@
-// Package session owns a Pact session's persistent resources and foreground run.
+// Package session owns a Pact session's persistent resources and execution.
 package session
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -41,7 +40,7 @@ type Terminal struct {
 	Ready func(string)
 }
 
-// Session represents one foreground use of retained Pact state. Cleanup removes
+// Session represents one execution of retained Pact state. Cleanup removes
 // temporary run resources; restoring creates another run using the same state.
 type Session struct {
 	Record                       state.Session
@@ -84,15 +83,7 @@ func prepare(ctx context.Context, store *state.Store, nix Nix, record state.Sess
 	return s, nil
 }
 
-func (s *Session) Start(ctx context.Context, prompt string) (runErr error) {
-	return s.start(ctx, prompt, nil)
-}
-
-func (s *Session) StartTerminal(ctx context.Context, terminal Terminal) error {
-	return s.start(ctx, "", &terminal)
-}
-
-func (s *Session) start(ctx context.Context, prompt string, terminal *Terminal) (runErr error) {
+func (s *Session) StartTerminal(ctx context.Context, terminal Terminal) (runErr error) {
 	if s.closed || s.containerID != "" {
 		return errors.New("session run has already started or ended")
 	}
@@ -179,22 +170,18 @@ func (s *Session) start(ctx context.Context, prompt string, terminal *Terminal) 
 		mcp[name] = s.bridge.AgentURL() + "/mcp/" + name
 	}
 	s.backendCleanup, err = codex.PrepareContainer(&agent, s.Record.Storage.StateVolume, harness.Options{
-		Prompt: prompt, Model: s.Record.Settings.Model, Effort: s.Record.Settings.Effort,
+		Model: s.Record.Settings.Model, Effort: s.Record.Settings.Effort,
 		BackendRef: s.Record.BackendRef, MCP: mcp, MCPApprovalTimeoutSeconds: approvalTimeout,
 	})
 	if err != nil {
 		return err
 	}
-	var consume func(io.Reader) error
-	if prompt != "" {
-		consume = func(input io.Reader) error {
-			return codex.ConsumeExec(input, s.bind, os.Stdout, os.Stderr, s.Record.BackendRef)
-		}
-	}
-	if terminal == nil {
-		return s.runContainer(ctx, agent, consume)
-	}
-	s.containerID, err = docker.CreateContainer(ctx, agent)
+	return s.runContainer(ctx, agent, terminal)
+}
+
+func (s *Session) runContainer(ctx context.Context, config docker.ContainerConfig, terminal Terminal) error {
+	var err error
+	s.containerID, err = docker.CreateContainer(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -204,26 +191,6 @@ func (s *Session) start(ctx context.Context, prompt string, terminal *Terminal) 
 		}
 		terminal.Ready(s.containerID)
 		return nil
-	})
-	return err
-}
-
-func (s *Session) bind(ref string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return s.store.BindBackendRef(ctx, s.Record.ID, ref)
-}
-
-func (s *Session) runContainer(ctx context.Context, config docker.ContainerConfig, consume func(io.Reader) error) error {
-	var err error
-	s.containerID, err = docker.CreateContainer(ctx, config)
-	if err != nil {
-		return err
-	}
-	s.started, err = docker.Attach(ctx, s.containerID, docker.AttachOptions{
-		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
-		Interactive: consume == nil, Interrupt: true, Consume: consume,
-		OnStart: func() error { return s.store.StartExecution(ctx, s.Record.ExecutionID) },
 	})
 	return err
 }

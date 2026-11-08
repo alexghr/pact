@@ -1,19 +1,15 @@
 package codex
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/alexghr/pact/internal/harness"
 )
 
 // The real server broadcasts status changes across clients without subscribing
@@ -200,9 +196,9 @@ func TestInteractiveDiagnostics(t *testing.T) {
 	}
 }
 
-// An unavailable provider still persists accepted user turns. Exercise native
-// exec resume and the subsequent remote-TUI handshake against that real store.
-func TestExecResumeRetainsContext(t *testing.T) {
+// An unavailable provider still persists accepted user turns. A cold remote-TUI
+// resume must retain that context and establish Pact's container permissions.
+func TestInteractiveResumeRetainsContext(t *testing.T) {
 	if os.Getenv("PACT_TEST_CODEX") != "1" {
 		t.Skip("set PACT_TEST_CODEX=1 to run real Codex continuation")
 	}
@@ -218,126 +214,46 @@ func TestExecResumeRetainsContext(t *testing.T) {
 	}
 	const original = "The project codename is cobalt-otter."
 	const continuation = "Continue using the project codename from our conversation."
-	if err := client.call(ctx, "turn/start", map[string]any{
-		"threadId": started.Thread.ID,
-		"input":    []map[string]any{{"type": "text", "text": original}},
-	}, nil); err != nil {
-		t.Fatal(err)
+	turn := func(client *Client, text string) {
+		t.Helper()
+		if err := client.call(ctx, "turn/start", map[string]any{
+			"threadId": started.Thread.ID,
+			"input":    []map[string]any{{"type": "text", "text": text}},
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
-	for {
-		var saved struct {
-			Thread struct {
-				Turns []json.RawMessage `json:"turns"`
-			} `json:"thread"`
-		}
-		err := client.call(ctx, "thread/read", map[string]any{"threadId": started.Thread.ID, "includeTurns": true}, &saved)
-		data, _ := json.Marshal(saved)
-		if err == nil && bytes.Contains(data, []byte(original)) {
-			break
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			t.Fatal("initial conversation was not saved")
+	waitSaved := func(client *Client, text string) json.RawMessage {
+		t.Helper()
+		for {
+			var saved json.RawMessage
+			err := client.call(ctx, "thread/read", map[string]any{"threadId": started.Thread.ID, "includeTurns": true}, &saved)
+			if err == nil && bytes.Contains(saved, []byte(text)) {
+				return saved
+			}
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				t.Fatalf("conversation did not retain %q", text)
+			}
 		}
 	}
+	turn(client, original)
+	waitSaved(client, original)
 	_ = server.Process.Kill()
 	_ = server.Wait()
-	binary := os.Getenv("PACT_CODEX_BINARY")
-	if binary == "" {
-		binary = "codex"
-	}
-	execCtx, stopExec := context.WithCancel(ctx)
-	defer stopExec()
-	args := []string{
-		"-c", `model_provider="offline"`,
-		"-c", `model_providers.offline={name="Offline",base_url="http://127.0.0.1:0/v1",wire_api="responses",requires_openai_auth=false,request_max_retries=0,stream_max_retries=0}`,
-	}
-	instructions := "Offline \"validation\".\nKeep the user's original text."
-	args = append(args, execArgs(harness.Options{Model: "offline", BackendRef: started.Thread.ID, Prompt: continuation}, instructions)...)
-	command := exec.CommandContext(execCtx, binary, args...)
-	command.Env = server.Env
-	command.Cancel = func() error { return command.Process.Signal(os.Interrupt) }
-	command.WaitDelay = 3 * time.Second
-	var output, diagnostics bytes.Buffer
-	command.Stderr = &diagnostics
-	events, err := command.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	found, accepted := false, false
-	scanner := bufio.NewScanner(events)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fmt.Fprintln(&output, line)
-		var event execEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			break
-		}
-		if event.Type == "thread.started" {
-			if event.ThreadID != started.Thread.ID {
-				break
-			}
-			found = true
-		}
-		if event.Type == "turn.started" {
-			accepted = true
-			break
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		stopExec()
-		_ = command.Wait()
-		t.Fatal(err)
-	}
-	if !found || !accepted {
-		stopExec()
-		_ = command.Wait()
-		t.Fatalf("native continuation did not resume: %s\n%s", output.String(), diagnostics.String())
-	}
 	_, resumed := startAppServer(t, ctx, home)
-	// Turn acceptance precedes native disk persistence. Wait for the real
-	// saved input before interrupting the unavailable provider's inference.
-	for {
-		var saved json.RawMessage
-		err := resumed.call(ctx, "thread/read", map[string]any{"threadId": started.Thread.ID, "includeTurns": true}, &saved)
-		if err == nil && bytes.Contains(saved, []byte(continuation)) {
-			break
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			stopExec()
-			_ = command.Wait()
-			t.Fatal("continuation was not saved")
-		}
-	}
-	stopExec()
-	_ = command.Wait()
-	// Cold ID-only resume can lose native sandbox provenance. Interactive
-	// continuation uses Pact's permission preparation before rejoining.
 	if err := resumed.PrepareResume(ctx, started.Thread.ID); err != nil {
 		t.Fatal(err)
 	}
-	var history json.RawMessage
-	if err := resumed.call(ctx, "thread/read", map[string]any{
-		"threadId": started.Thread.ID, "includeTurns": true,
-	}, &history); err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(history, []byte(original)) || !bytes.Contains(history, []byte(continuation)) {
+	waitSaved(resumed, original)
+	turn(resumed, continuation)
+	if history := waitSaved(resumed, continuation); !bytes.Contains(history, []byte(original)) {
 		t.Fatalf("interactive continuation lost saved context: %s", history)
 	}
-	unavailable := exec.CommandContext(ctx, binary, command.Args[1:]...)
-	unavailable.Args[len(unavailable.Args)-2] = "0199a213-81c0-7800-8aa1-bbab2a035a53"
-	unavailable.Env = server.Env
-	result, err := unavailable.CombinedOutput()
-	if err == nil || bytes.Contains(result, []byte(`"type":"thread.started"`)) {
-		t.Fatalf("missing target started a replacement conversation: %s, %v", result, err)
+	if err := resumed.PrepareResume(ctx, "0199a213-81c0-7800-8aa1-bbab2a035a53"); err == nil {
+		t.Fatal("missing target started a replacement conversation")
 	}
 }

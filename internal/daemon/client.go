@@ -25,11 +25,23 @@ func Attach(ctx context.Context, id int64) error {
 	return connect(ctx, request{SessionID: id})
 }
 
+// Resume rejoins a live run or restores saved state. Zero selects the last used session.
+func Resume(ctx context.Context, id int64, configPath string, detach bool) error {
+	return connect(ctx, request{ResumeID: &id, ConfigPath: configPath, Detach: detach})
+}
+
 func connect(ctx context.Context, req request) error {
 	socket, err := socketPath(false)
 	if err != nil {
-		return fmt.Errorf("connect to Pact daemon: %w", err)
+		return fmt.Errorf("connect to Pact daemon (start it with pact daemon): %w", err)
 	}
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	if err != nil {
+		return fmt.Errorf("connect to Pact daemon (start it with pact daemon): %w", err)
+	}
+	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	var terminal *os.File
 	req.Size = docker.TerminalSize{Rows: 24, Cols: 80}
 	if !req.Detach {
@@ -40,13 +52,6 @@ func connect(ctx context.Context, req request) error {
 		defer terminal.Close()
 		req.Size = terminalSize(terminal)
 	}
-	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	if err != nil {
-		return fmt.Errorf("connect to Pact daemon (start it with pact daemon): %w", err)
-	}
-	defer conn.Close()
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	defer stop()
 	encoder, decoder := json.NewEncoder(conn), json.NewDecoder(conn)
 	if err := encoder.Encode(req); err != nil {
 		return err

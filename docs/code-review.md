@@ -1,9 +1,10 @@
 # Code review
 
-Start a review in a fresh session with a PR URL and the bundled `review-pr` skill:
+Start `pact`, then enter a PR URL and the bundled `review-pr` skill in the native
+TUI:
 
-```sh
-pact -p 'Use $review-pr to review https://forge.alexghr.me/ag/pact/pulls/125'
+```text
+Use $review-pr to review https://forge.alexghr.me/ag/pact/pulls/125
 ```
 
 Add “publish findings” to authorize posting the review. Issue creation is a
@@ -99,7 +100,7 @@ Saving a local JSON result alone does not complete a request to publish.
 This is an agent workflow, not a deterministic enforcement mechanism.
 Investigation notes record what was examined; they do not prove model compliance
 or exhaustive correctness. Event-triggered session startup and a CI review gate
-are not installed by these skills. The same prompted workflow can be invoked
+are not installed by these skills. The same review workflow can be invoked
 by future automation.
 
 ## Evaluating changes
