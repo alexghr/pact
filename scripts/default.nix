@@ -71,12 +71,14 @@
       '';
     };
 
-    p-lint.exec = ''
-      set -euo pipefail
-
-      p-fmt --check
-      go vet ./...
-    '';
+    p-lint = {
+      packages = [
+        pkgs.findutils
+        pkgs.gopls
+        (pkgs.go-tools.override { buildGoModule = pkgs.buildGo127Module; })
+      ];
+      exec = builtins.readFile ./lint.sh;
+    };
 
     p-deps = {
       packages = [
