@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/alexghr/pact/internal/codex"
+	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/harness"
 )
 
@@ -31,15 +32,23 @@ func run(ctx context.Context, args []string) error {
 	if len(args) != 2 || args[0] != "codex" {
 		return fmt.Errorf("expected backend and JSON launch options")
 	}
+
+	cfg, err := config.LoadAgent()
+	if err != nil {
+		return fmt.Errorf("load agent config: %w", err)
+	}
+
 	var options harness.Options
 	if err := json.Unmarshal([]byte(args[1]), &options); err != nil {
 		return fmt.Errorf("decode launch options: %w", err)
 	}
+
 	instructions, err := os.ReadFile("/opt/pact/agent-instructions.md")
 	if err != nil {
 		return fmt.Errorf("read agent instructions: %w", err)
 	}
+
 	return codex.Run(ctx, options, string(instructions), func(ctx context.Context, ref string) error {
-		return harness.PublishBinding(ctx, os.Getenv("PACT_BINDING_URL"), ref)
+		return harness.PublishBinding(ctx, cfg.BindingURL, ref)
 	})
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/alexghr/pact/internal/config"
 )
 
 func TestConcurrentRefreshRetainsTrust(t *testing.T) {
@@ -31,10 +33,15 @@ func TestConcurrentRefreshRetainsTrust(t *testing.T) {
 	}))
 	defer server.Close()
 	t.Setenv("PACT_GIT_URL", server.URL)
+	cfg, err := config.LoadAgent()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	const count = 8
 	done := make(chan error, count)
 	for range count {
-		go func() { done <- refreshIdentity() }()
+		go func() { done <- refreshIdentity(cfg) }()
 	}
 	for range count {
 		if err := <-done; err != nil {
@@ -53,7 +60,7 @@ func TestConcurrentRefreshRetainsTrust(t *testing.T) {
 	}
 	unchanged.Store(true)
 	for range 2 {
-		if err := refreshIdentity(); err != nil {
+		if err := refreshIdentity(cfg); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -62,7 +69,7 @@ func TestConcurrentRefreshRetainsTrust(t *testing.T) {
 		t.Fatalf("repeated refresh changed cached trust: %v, %s", err, after)
 	}
 	invalid.Store(true)
-	if err := refreshIdentity(); err == nil {
+	if err := refreshIdentity(cfg); err == nil {
 		t.Fatal("accepted a wildcard signing identity")
 	}
 	after, err = os.ReadFile(path)

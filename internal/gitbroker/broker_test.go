@@ -46,7 +46,7 @@ func writeFile(t *testing.T, path, content string, mode os.FileMode) {
 
 func writeConfig(t *testing.T, path string, cfg config.Git) {
 	t.Helper()
-	data, err := json.Marshal(config.Config{Git: cfg})
+	data, err := json.Marshal(config.HostConfig{Git: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,7 +25,7 @@ func TestManagedLaunchFailureCanResume(t *testing.T) {
 	// A real unreachable endpoint fails startup before any agent can run.
 	t.Setenv("DOCKER_CONTEXT", "")
 	t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
-	store, err := OpenStore(t.Context())
+	store, err := OpenStore(t.Context(), filepath.Join(os.Getenv("XDG_STATE_HOME"), "pact", "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := OpenStore(t.Context())
+	store, err := OpenStore(t.Context(), filepath.Join(os.Getenv("XDG_STATE_HOME"), "pact", "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

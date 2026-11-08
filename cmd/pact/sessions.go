@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/session"
 )
 
@@ -26,13 +27,13 @@ type showSessionConfig struct {
 	json      bool
 }
 
-func manageSessions(ctx context.Context, args []string, output, errOut io.Writer) error {
+func manageSessions(ctx context.Context, args []string, output, errOut io.Writer, hostCfg config.HostConfig) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "list":
-			return listSessions(ctx, args[1:], output, errOut)
+			return listSessions(ctx, args[1:], output, errOut, hostCfg)
 		case "show":
-			return showSession(ctx, args[1:], output, errOut)
+			return showSession(ctx, args[1:], output, errOut, hostCfg)
 		default:
 			return fmt.Errorf("unknown sessions command %q", args[0])
 		}
@@ -41,13 +42,13 @@ func manageSessions(ctx context.Context, args []string, output, errOut io.Writer
 	return errors.New("usage: pact sessions list [--workspace PATH | --all] [--json] | show ID [--json]")
 }
 
-func listSessions(ctx context.Context, args []string, output, errOut io.Writer) (runErr error) {
+func listSessions(ctx context.Context, args []string, output, errOut io.Writer, hostCfg config.HostConfig) (runErr error) {
 	cfg, err := parseListSessionsArgs(args, errOut)
 	if err != nil {
 		return err
 	}
 
-	store, err := session.OpenStore(ctx)
+	store, err := session.OpenStore(ctx, hostCfg.DatabasePath)
 	if err != nil {
 		return err
 	}
@@ -73,13 +74,13 @@ func listSessions(ctx context.Context, args []string, output, errOut io.Writer) 
 	return writer.Flush()
 }
 
-func showSession(ctx context.Context, args []string, output, errOut io.Writer) (runErr error) {
+func showSession(ctx context.Context, args []string, output, errOut io.Writer, hostCfg config.HostConfig) (runErr error) {
 	cfg, err := parseShowSessionArgs(args, errOut)
 	if err != nil {
 		return err
 	}
 
-	store, err := session.OpenStore(ctx)
+	store, err := session.OpenStore(ctx, hostCfg.DatabasePath)
 	if err != nil {
 		return err
 	}

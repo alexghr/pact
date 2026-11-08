@@ -42,7 +42,7 @@ type Broker struct {
 // request loads the Git settings. Config, executables and credentials must stay outside
 // the agent-writable workspace.
 func New(path, workspace string) (*Broker, error) {
-	path, err := config.Path(path)
+	path, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}

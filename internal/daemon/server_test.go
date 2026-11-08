@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/docker"
 )
 
@@ -25,7 +26,7 @@ func TestDaemonSocketLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx) }()
+	go func() { done <- Serve(ctx, config.HostConfig{DatabasePath: filepath.Join(t.TempDir(), "sessions.db")}) }()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	var conn net.Conn

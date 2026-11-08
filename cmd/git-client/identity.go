@@ -15,11 +15,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/alexghr/pact/internal/config"
 )
 
 // Keep public verification material in the container. Retaining old signers lets
 // historical commits verify after the host rotates its key or signing identity.
-func refreshIdentity() error {
+func refreshIdentity(cfg config.AgentConfig) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -39,7 +41,7 @@ func refreshIdentity() error {
 		return err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	res, err := request(http.MethodGet, "signing-identity", url.Values{}, nil)
+	res, err := request(cfg.GitURL, http.MethodGet, "signing-identity", url.Values{}, nil)
 	if err != nil {
 		return err
 	}

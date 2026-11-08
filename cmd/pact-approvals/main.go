@@ -39,7 +39,14 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	if socket == "" {
-		cfg, err := config.Load("")
+		path, err := config.DefaultHostPath()
+		if err != nil {
+			return err
+		}
+		if err := config.InitEmptyConfig(path); err != nil {
+			return err
+		}
+		cfg, err := config.Load(path)
 		if err != nil {
 			return err
 		}

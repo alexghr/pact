@@ -7,20 +7,19 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 
+	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/daemon"
 	"github.com/alexghr/pact/internal/session"
 )
 
 type startConfig struct {
 	newSessionConfig
-	configPath string
-	detach     bool
+	detach bool
 }
 
-func serveDaemon(ctx context.Context, args []string) error {
+func serveDaemon(ctx context.Context, args []string, hostCfg config.HostConfig) error {
 	flags := flag.NewFlagSet("pact daemon", flag.ContinueOnError)
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -28,17 +27,17 @@ func serveDaemon(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return errors.New("usage: pact daemon")
 	}
-	return daemon.Serve(ctx)
+	return daemon.Serve(ctx, hostCfg)
 }
 
-func startDaemonSession(ctx context.Context, args []string) error {
+func startDaemonSession(ctx context.Context, args []string, configPath string) error {
 	cfg, err := parseStartArgs(args, os.Stderr)
 	if err != nil {
 		return err
 	}
 	return daemon.Start(ctx, session.Options{
 		Workspace: cfg.workspace, Title: cfg.title, Model: cfg.model, Effort: cfg.effort,
-		ConfigPath: cfg.configPath, Capabilities: session.Capabilities{DIND: cfg.dind, HostNetwork: cfg.hostNet},
+		ConfigPath: configPath, Capabilities: session.Capabilities{DIND: cfg.dind, HostNetwork: cfg.hostNet},
 	}, cfg.detach)
 }
 
@@ -47,11 +46,10 @@ func parseStartArgs(args []string, output io.Writer) (startConfig, error) {
 	flags := flag.NewFlagSet("pact start", flag.ContinueOnError)
 	flags.SetOutput(output)
 	addNewSessionFlags(flags, &cfg.newSessionConfig)
-	flags.StringVar(&cfg.configPath, "config", "", "Config file (default: $XDG_CONFIG_HOME/pact/config.json or ~/.config/pact/config.json)")
 	flags.BoolVar(&cfg.detach, "detach", false, "Return without attaching")
 	flags.BoolVar(&cfg.detach, "d", false, "Alias for --detach")
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pact start [--detach] [--workspace PATH] [--model MODEL] [--effort EFFORT] [--config PATH]")
+		fmt.Fprintln(output, "Usage: pact [--config PATH] start [--detach] [--workspace PATH] [--model MODEL] [--effort EFFORT]")
 		fmt.Fprintln(output, "Enter prompts in the native TUI; detach with Ctrl-].")
 		flags.PrintDefaults()
 	}
@@ -66,12 +64,6 @@ func parseStartArgs(args []string, output io.Writer) (startConfig, error) {
 	cfg.title = sessionTitle("")
 	var err error
 	cfg.workspace, err = resolveWorkspace(cfg.workspace)
-	if err != nil {
-		return cfg, err
-	}
-	if cfg.configPath != "" {
-		cfg.configPath, err = filepath.Abs(cfg.configPath)
-	}
 	return cfg, err
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/session"
 )
@@ -32,7 +33,7 @@ type response struct {
 
 // Serve owns all live sessions until cancellation. Existing foreground launch
 // commands remain independent of this experimental service.
-func Serve(ctx context.Context) error {
+func Serve(ctx context.Context, cfg config.HostConfig) error {
 	socket, err := socketPath(true)
 	if err != nil {
 		return err
@@ -47,7 +48,7 @@ func Serve(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	store, err := session.OpenStore(ctx)
+	store, err := session.OpenStore(ctx, cfg.DatabasePath)
 	if err != nil {
 		return err
 	}

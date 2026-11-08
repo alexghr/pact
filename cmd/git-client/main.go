@@ -14,13 +14,11 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alexghr/pact/internal/config"
 )
 
-func request(method, operation string, params url.Values, body io.Reader) (*http.Response, error) {
-	endpoint, err := url.Parse(os.Getenv("PACT_GIT_URL"))
-	if err != nil || endpoint.Scheme != "http" || endpoint.Host == "" {
-		return nil, errors.New("PACT_GIT_URL is missing or invalid")
-	}
+func request(endpoint *url.URL, method, operation string, params url.Values, body io.Reader) (*http.Response, error) {
 	params.Set("op", operation)
 	endpoint.RawQuery = params.Encode()
 	req, err := http.NewRequest(method, endpoint.String(), body)
@@ -45,9 +43,9 @@ func request(method, operation string, params url.Values, body io.Reader) (*http
 	return res, nil
 }
 
-func ssh(args []string) error {
+func ssh(cfg config.AgentConfig, args []string) error {
 	if len(args) == 1 && args[0] == "--allowed-remotes" {
-		res, err := request(http.MethodGet, "allowed-remotes", url.Values{}, nil)
+		res, err := request(cfg.GitURL, http.MethodGet, "allowed-remotes", url.Values{}, nil)
 		if err != nil {
 			return err
 		}
@@ -77,7 +75,7 @@ func ssh(args []string) error {
 	}
 	params.Set("host", args[0])
 	params.Set("command", args[1])
-	res, err := request(http.MethodPost, "ssh", params, os.Stdin)
+	res, err := request(cfg.GitURL, http.MethodPost, "ssh", params, os.Stdin)
 	if err != nil {
 		return err
 	}
@@ -122,13 +120,13 @@ func ssh(args []string) error {
 	}
 }
 
-func sign(args []string) error {
+func sign(cfg config.AgentConfig, args []string) error {
 	if len(args) == 1 && args[0] == "--refresh" {
-		return refreshIdentity()
+		return refreshIdentity(cfg)
 	}
 	// Verification stays local and never needs a private key.
 	if len(args) >= 2 && args[0] == "-Y" && (args[1] == "find-principals" || args[1] == "verify" || args[1] == "check-novalidate") {
-		if err := refreshIdentity(); err != nil {
+		if err := refreshIdentity(cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "pact-git: cannot refresh verification keys; using cached keys:", err)
 		}
 		cmd := exec.Command("ssh-keygen", args...)
@@ -139,7 +137,7 @@ func sign(args []string) error {
 	if len(args) != 7 || args[0] != "-Y" || args[1] != "sign" || args[2] != "-n" || args[3] != "git" || args[4] != "-f" {
 		return errors.New("only Git object signing and verification are supported")
 	}
-	if err := refreshIdentity(); err != nil {
+	if err := refreshIdentity(cfg); err != nil {
 		return err
 	}
 	data, err := os.Open(args[6])
@@ -147,7 +145,7 @@ func sign(args []string) error {
 		return err
 	}
 	defer data.Close()
-	res, err := request(http.MethodPost, "sign", url.Values{}, data)
+	res, err := request(cfg.GitURL, http.MethodPost, "sign", url.Values{}, data)
 	if err != nil {
 		return err
 	}
@@ -160,11 +158,16 @@ func sign(args []string) error {
 }
 
 func main() {
-	var err error
+	cfg, err := config.LoadAgent()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "config error:", err)
+		os.Exit(1)
+	}
+
 	if filepath.Base(os.Args[0]) == "pact-git-ssh" {
-		err = ssh(os.Args[1:])
+		err = ssh(cfg, os.Args[1:])
 	} else {
-		err = sign(os.Args[1:])
+		err = sign(cfg, os.Args[1:])
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "pact-git:", err)

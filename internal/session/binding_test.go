@@ -2,6 +2,8 @@ package session
 
 import (
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/alexghr/pact/internal/harness"
@@ -9,7 +11,7 @@ import (
 
 func TestSessionBindingOnlyChangesBoundSession(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := OpenStore(t.Context())
+	store, err := OpenStore(t.Context(), filepath.Join(os.Getenv("XDG_STATE_HOME"), "pact", "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

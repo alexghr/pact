@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func TestSharedStorage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 	defer cancel()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := OpenStore(ctx)
+	store, err := OpenStore(ctx, filepath.Join(os.Getenv("XDG_STATE_HOME"), "pact", "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

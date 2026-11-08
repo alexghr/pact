@@ -13,7 +13,7 @@ import (
 
 func openSessionStore(t *testing.T) *state.Store {
 	t.Helper()
-	store, err := OpenStore(t.Context())
+	store, err := OpenStore(t.Context(), filepath.Join(os.Getenv("XDG_STATE_HOME"), "pact", "sessions.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

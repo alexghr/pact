@@ -12,10 +12,10 @@ import (
 	"github.com/alexghr/pact/internal/config"
 )
 
-func serveApprovals(ctx context.Context, args []string) error {
+func serveApprovals(ctx context.Context, args []string, hostCfg config.HostConfig) error {
 	flags := flag.NewFlagSet("pact approvals", flag.ContinueOnError)
 	var socket string
-	flags.StringVar(&socket, "socket", "", "Unix socket to listen on (default: approvals.socket in the default Pact config)")
+	flags.StringVar(&socket, "socket", "", "Unix socket to listen on (default: approvals.socket in the Pact config)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -23,14 +23,10 @@ func serveApprovals(ctx context.Context, args []string) error {
 		return fmt.Errorf("unexpected argument: %s", flags.Arg(0))
 	}
 	if socket == "" {
-		cfg, err := config.Load("")
-		if err != nil {
-			return err
-		}
-		socket = cfg.Approvals.Socket
+		socket = hostCfg.Approvals.Socket
 	}
 	if socket == "" {
-		return errors.New("set approvals.socket in the default Pact config or pass --socket PATH")
+		return errors.New("set approvals.socket in the Pact config or pass --socket PATH")
 	}
 	socket, err := filepath.Abs(socket)
 	if err != nil {
