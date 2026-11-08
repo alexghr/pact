@@ -15,7 +15,7 @@ import (
 )
 
 // createRecord records resource identities before allocating a managed workspace.
-func createRecord(ctx context.Context, store *state.Store, options Options) (state.Session, error) {
+func createRecord(ctx context.Context, store *state.Store, workspaceRoot string, options Options) (state.Session, error) {
 	if options.Backend == "" {
 		options.Backend = "codex"
 	}
@@ -25,17 +25,17 @@ func createRecord(ctx context.Context, store *state.Store, options Options) (sta
 	workspace := state.Workspace{Owner: "uid:" + strconv.Itoa(os.Getuid()), Managed: options.Workspace == "", Status: "ready"}
 	var err error
 	if workspace.Managed {
-		workspace.Path, err = newWorkspacePath(store)
+		workspace.Path, err = newWorkspacePath(workspaceRoot)
 		workspace.Status = "allocating"
 	} else {
-		workspace.Path, err = resolveWorkspace(store, options.Workspace)
+		workspace.Path, err = resolveWorkspace(options.Workspace)
 		if err == nil {
 			var saved state.Workspace
 			saved, err = store.WorkspaceByPath(ctx, workspace.Path)
 			if errors.Is(err, sql.ErrNoRows) {
 				err = nil
 			} else if err == nil {
-				err = checkWorkspace(store, saved)
+				err = checkWorkspace(saved)
 			}
 		}
 	}
@@ -76,7 +76,7 @@ func restoreRecord(ctx context.Context, store *state.Store, id int64) (state.Ses
 	if err != nil {
 		return state.Session{}, err
 	}
-	if err := checkWorkspace(store, workspace); err != nil {
+	if err := checkWorkspace(workspace); err != nil {
 		return state.Session{}, err
 	}
 	record.ExecutionID, err = store.CreateExecution(ctx, id, record.Settings)

@@ -411,28 +411,3 @@ func TestMCPApprovals(t *testing.T) {
 		t.Fatal("unavailable approval service allowed a call")
 	}
 }
-
-func TestApprovalSocketOutsideWorkspace(t *testing.T) {
-	session := approval.Session{Workspace: t.TempDir()}
-	socket := filepath.Join(session.Workspace, "approval.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	if _, err := approval.New(config.Approvals{Socket: socket}, session); err == nil {
-		t.Fatal("agent-writable approval socket accepted")
-	}
-	link := filepath.Join(t.TempDir(), "approval.sock")
-	if err := os.Symlink(socket, link); err != nil {
-		t.Fatal(err)
-	}
-	client, err := approval.New(config.Approvals{Socket: link}, session)
-	if err != nil {
-		t.Fatal(err)
-	}
-	allowed, err := client.Approve(t.Context(), approval.ToolCall{Tool: "create_issue"})
-	if allowed || err == nil || !strings.Contains(err.Error(), "outside the mounted workspace") {
-		t.Fatalf("socket symlink into workspace accepted: %v, %v", allowed, err)
-	}
-}

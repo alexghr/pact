@@ -33,41 +33,29 @@ type remote struct {
 
 // Broker exposes the public key, allowed remotes, Git-object signing, and two Git wire services.
 type Broker struct {
-	ssh, keygen, dir      string
-	configPath, workspace string
-	slots                 chan struct{}
+	ssh, keygen, dir string
+	configPath       string
+	slots            chan struct{}
 }
 
 // New prepares the host executables without requiring Git credentials yet. Each
-// request loads the Git settings. Config, executables and credentials must stay outside
-// the agent-writable workspace.
-func New(path, workspace string) (*Broker, error) {
+// request loads the current Git settings.
+func New(path string) (*Broker, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
-	workspace, err = filepath.EvalSymlinks(workspace)
-	if err != nil {
-		return nil, err
-	}
-	b := &Broker{configPath: path, workspace: workspace, slots: make(chan struct{}, 8)}
+	b := &Broker{configPath: path, slots: make(chan struct{}, 8)}
 	for name, dest := range map[string]*string{"ssh": &b.ssh, "ssh-keygen": &b.keygen} {
 		path, err := exec.LookPath(name)
 		if err != nil {
 			return nil, err
 		}
-		*dest, err = outsideWorkspace(path, workspace)
-		if err != nil {
-			return nil, fmt.Errorf("host %s: %w", name, err)
-		}
+		*dest = path
 	}
-	// Ignore TMPDIR: it may be inside the mounted workspace.
+	// Use a short host-local path independent of TMPDIR.
 	b.dir, err = os.MkdirTemp("/tmp", "pact-git-")
 	if err != nil {
-		return nil, err
-	}
-	if _, err := outsideWorkspace(b.dir, workspace); err != nil {
-		b.Close()
 		return nil, err
 	}
 	return b, nil
@@ -79,17 +67,7 @@ type gitConfig struct {
 }
 
 func (b *Broker) loadConfig() (gitConfig, error) {
-	// Read through a host-owned directory, so the agent cannot replace the
-	// config symlink between checking its target and reading it.
-	dir, err := outsideWorkspace(filepath.Dir(b.configPath), b.workspace)
-	if err != nil {
-		return gitConfig{}, fmt.Errorf("pact config directory: %w", err)
-	}
-	path := filepath.Join(dir, filepath.Base(b.configPath))
-	if _, err := outsideWorkspace(path, b.workspace); err != nil {
-		return gitConfig{}, fmt.Errorf("pact config: %w", err)
-	}
-	cfg, err := config.Load(path)
+	cfg, err := config.Load(b.configPath)
 	if err != nil {
 		return gitConfig{}, err
 	}
@@ -100,7 +78,7 @@ func (b *Broker) loadConfig() (gitConfig, error) {
 	if git.Name == "" || git.Email == "" || strings.ContainsAny(git.Name+git.Email, "\x00\r\n<>") {
 		return gitConfig{}, errors.New("git broker requires a name and email without line breaks or angle brackets")
 	}
-	git.SSHKey, err = outsideWorkspace(git.SSHKey, b.workspace)
+	git.SSHKey, err = filepath.EvalSymlinks(git.SSHKey)
 	if err != nil {
 		return gitConfig{}, fmt.Errorf("git.sshKey: %w", err)
 	}
@@ -119,7 +97,7 @@ func (b *Broker) loadConfig() (gitConfig, error) {
 			}
 			git.KnownHosts = filepath.Join(home, ".ssh", "known_hosts")
 		}
-		git.KnownHosts, err = outsideWorkspace(git.KnownHosts, b.workspace)
+		git.KnownHosts, err = filepath.EvalSymlinks(git.KnownHosts)
 		if err != nil {
 			return gitConfig{}, fmt.Errorf("git.knownHosts: %w", err)
 		}
@@ -135,25 +113,6 @@ func (b *Broker) publicKey(ctx context.Context, key string) (string, error) {
 		return "", errors.New("cannot load git.sshKey (an unencrypted OpenSSH private key is required)")
 	}
 	return strings.TrimSpace(string(publicKey)), nil
-}
-
-func outsideWorkspace(path, workspace string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", err
-	}
-	resolved, err = filepath.Abs(resolved)
-	if err != nil {
-		return "", err
-	}
-	rel, err := filepath.Rel(workspace, resolved)
-	if err != nil {
-		return "", err
-	}
-	if rel == "." || filepath.IsLocal(rel) {
-		return "", errors.New("must be outside the mounted workspace")
-	}
-	return resolved, nil
 }
 
 var (

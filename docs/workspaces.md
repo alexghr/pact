@@ -1,9 +1,9 @@
 # Managed workspaces
 
 Plain `pact` and `pact -p 'Investigate deployment errors'` allocate a new empty
-directory under `$XDG_STATE_HOME/pact/workspaces` (by default
-`~/.local/state/pact/workspaces`). Each launch gets its own directory and private
-Codex state volume. The foreground launcher prints the session ID; use
+directory under the configured `workspaceRoot`, defaulting to
+`~/.local/state/pact/workspaces` (`$XDG_STATE_HOME/pact/workspaces` when set). Each launch
+gets its own directory and private Codex state volume. The foreground launcher prints the session ID; use
 `pact sessions show ID` to find its workspace and `pact resume ID` to return to it.
 
 For a fresh managed session, only its directory is mounted as
@@ -15,9 +15,33 @@ required at the workspace root.
 
 `pact -w PATH` uses an existing directory and records it as operator owned.
 The operator chooses the entire directory exposed to the agent through this
-mount. Repeated launches there get independent agent state but share workspace
-files. A supplied alias of an existing managed directory retains its managed
+mount. Pact trusts this choice and does not check for host config, credentials,
+or sockets inside an explicitly supplied workspace. Repeated launches there get
+independent agent state but share workspace files. A supplied alias of an existing managed directory retains its managed
 ownership.
+
+## Layout configuration
+
+`workspaceRoot` and `databasePath` are independent settings in Pact's config.
+Both accept absolute paths, `~/` paths, or paths relative to the config directory.
+Config loading resolves symlinks and checks that the managed root contains
+neither the database nor the Pact config directory or file. New directories and
+a database that does not exist yet are supported. These checks concern the
+configured root, not individual supplied or saved workspaces.
+
+Changing `workspaceRoot` affects newly allocated workspaces. Existing sessions
+resume at their recorded paths; Pact does not move them. Restart the daemon to
+apply a new root to `pact start` sessions.
+
+The previous defaults were `~/.local/state/pact/sessions.db` and
+`~/.local/state/pact/workspaces`. To keep using them, set:
+
+```json
+{
+  "databasePath": "~/.local/state/pact/sessions.db",
+  "workspaceRoot": "~/.local/state/pact/workspaces"
+}
+```
 
 ## Persistence and recovery
 

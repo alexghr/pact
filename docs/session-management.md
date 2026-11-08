@@ -11,8 +11,10 @@ conversation format and interprets the opaque `BackendRef`.
 `session.PrepareNix(ctx)` to start or reuse the fixed shared Nix service. It passes
 this runtime handle to `session.New` or `session.Restore`, registers `Cleanup`,
 and calls `Start` with an optional prompt. Constructors allocate or restore persistent resources.
-`Start` owns transient service startup and attached execution. `session.OpenStore`
-resolves the host catalogue location and creates its parent directory;
+`Start` owns transient service startup and attached execution. Config loading
+resolves `databasePath` and `workspaceRoot` and validates their layout.
+`session.New` receives the configured root for managed allocation.
+`session.OpenStore` creates the catalogue parent directory;
 `state.Open` accepts an explicit database path and applies migrations.
 
 `session.Options` contains the workspace, initial title, backend, model, effort,
@@ -127,8 +129,9 @@ Git private keys and upstream MCP credentials remain on the host behind the
 bridge. The Nix daemon has no workspace, private agent state, or credential mounts.
 DinD shares only the workspace and its private socket volume.
 
-The host catalogue stays outside every mounted workspace. Back up catalogue,
-workspace files, and private native volumes together. Missing established private
+The configured managed root cannot contain the catalogue or Pact config.
+Explicit workspaces are chosen by the operator without host-path exclusion
+checks. Back up catalogue, workspace files, and private native volumes together. Missing established private
 state requires restoration; a missing shared package cache can be rebuilt.
 See [workspaces](workspaces.md) and [Nix storage](nix-storage.md).
 

@@ -16,11 +16,11 @@ func TestSessionBindingOnlyChangesBoundSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	first, err := createRecord(t.Context(), store, Options{Workspace: t.TempDir()})
+	first, err := createRecord(t.Context(), store, "", Options{Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := createRecord(t.Context(), store, Options{Workspace: t.TempDir()})
+	other, err := createRecord(t.Context(), store, "", Options{Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

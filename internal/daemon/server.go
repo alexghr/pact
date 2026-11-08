@@ -87,7 +87,7 @@ func Serve(ctx context.Context, cfg config.HostConfig) error {
 				nix, err = session.PrepareNix(ctx)
 				if err == nil {
 					var run *session.Session
-					run, err = session.New(ctx, store, nix, *req.Options)
+					run, err = session.New(ctx, store, nix, cfg.WorkspaceRoot, *req.Options)
 					if err == nil {
 						current = newLiveSession()
 						req.SessionID = run.Record.ID

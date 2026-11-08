@@ -12,8 +12,7 @@ import (
 	"github.com/alexghr/pact/internal/state"
 )
 
-func newWorkspacePath(store *state.Store) (string, error) {
-	root := filepath.Join(filepath.Dir(store.Path()), "workspaces")
+func newWorkspacePath(root string) (string, error) {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return "", fmt.Errorf("create workspace storage: %w", err)
 	}
@@ -33,11 +32,11 @@ func allocateWorkspace(ctx context.Context, store *state.Store, w state.Workspac
 	return store.UpdateWorkspace(ctx, w)
 }
 
-func checkWorkspace(store *state.Store, w state.Workspace) error {
+func checkWorkspace(w state.Workspace) error {
 	if w.Status != "ready" {
 		return fmt.Errorf("workspace %s is %s; inspect the session and recover it explicitly", w.Path, w.Status)
 	}
-	path, err := resolveWorkspace(store, w.Path)
+	path, err := resolveWorkspace(w.Path)
 	if err != nil {
 		return fmt.Errorf("saved workspace needs recovery: %w", err)
 	}
@@ -47,7 +46,7 @@ func checkWorkspace(store *state.Store, w state.Workspace) error {
 	return nil
 }
 
-func resolveWorkspace(store *state.Store, workspace string) (string, error) {
+func resolveWorkspace(workspace string) (string, error) {
 	workspace, err := filepath.Abs(workspace)
 	if err != nil {
 		return "", err
@@ -62,17 +61,6 @@ func resolveWorkspace(store *state.Store, workspace string) (string, error) {
 	}
 	if !info.IsDir() {
 		return "", errors.New("workspace must be a directory")
-	}
-	path, err := filepath.EvalSymlinks(store.Path())
-	if err != nil {
-		return "", fmt.Errorf("resolve catalogue: %w", err)
-	}
-	rel, err := filepath.Rel(workspace, path)
-	if err != nil {
-		return "", err
-	}
-	if rel == "." || filepath.IsLocal(rel) {
-		return "", errors.New("catalogue must be outside the mounted workspace")
 	}
 	return workspace, nil
 }

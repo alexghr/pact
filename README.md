@@ -39,8 +39,27 @@ space is used efficiently.
 Each new session prints its Pact ID. Find sessions from any directory with
 `pact sessions list`, or inspect one with `pact sessions show 42`. Both accept
 `--json`; listing supports `--workspace PATH` and `--all`.
-The catalogue lives at `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
-`~/.local/state/pact/sessions.db`.
+The catalogue defaults to `~/.local/state/pact/store.sqlite`; managed workspaces
+default to `~/.local/state/pact/workspaces/`. `XDG_STATE_HOME` overrides
+`~/.local/state`.
+Set `databasePath` and `workspaceRoot` in `~/.config/pact/config.json`
+(or the file selected by `--config`) to choose other locations:
+
+```json
+{
+  "databasePath": "~/.local/state/pact/store.sqlite",
+  "workspaceRoot": "~/.local/state/pact/workspaces"
+}
+```
+
+Relative paths resolve against the config directory. The managed workspace root
+must not contain the database or Pact config. For `-w PATH`, you choose everything
+exposed to the agent; Pact does not check for host config or credential files
+inside that directory.
+
+Existing catalogues are not moved automatically. To keep an older installation,
+set `databasePath` to its existing `sessions.db` and `workspaceRoot` to its existing
+workspace directory. Saved sessions retain their recorded workspace locations.
 
 A Pact session binds once to the agent's initial native conversation. Run
 `pact resume` to resume the last used Pact session from any directory, or

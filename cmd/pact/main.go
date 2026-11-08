@@ -297,7 +297,7 @@ func newSessionRuntime(ctx context.Context, resumeID *int64, configPath string, 
 	if resumeID != nil {
 		runtime.session, err = session.Restore(ctx, runtime.store, nix, *resumeID, configPath)
 	} else {
-		runtime.session, err = session.New(ctx, runtime.store, nix, session.Options{
+		runtime.session, err = session.New(ctx, runtime.store, nix, hostCfg.WorkspaceRoot, session.Options{
 			Workspace: cfg.workspace,
 			Title:     cfg.title,
 			Model:     cfg.model,

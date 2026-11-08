@@ -31,7 +31,7 @@ func TestManagedLaunchFailureCanResume(t *testing.T) {
 	}
 	defer store.Close()
 	nix := Nix{Container: "pact-test-nix", Volume: "pact-test-nix-volume"}
-	if _, err := New(t.Context(), store, nix, Options{Title: "Investigate deployment errors", Model: "saved", Capabilities: state.Capabilities{DIND: true, HostNetwork: true}}); err == nil {
+	if _, err := New(t.Context(), store, nix, t.TempDir(), Options{Title: "Investigate deployment errors", Model: "saved", Capabilities: state.Capabilities{DIND: true, HostNetwork: true}}); err == nil {
 		t.Fatal("launch succeeded without Docker")
 	}
 	sessions, err := store.Sessions(t.Context(), "")
@@ -71,7 +71,7 @@ func TestRuntimeCancellationStopsContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	launch, err := createRecord(t.Context(), store, Options{Workspace: t.TempDir()})
+	launch, err := createRecord(t.Context(), store, "", Options{Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

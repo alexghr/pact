@@ -89,7 +89,7 @@ route. The internal relay script is `host-relay.sh`.
 
 ## Transport and lifetime
 
-On Linux, each run creates a private Unix socket outside the workspace and mounts only
+On Linux, each run creates a private Unix socket under `/tmp/pact-mcp-*` and mounts only
 that socket into the container, read-only. A `socat` relay runs as the agent user
 on container loopback port 8765. Pact supplies invocation-only Codex MCP URLs;
 it does not write these registrations into the persistent Codex configuration.

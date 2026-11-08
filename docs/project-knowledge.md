@@ -70,9 +70,9 @@ Extend the host-side catalogue planned by the session-management work:
 [SQLite storage and migrations (#5)](https://forge.alexghr.me/ag/pact/issues/5)
 and [workspace records (#6)](https://forge.alexghr.me/ag/pact/issues/6).
 Reuse its database, driver, migrations, and workspace IDs. The proposed location
-is `$XDG_STATE_HOME/pact/sessions.db`, defaulting to
-`~/.local/state/pact/sessions.db`. Do not create another registry or rename the
-catalogue as part of this experiment.
+is selected by `databasePath`, defaulting to `~/.local/state/pact/store.sqlite`
+(`$XDG_STATE_HOME/pact/store.sqlite` when set). Do not create another registry or
+rename the catalogue as part of this experiment.
 
 A workspace can contain several repositories or none. Its stable catalogue ID
 is the scope; `/home/pact/workspace` is only a container mount path shared by

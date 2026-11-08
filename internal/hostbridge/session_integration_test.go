@@ -39,7 +39,7 @@ func TestRelayStreamingAndSessionLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bridge, err := startUnix([]Server{{Path: "/mcp/example", Handler: proxy}}, t.TempDir())
+	bridge, err := startUnix([]Server{{Path: "/mcp/example", Handler: proxy}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestRelayResetDiagnostics(t *testing.T) {
 			}
 			w.(http.Flusher).Flush()
 		}
-	})}}, t.TempDir())
+	})}})
 	if err != nil {
 		t.Fatal(err)
 	}

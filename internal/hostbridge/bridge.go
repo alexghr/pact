@@ -42,7 +42,7 @@ type ContainerConfig struct {
 
 // Start returns a running bridge for the local Docker host. macOS Docker Desktop
 // cannot mount host Unix sockets; local Linux Docker uses a socket and relay.
-func Start(servers []Server, workspace string) (Bridge, error) {
+func Start(servers []Server) (Bridge, error) {
 	if runtime.GOOS == "darwin" {
 		bridge, err := startTCP(servers)
 		if err != nil {
@@ -50,7 +50,7 @@ func Start(servers []Server, workspace string) (Bridge, error) {
 		}
 		return bridge, nil
 	}
-	bridge, err := startUnix(servers, workspace)
+	bridge, err := startUnix(servers)
 	if err != nil {
 		return nil, err
 	}

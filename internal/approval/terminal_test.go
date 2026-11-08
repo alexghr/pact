@@ -124,7 +124,7 @@ func TestTerminalDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport := &http.Transport{DialContext: unixhttp.Dialer(socket, nil)}
+	transport := &http.Transport{DialContext: unixhttp.Dialer(socket)}
 	defer transport.CloseIdleConnections()
 	expired := make(chan error, 1)
 	go func() {

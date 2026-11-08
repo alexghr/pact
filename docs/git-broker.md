@@ -140,11 +140,10 @@ Verification itself stays local. Only MCP registration changes require a restart
 All helper HTTP requests share a 30-second response-header timeout and a
 30-minute overall timeout, allowing long-running Git transfers.
 
-The config and its directory, key files, known-hosts files, and host executables
-must resolve outside the mounted workspace. Pact checks host executables at
-startup and checks config and credential paths, including symlinks, on each
-request. Keep all copies and hard links of credentials outside the workspace too.
-Do not mount your home directory as the workspace.
+Operators choose explicit workspaces and keep host configuration, credentials,
+and executables out of those mounts. The broker does not compare these paths
+with workspaces. Pact validates the configured managed workspace root against
+the database and Pact config when loading configuration.
 
 ## Boundary and lifecycle
 
@@ -201,7 +200,7 @@ revocation. The allowed-remotes command is checked against a real broker, includ
 live updates, empty lists and connection failures. The Git workflow also checks
 that host config edits grant and revoke transport access, rotate keys and
 known-hosts paths, and change the signing identity without a broker restart.
-Invalid config and workspace symlinks must fail without starting a host process.
+Invalid Git config must fail without starting a host process.
 Tests do not require a privileged SSH daemon.
 
 On a host where an unprivileged OpenSSH daemon can run,

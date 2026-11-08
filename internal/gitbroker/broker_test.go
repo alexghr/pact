@@ -67,7 +67,7 @@ func testBroker(t *testing.T, remotes ...string) (*Broker, config.Git, string) {
 	writeFile(t, cfg.KnownHosts, "", 0600)
 	path := filepath.Join(host, "config.json")
 	writeConfig(t, path, cfg)
-	b, err := New(path, workspace)
+	b, err := New(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,35 +113,15 @@ func TestAllowedRemotes(t *testing.T) {
 }
 
 func TestConfigReloadFailsClosed(t *testing.T) {
-	b, cfg, workspace := testBroker(t, "git@forge.test:team/repo")
+	b, cfg, _ := testBroker(t, "git@forge.test:team/repo")
 	marker := filepath.Join(filepath.Dir(cfg.SSHKey), "executed")
 	b.ssh = filepath.Join(filepath.Dir(cfg.SSHKey), "trap")
 	writeFile(t, b.ssh, "#!/bin/sh\nprintf executed > '"+marker+"'\n", 0700)
 	b.keygen = b.ssh
 	server := httptest.NewServer(b)
 	defer server.Close()
-	workspaceConfig := filepath.Join(workspace, "config.json")
-	writeConfig(t, workspaceConfig, cfg)
-	configAlias := filepath.Join(workspace, "config-link.json")
-	if err := os.Symlink(b.configPath, configAlias); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{workspaceConfig, configAlias} {
-		broker, err := New(path, workspace)
-		if err != nil {
-			t.Fatal(err)
-		}
-		res := httptest.NewRecorder()
-		broker.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/?op=signing-identity", nil))
-		broker.Close()
-		if res.Code != http.StatusServiceUnavailable {
-			t.Fatal("read a config path inside the workspace")
-		}
-	}
-	workspaceHosts := filepath.Join(workspace, "known_hosts")
-	writeFile(t, workspaceHosts, "", 0600)
 	original := cfg
-	for _, scenario := range []string{"invalid JSON", "invalid remote", "missing Git config", "invalid identity", "missing key", "missing config", "workspace config", "workspace known hosts", "workspace key"} {
+	for _, scenario := range []string{"invalid JSON", "invalid remote", "missing Git config", "invalid identity", "missing key", "missing config"} {
 		t.Run(scenario, func(t *testing.T) {
 			cfg = original
 			writeConfig(t, b.configPath, cfg)
@@ -159,26 +139,10 @@ func TestConfigReloadFailsClosed(t *testing.T) {
 			case "missing key":
 				cfg.SSHKey += ".missing"
 				writeConfig(t, b.configPath, cfg)
-			case "missing config", "workspace config":
+			case "missing config":
 				if err := os.Remove(b.configPath); err != nil {
 					t.Fatal(err)
 				}
-				if scenario == "workspace config" {
-					if err := os.Symlink(workspaceConfig, b.configPath); err != nil {
-						t.Fatal(err)
-					}
-				}
-			case "workspace known hosts", "workspace key":
-				alias := filepath.Join(t.TempDir(), "workspace-link")
-				if err := os.Symlink(workspaceHosts, alias); err != nil {
-					t.Fatal(err)
-				}
-				if scenario == "workspace key" {
-					cfg.SSHKey = alias
-				} else {
-					cfg.KnownHosts = alias
-				}
-				writeConfig(t, b.configPath, cfg)
 			}
 			for _, op := range []string{"allowed-remotes", "signing-identity", "sign", "ssh"} {
 				q := url.Values{"op": {op}, "host": {"git@forge.test"}, "command": {"git-upload-pack 'team/repo'"}}
@@ -245,7 +209,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	}
 
 	// Exercise the production bridge and the container's Unix-to-HTTP relay.
-	bridge, err := hostbridge.Start([]hostbridge.Server{{Path: HandlerPath, Handler: b}}, workspace)
+	bridge, err := hostbridge.Start([]hostbridge.Server{{Path: HandlerPath, Handler: b}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +492,7 @@ func testRelay(t *testing.T, socket string) string {
 }
 
 func TestBrokerRejectsCredentialAbuse(t *testing.T) {
-	b, cfg, workspace := testBroker(t, "git@forge.test:team/repo")
+	b, cfg, _ := testBroker(t, "git@forge.test:team/repo")
 	// If any forbidden request starts a host process, this executable leaves proof.
 	marker := filepath.Join(filepath.Dir(cfg.SSHKey), "executed")
 	trap := filepath.Join(filepath.Dir(cfg.SSHKey), "trap")
@@ -598,21 +562,6 @@ func TestBrokerRejectsCredentialAbuse(t *testing.T) {
 		!strings.HasPrefix(identity.PublicKey, "ssh-ed25519 ") || strings.Contains(identity.PublicKey, "PRIVATE KEY") {
 		t.Fatalf("signing-identity endpoint returned unexpected material: %+v, %v", identity, err)
 	}
-	keyInWorkspace := filepath.Join(workspace, "key")
-	writeFile(t, keyInWorkspace, "secret", 0600)
-	alias := filepath.Join(filepath.Dir(cfg.SSHKey), "key-link")
-	if err := os.Symlink(keyInWorkspace, alias); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{keyInWorkspace, alias} {
-		cfg.SSHKey = key
-		writeConfig(t, b.configPath, cfg)
-		res := httptest.NewRecorder()
-		b.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/?op=signing-identity", nil))
-		if res.Code != http.StatusServiceUnavailable {
-			t.Fatal("read a private key inside the workspace")
-		}
-	}
 }
 
 func TestKeyAddedAfterStartup(t *testing.T) {
@@ -630,7 +579,7 @@ func TestKeyAddedAfterStartup(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			b, err := New(path, workspace)
+			b, err := New(path)
 			if err != nil {
 				t.Fatal(err)
 			}

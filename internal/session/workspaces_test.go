@@ -28,10 +28,11 @@ func openSessionStore(t *testing.T) *state.Store {
 func TestManagedWorkspaceLifecycle(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	store, other := openSessionStore(t), openSessionStore(t)
+	root := filepath.Join(t.TempDir(), "managed")
 	results := make(chan state.Session, 2)
 	for _, connection := range []*state.Store{store, other} {
 		go func() {
-			launch, err := createRecord(t.Context(), connection, Options{})
+			launch, err := createRecord(t.Context(), connection, root, Options{})
 			if err != nil {
 				t.Error(err)
 			}
@@ -46,6 +47,9 @@ func TestManagedWorkspaceLifecycle(t *testing.T) {
 		t.Fatal("independent launches share workspace or agent state")
 	}
 	for _, launch := range []state.Session{a, b} {
+		if filepath.Dir(launch.Workspace) != root {
+			t.Fatalf("managed workspace ignored the configured root: %s", launch.Workspace)
+		}
 		entries, err := os.ReadDir(launch.Workspace)
 		if err != nil || len(entries) != 0 {
 			t.Fatalf("workspace was not initially empty: %v, %v", entries, err)
@@ -102,6 +106,15 @@ func TestManagedWorkspaceLifecycle(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(resumed.Workspace, "build-output")); err != nil || string(data) != "retained" {
 		t.Fatalf("resume lost untracked build output: %q, %v", data, err)
 	}
+	// Explicit checkouts remain the operator's choice, even when they contain
+	// the catalogue. Only the configured managed root has a layout constraint.
+	checkout, err := createRecord(t.Context(), store, root, Options{Workspace: filepath.Dir(store.Path())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restoreRecord(t.Context(), store, checkout.ID); err != nil {
+		t.Fatalf("could not resume an operator-selected checkout: %v", err)
+	}
 	if err := os.Rename(a.Workspace, a.Workspace+"-original"); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +131,7 @@ func TestManagedAllocationFailureIsRetained(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(root, 0700) })
-	_, err := createRecord(t.Context(), store, Options{})
+	_, err := createRecord(t.Context(), store, root, Options{})
 	if err == nil || !strings.Contains(err.Error(), "needs recovery") {
 		t.Fatalf("allocation failure: %v", err)
 	}
@@ -138,7 +151,7 @@ func TestResumeRetainsSettingsAndRejectsMovedWorkspace(t *testing.T) {
 	if err := os.Mkdir(workspace, 0700); err != nil {
 		t.Fatal(err)
 	}
-	original, err := createRecord(t.Context(), store, Options{Workspace: workspace, Model: "original", Effort: "high", Capabilities: Capabilities{DIND: true, HostNetwork: true}})
+	original, err := createRecord(t.Context(), store, "", Options{Workspace: workspace, Model: "original", Effort: "high", Capabilities: Capabilities{DIND: true, HostNetwork: true}})
 	if err != nil {
 		t.Fatal(err)
 	}

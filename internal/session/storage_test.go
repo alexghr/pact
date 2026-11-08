@@ -37,7 +37,7 @@ func TestSharedStorage(t *testing.T) {
 	}
 	var environments []state.Storage
 	for range 2 {
-		launch, err := createRecord(ctx, store, Options{Workspace: t.TempDir()})
+		launch, err := createRecord(ctx, store, "", Options{Workspace: t.TempDir()})
 		if err != nil {
 			t.Fatal(err)
 		}

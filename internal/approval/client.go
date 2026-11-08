@@ -73,24 +73,9 @@ func New(settings config.Approvals, session Session) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read approval hostname: %w", err)
 	}
-	workspace, err := filepath.EvalSymlinks(session.Workspace)
-	if err != nil {
-		return nil, fmt.Errorf("resolve approval workspace: %w", err)
-	}
-	outsideWorkspace := func(socket string) error {
-		relative, err := filepath.Rel(workspace, socket)
-		if err != nil || filepath.IsLocal(relative) {
-			return errors.New("approvals.socket must be outside the mounted workspace")
-		}
-		return nil
-	}
-	if err := outsideWorkspace(settings.Socket); err != nil {
-		return nil, err
-	}
 	transport := &http.Transport{
 		DisableKeepAlives: true,
-		// Recheck the resolved path when SSH replaces its forwarded socket.
-		DialContext: unixhttp.Dialer(settings.Socket, outsideWorkspace),
+		DialContext:       unixhttp.Dialer(settings.Socket),
 	}
 	return &Client{
 		http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {

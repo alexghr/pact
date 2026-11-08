@@ -1,7 +1,6 @@
 package hostbridge
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -14,9 +13,8 @@ type unixBridge struct {
 	socketPath string
 }
 
-// startUnix creates a private socket bridge for a local Linux Docker daemon,
-// rejecting a socket directory exposed by the workspace mount.
-func startUnix(servers []Server, workspace string) (*unixBridge, error) {
+// startUnix creates a private socket bridge for a local Linux Docker daemon.
+func startUnix(servers []Server) (*unixBridge, error) {
 	mux, err := routes(servers)
 	if err != nil {
 		return nil, err
@@ -33,18 +31,6 @@ func startUnix(servers []Server, workspace string) (*unixBridge, error) {
 			_ = os.RemoveAll(dir)
 		}
 	}()
-	resolvedDir, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return nil, fmt.Errorf("resolve host bridge socket directory: %w", err)
-	}
-	dir = resolvedDir
-	relativeSocket, err := filepath.Rel(workspace, filepath.Join(dir, "mcp.sock"))
-	if err != nil {
-		return nil, err
-	}
-	if filepath.IsLocal(relativeSocket) {
-		return nil, errors.New("host bridge socket directory must be outside the mounted workspace; choose a narrower workspace")
-	}
 	socketPath := filepath.Join(dir, "mcp.sock")
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {

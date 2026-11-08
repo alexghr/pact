@@ -35,7 +35,7 @@ type Client struct {
 }
 
 func Dial(ctx context.Context, socket string) (*Client, error) {
-	transport := &http.Transport{DialContext: unixhttp.Dialer(socket, nil)}
+	transport := &http.Transport{DialContext: unixhttp.Dialer(socket)}
 	defer transport.CloseIdleConnections()
 	conn, _, err := websocket.Dial(ctx, "ws://localhost/", &websocket.DialOptions{
 		HTTPClient: &http.Client{Transport: transport},

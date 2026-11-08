@@ -12,10 +12,11 @@ import (
 )
 
 type HostConfig struct {
-	Git          Git                  `json:"git,omitzero"`
-	MCP          map[string]MCPServer `json:"mcp,omitempty"`
-	Approvals    Approvals            `json:"approvals,omitzero"`
-	DatabasePath string               `json:"databasePath"`
+	Git           Git                  `json:"git,omitzero"`
+	MCP           map[string]MCPServer `json:"mcp,omitempty"`
+	Approvals     Approvals            `json:"approvals,omitzero"`
+	DatabasePath  string               `json:"databasePath"`
+	WorkspaceRoot string               `json:"workspaceRoot"`
 }
 
 type MCPServer struct {
@@ -127,15 +128,33 @@ func Load(path string) (HostConfig, error) {
 		cfg.MCP[name] = server
 	}
 
-	if cfg.DatabasePath == "" {
-		db, err := defaultDatabase()
+	if cfg.DatabasePath == "" || cfg.WorkspaceRoot == "" {
+		dir, err := defaultStateDir()
 		if err != nil {
-			return cfg, fmt.Errorf("resolve default database path: %s", err)
+			return HostConfig{}, err
 		}
-
-		cfg.DatabasePath = db
+		if cfg.DatabasePath == "" {
+			cfg.DatabasePath = filepath.Join(dir, "store.sqlite")
+		}
+		if cfg.WorkspaceRoot == "" {
+			cfg.WorkspaceRoot = filepath.Join(dir, "workspaces")
+		}
 	}
-
+	for _, setting := range []struct {
+		name  string
+		value *string
+	}{
+		{"databasePath", &cfg.DatabasePath},
+		{"workspaceRoot", &cfg.WorkspaceRoot},
+	} {
+		*setting.value, err = resolvePath(path, *setting.value)
+		if err != nil {
+			return HostConfig{}, fmt.Errorf("resolve %s: %w", setting.name, err)
+		}
+	}
+	if err := cfg.validatePaths(path); err != nil {
+		return HostConfig{}, err
+	}
 	return cfg, nil
 }
 
@@ -152,7 +171,7 @@ func resolvePath(path, key string) (string, error) {
 	return filepath.Abs(key)
 }
 
-func defaultDatabase() (string, error) {
+func defaultStateDir() (string, error) {
 	dir := os.Getenv("XDG_STATE_HOME")
 
 	if dir == "" {
@@ -167,5 +186,51 @@ func defaultDatabase() (string, error) {
 		return "", errors.New("catalogue state directory must be absolute")
 	}
 
-	return filepath.Join(dir, "pact", "sessions.db"), nil
+	return filepath.Join(dir, "pact"), nil
+}
+
+// Only the configured managed root is constrained. Operators choose what an
+// explicit -w workspace exposes, including any host files inside it.
+func (cfg HostConfig) validatePaths(configPath string) error {
+	root, err := canonicalPath(cfg.WorkspaceRoot)
+	if err != nil {
+		return fmt.Errorf("resolve workspaceRoot: %w", err)
+	}
+	for _, target := range []struct{ name, path string }{
+		{"databasePath", cfg.DatabasePath},
+		{"config directory", filepath.Dir(configPath)},
+		{"config file", configPath},
+	} {
+		path, err := canonicalPath(target.path)
+		if err != nil {
+			return fmt.Errorf("resolve %s: %w", target.name, err)
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." || filepath.IsLocal(rel) {
+			return fmt.Errorf("workspaceRoot %s must not contain %s (%s)", root, target.name, path)
+		}
+	}
+	return nil
+}
+
+// Resolve existing ancestors so a first launch can validate paths before the
+// database or workspace root exists. A dangling symlink still returns an error.
+func canonicalPath(path string) (string, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return filepath.EvalSymlinks(path)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	parent, err := canonicalPath(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, filepath.Base(path)), nil
 }

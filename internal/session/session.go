@@ -58,8 +58,8 @@ type Session struct {
 	runErr, cleanupErr           error
 }
 
-func New(ctx context.Context, store *state.Store, nix Nix, options Options) (*Session, error) {
-	record, err := createRecord(ctx, store, options)
+func New(ctx context.Context, store *state.Store, nix Nix, workspaceRoot string, options Options) (*Session, error) {
+	record, err := createRecord(ctx, store, workspaceRoot, options)
 	if err != nil {
 		return nil, err
 	}
@@ -123,13 +123,13 @@ func (s *Session) start(ctx context.Context, prompt string, terminal *Terminal) 
 	if err != nil {
 		return err
 	}
-	s.broker, err = gitbroker.New(s.configPath, s.Record.Workspace)
+	s.broker, err = gitbroker.New(s.configPath)
 	if err != nil {
 		return err
 	}
 	servers = append(servers, hostbridge.Server{Path: gitbroker.HandlerPath, Handler: s.broker},
 		hostbridge.Server{Path: "/harness/binding", Handler: sessionBinding(s.store, s.Record.ID)})
-	s.bridge, err = hostbridge.Start(servers, s.Record.Workspace)
+	s.bridge, err = hostbridge.Start(servers)
 	if err != nil {
 		return err
 	}
