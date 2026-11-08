@@ -290,6 +290,11 @@ func TestExecResumeRetainsContext(t *testing.T) {
 			break
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		stopExec()
+		_ = command.Wait()
+		t.Fatal(err)
+	}
 	if !found || !accepted {
 		stopExec()
 		_ = command.Wait()

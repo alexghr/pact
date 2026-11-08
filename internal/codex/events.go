@@ -49,11 +49,11 @@ func ConsumeExec(input io.Reader, bind func(string) error, output, diagnostics i
 		switch event.Type {
 		case "thread.started":
 			if expectedThread != "" && event.ThreadID != expectedThread {
-				return fmt.Errorf("Codex resumed thread %q instead of requested thread %q", event.ThreadID, expectedThread)
+				return fmt.Errorf("codex resumed thread %q instead of requested thread %q", event.ThreadID, expectedThread)
 			}
 			if threadID != "" {
 				if threadID != event.ThreadID {
-					return fmt.Errorf("Codex changed thread during a prompted run")
+					return fmt.Errorf("codex changed thread during a prompted run")
 				}
 				continue
 			}
@@ -63,21 +63,21 @@ func ConsumeExec(input io.Reader, bind func(string) error, output, diagnostics i
 			}
 		case "turn.started", "turn.completed":
 			if threadID == "" {
-				return fmt.Errorf("Codex reported a turn before a thread")
+				return fmt.Errorf("codex reported a turn before a thread")
 			}
 			completed = event.Type == "turn.completed"
 		case "turn.failed":
-			return fmt.Errorf("Codex turn failed: %s", event.Error.Message)
+			return fmt.Errorf("codex turn failed: %s", event.Error.Message)
 		case "error":
 			// Codex remains running after an error notification; the turn outcome
 			// decides whether it recovered. Retain the diagnostic if the stream ends.
-			reportedError = fmt.Errorf("Codex error: %s", event.Message)
+			reportedError = fmt.Errorf("codex error: %s", event.Message)
 			if _, err := fmt.Fprintln(diagnostics, reportedError); err != nil {
 				return err
 			}
 		case "item.started", "item.updated", "item.completed":
 			if threadID == "" {
-				return fmt.Errorf("Codex reported an item before a thread")
+				return fmt.Errorf("codex reported an item before a thread")
 			}
 			if err := renderItem(event, output, diagnostics); err != nil {
 				return err
@@ -88,10 +88,10 @@ func ConsumeExec(input io.Reader, bind func(string) error, output, diagnostics i
 		return fmt.Errorf("read Codex events: %w", err)
 	}
 	if threadID == "" {
-		return errors.Join(fmt.Errorf("Codex exited without reporting a thread"), reportedError)
+		return errors.Join(fmt.Errorf("codex exited without reporting a thread"), reportedError)
 	}
 	if !completed {
-		return errors.Join(fmt.Errorf("Codex exited without completing the turn"), reportedError)
+		return errors.Join(fmt.Errorf("codex exited without completing the turn"), reportedError)
 	}
 	return nil
 }
@@ -109,9 +109,10 @@ func renderItem(event execEvent, output, diagnostics io.Writer) error {
 			_, err = fmt.Fprintln(diagnostics, item.Text)
 		}
 	case "command_execution":
-		if event.Type == "item.started" {
+		switch event.Type {
+		case "item.started":
 			_, err = fmt.Fprintf(diagnostics, "> %s\n", item.Command)
-		} else if event.Type == "item.completed" {
+		case "item.completed":
 			if item.AggregatedOutput != "" {
 				_, err = fmt.Fprintln(diagnostics, item.AggregatedOutput)
 			}

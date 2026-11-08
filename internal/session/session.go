@@ -221,7 +221,7 @@ func (s *Session) runContainer(ctx context.Context, config docker.ContainerConfi
 		return err
 	}
 	s.started, err = docker.Attach(ctx, s.containerID, docker.AttachOptions{
-		Streams:     docker.Streams{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr},
+		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Interactive: consume == nil, Interrupt: true, Consume: consume,
 		OnStart: func() error { return s.store.StartExecution(ctx, s.Record.ExecutionID) },
 	})

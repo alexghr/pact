@@ -40,7 +40,7 @@ func request(method, operation string, params url.Values, body io.Reader) (*http
 	if res.StatusCode != http.StatusOK {
 		defer res.Body.Close()
 		message, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
-		return nil, fmt.Errorf("Git broker: %s: %s", res.Status, strings.TrimSpace(string(message)))
+		return nil, fmt.Errorf("git broker: %s: %s", res.Status, strings.TrimSpace(string(message)))
 	}
 	return res, nil
 }
@@ -89,7 +89,7 @@ func ssh(args []string) error {
 	for {
 		var header [5]byte
 		if _, err := io.ReadFull(res.Body, header[:]); err != nil {
-			return fmt.Errorf("Git transport ended without exit status: %w", err)
+			return fmt.Errorf("git transport ended without exit status: %w", err)
 		}
 		size := binary.BigEndian.Uint32(header[1:])
 		if size > 1<<20 {

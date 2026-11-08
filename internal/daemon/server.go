@@ -140,7 +140,7 @@ func (s *liveSession) run(ctx context.Context, run *session.Session, size docker
 	s.size = size
 	s.mu.Unlock()
 	err := run.StartTerminal(ctx, session.Terminal{
-		Streams: docker.Streams{Stdin: input, Stdout: s, Stderr: s}, Size: size,
+		Stdin: input, Stdout: s, Stderr: s, Size: size,
 		Ready: func(id string) {
 			s.mu.Lock()
 			s.container = id

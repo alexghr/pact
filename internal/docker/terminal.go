@@ -96,12 +96,12 @@ func engineRequest(ctx context.Context, path string, upgrade bool) (*http.Respon
 	}
 	if err != nil {
 		cleanup()
-		return nil, nil, nil, nil, fmt.Errorf("Docker terminal request: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("docker terminal request: %w", err)
 	}
 	if response.StatusCode != http.StatusSwitchingProtocols && response.StatusCode/100 != 2 {
 		defer cleanup()
 		message, _ := io.ReadAll(response.Body)
-		return nil, nil, nil, nil, fmt.Errorf("Docker terminal request: %s: %s", response.Status, message)
+		return nil, nil, nil, nil, fmt.Errorf("docker terminal request: %s: %s", response.Status, message)
 	}
 	return response, reader, input, cleanup, nil
 }

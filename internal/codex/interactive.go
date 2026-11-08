@@ -110,12 +110,12 @@ func runInteractive(ctx context.Context, serverConfig, native []string, backendR
 				return err
 			}
 		case <-client.Done():
-			return fmt.Errorf("Codex observer disconnected: %w", client.Err())
+			return fmt.Errorf("codex observer disconnected: %w", client.Err())
 		case <-serverDone:
 			if serverErr == nil {
 				serverErr = fmt.Errorf("unexpected exit")
 			}
-			return fmt.Errorf("Codex app-server stopped: %w", serverErr)
+			return fmt.Errorf("codex app-server stopped: %w", serverErr)
 		}
 	}
 }
@@ -134,7 +134,7 @@ func connect(ctx context.Context, socket string, serverDone <-chan struct{}) (*C
 		case <-ctx.Done():
 			return nil, fmt.Errorf("connect Codex app-server: %w", errors.Join(err, ctx.Err()))
 		case <-serverDone:
-			return nil, fmt.Errorf("Codex app-server exited before accepting connections: %w", err)
+			return nil, fmt.Errorf("codex app-server exited before accepting connections: %w", err)
 		case <-ticker.C:
 		}
 	}

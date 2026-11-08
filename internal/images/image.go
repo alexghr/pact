@@ -1,3 +1,4 @@
+// Package images provides embedded Docker build contexts and image helpers.
 package images
 
 import (
@@ -35,7 +36,7 @@ func GetNixImageName(ctx context.Context) (string, error) {
 	return docker.GetImageName(ctx, nixBuildContext, nixImage)
 }
 
-// Get files from the agent image's build context. Used for testing
+// GetAgentFile reads a file from the agent image's build context for tests.
 func GetAgentFile(path string) (string, error) {
 	script, err := fs.ReadFile(agentBuildContext, path)
 	if err != nil {

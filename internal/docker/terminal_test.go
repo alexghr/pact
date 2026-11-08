@@ -62,7 +62,8 @@ func TestTerminalPipeInputAndResize(t *testing.T) {
 	var received strings.Builder
 	scanner := bufio.NewScanner(output)
 	for scanner.Scan() {
-		received.WriteString(scanner.Text() + "\n")
+		received.WriteString(scanner.Text())
+		received.WriteByte('\n')
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)

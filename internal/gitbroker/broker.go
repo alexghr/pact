@@ -83,11 +83,11 @@ func (b *Broker) loadConfig() (gitConfig, error) {
 	// config symlink between checking its target and reading it.
 	dir, err := outsideWorkspace(filepath.Dir(b.configPath), b.workspace)
 	if err != nil {
-		return gitConfig{}, fmt.Errorf("Pact config directory: %w", err)
+		return gitConfig{}, fmt.Errorf("pact config directory: %w", err)
 	}
 	path := filepath.Join(dir, filepath.Base(b.configPath))
 	if _, err := outsideWorkspace(path, b.workspace); err != nil {
-		return gitConfig{}, fmt.Errorf("Pact config: %w", err)
+		return gitConfig{}, fmt.Errorf("pact config: %w", err)
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
@@ -98,7 +98,7 @@ func (b *Broker) loadConfig() (gitConfig, error) {
 		return gitConfig{}, errors.New("git.sshKey is not configured")
 	}
 	if git.Name == "" || git.Email == "" || strings.ContainsAny(git.Name+git.Email, "\x00\r\n<>") {
-		return gitConfig{}, errors.New("Git broker requires a name and email without line breaks or angle brackets")
+		return gitConfig{}, errors.New("git broker requires a name and email without line breaks or angle brackets")
 	}
 	git.SSHKey, err = outsideWorkspace(git.SSHKey, b.workspace)
 	if err != nil {
@@ -189,9 +189,9 @@ func parseRemote(raw string) (remote, error) {
 	if err != nil || port < 1 || port > 65535 || !safeHost.MatchString(r.host) || !safePath.MatchString(r.path) {
 		return r, errors.New("invalid SSH remote; use an explicit user, DNS host, port, and a simple repository path")
 	}
-	for _, part := range strings.Split(r.path, "/") {
+	for part := range strings.SplitSeq(r.path, "/") {
 		if part == "." || part == ".." {
-			return r, errors.New("Git remote paths cannot contain . or .. components")
+			return r, errors.New("git remote paths cannot contain . or .. components")
 		}
 	}
 	r.port = strconv.Itoa(port)

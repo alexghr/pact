@@ -149,7 +149,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	select {
 	case reply := <-response:
 		if reply.Error != nil {
-			return fmt.Errorf("Codex %s: %s (%d)", method, reply.Error.Message, reply.Error.Code)
+			return fmt.Errorf("codex %s: %s (%d)", method, reply.Error.Message, reply.Error.Code)
 		}
 		if result != nil {
 			if err := json.Unmarshal(reply.Result, result); err != nil {
@@ -180,7 +180,7 @@ func (c *Client) PrepareResume(ctx context.Context, threadID string) error {
 		return err
 	}
 	if result.ApprovalPolicy != "never" || result.Sandbox.Type != "dangerFullAccess" {
-		return fmt.Errorf("Codex refused Pact's resume permissions: approval policy %q, sandbox %q", result.ApprovalPolicy, result.Sandbox.Type)
+		return fmt.Errorf("codex refused Pact's resume permissions: approval policy %q, sandbox %q", result.ApprovalPolicy, result.Sandbox.Type)
 	}
 	return nil
 }

@@ -34,7 +34,7 @@ func CreateAuthSnapshot(source string) (string, error) {
 	}
 
 	if login.Mode != "chatgpt" || login.Tokens.IDToken == "" || login.Tokens.AccessToken == "" || login.Tokens.AccountID == "" {
-		return "", errors.New("Pact requires a file-based ChatGPT login with ID token, access token, and account ID")
+		return "", errors.New("pact requires a file-based ChatGPT login with ID token, access token, and account ID")
 	}
 
 	login.Tokens.RefreshToken = ""
