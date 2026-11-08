@@ -2,7 +2,12 @@
 
 set -euo pipefail
 
-./shell p-build
+if [[ "${DEVENV_ROOT:-}" == "$(git rev-parse --show-toplevel)" ]]; then
+  p-build
+else
+  ./shell p-build
+fi
+
 mv ./pact ~/.local/bin
 if [[ -f ./pact-approvals ]]; then
   mv ./pact-approvals ~/.local/bin
