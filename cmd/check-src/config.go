@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"io"
 	"io/fs"
 	"path/filepath"
@@ -17,8 +15,7 @@ import (
 // ensure all config fields in internal/config use camelCase
 type configCamelCase struct{}
 
-func (c configCamelCase) Check(out io.Writer) (bool, error) {
-	positions := token.NewFileSet()
+func (c configCamelCase) Check(src *srcFiles, out io.Writer) (bool, error) {
 	camelCase := regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
 	failed := false
 
@@ -31,7 +28,7 @@ func (c configCamelCase) Check(out io.Writer) (bool, error) {
 			return nil
 		}
 
-		file, err := parser.ParseFile(positions, path, nil, parser.SkipObjectResolution)
+		file, err := src.ParseFile(path)
 		if err != nil {
 			return err
 		}
@@ -43,7 +40,7 @@ func (c configCamelCase) Check(out io.Writer) (bool, error) {
 			}
 			tag, err := strconv.Unquote(field.Tag.Value)
 			if err != nil {
-				return fmt.Errorf("%s: %w", positions.Position(field.Tag.Pos()), err)
+				return fmt.Errorf("%s: %w", src.Position(field.Tag.Pos()), err)
 			}
 			jsonTag, ok := reflect.StructTag(tag).Lookup("json")
 			if !ok || jsonTag == "-" {
@@ -51,7 +48,7 @@ func (c configCamelCase) Check(out io.Writer) (bool, error) {
 			}
 			name, _, _ := strings.Cut(jsonTag, ",")
 			if !camelCase.MatchString(name) {
-				fmt.Fprintf(out, "%s: config JSON name must be camelCase: %q\n", positions.Position(field.Tag.Pos()), name)
+				fmt.Fprintf(out, "%s: config JSON name must be camelCase: %q\n", src.Position(field.Tag.Pos()), name)
 				failed = true
 			}
 		}

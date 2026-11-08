@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"io"
 	"io/fs"
 	"path/filepath"
@@ -15,8 +13,7 @@ import (
 // ensure any calls to docker are handled by internal/docker
 type dockerPackageCmds struct{}
 
-func (d dockerPackageCmds) Check(out io.Writer) (bool, error) {
-	positions := token.NewFileSet()
+func (d dockerPackageCmds) Check(src *srcFiles, out io.Writer) (bool, error) {
 	failed := false
 
 	// scripts/checks/layout.sh enforces all go code lives in cmd/ or internal/
@@ -37,7 +34,7 @@ func (d dockerPackageCmds) Check(out io.Writer) (bool, error) {
 				return nil
 			}
 
-			file, err := parser.ParseFile(positions, path, nil, parser.SkipObjectResolution)
+			file, err := src.ParseFile(path)
 			if err != nil {
 				return err
 			}
@@ -62,7 +59,7 @@ func (d dockerPackageCmds) Check(out io.Writer) (bool, error) {
 			for node := range ast.Preorder(file) {
 				call, ok := node.(*ast.CallExpr)
 				if ok && callsDocker(call) {
-					fmt.Fprintf(out, "%s: Docker commands must use internal/docker\n", positions.Position(call.Pos()))
+					fmt.Fprintf(out, "%s: Docker commands must use internal/docker\n", src.Position(call.Pos()))
 					failed = true
 				}
 			}

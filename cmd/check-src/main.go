@@ -3,13 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 )
-
-type srcCheck interface {
-	Check(io.Writer) (bool, error)
-}
 
 // Run checks on the Go source
 func main() {
@@ -25,10 +20,13 @@ func run() (retErr error) {
 	checks := []srcCheck{
 		dockerPackageCmds{},
 		configCamelCase{},
+		getenvOutsideConfig{},
 	}
 
+	src := newSrcFiles()
+
 	for _, c := range checks {
-		failed, err := c.Check(os.Stderr)
+		failed, err := c.Check(src, os.Stderr)
 		if err != nil {
 			return err
 		}
