@@ -72,6 +72,8 @@
               curl
               diffutils
               docker-client
+              fd
+              file
               findutils
               gawk
               git
@@ -79,11 +81,13 @@
               gnused
               gnutar
               gzip
+              jq
               less
               openssh
               procps
               ripgrep
               socat
+              unzip
               which
               xz
             ];

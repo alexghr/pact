@@ -17,6 +17,9 @@ if [[ "$(id -u)" == "0" ]]; then
   chown pact:"$pact_group" /home/pact /etc/pi
   if [[ -n "${PACT_AGENT_STATE_DIR:-}" ]]; then
     mkdir -p "$PACT_AGENT_STATE_DIR"
+    if [[ ! -e "$PACT_AGENT_STATE_DIR/settings.json" ]]; then
+      cp /opt/pact/pi-settings.json "$PACT_AGENT_STATE_DIR/settings.json"
+    fi
     chown pact:"$pact_group" "$PACT_AGENT_STATE_DIR"
     # Host authentication and model snapshots are read-only mounts.
     shopt -s dotglob nullglob

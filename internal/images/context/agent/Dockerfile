@@ -21,6 +21,7 @@ COPY nix.conf /etc/nix/nix.conf
 COPY entrypoint.sh /opt/pact/entrypoint.sh
 COPY env/ /opt/pact/toolset/
 COPY agent-instructions.md /opt/pact/agent-instructions.md
+COPY pi-settings.json /opt/pact/pi-settings.json
 RUN chmod 0755 /opt/pact/entrypoint.sh
 
 ENV NIX_REMOTE=daemon
