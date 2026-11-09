@@ -9,7 +9,7 @@ import (
 )
 
 // authSnapshot excludes renewable credentials and unknown fields while keeping
-// native expiry handling. Renew an expired login on the host before resuming.
+// native expiry handling. OpenAI renewal is delegated to the host bridge.
 func authSnapshot(source string) ([]byte, error) {
 	data, err := os.ReadFile(source)
 	if errors.Is(err, fs.ErrNotExist) {

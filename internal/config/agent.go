@@ -9,6 +9,7 @@ import (
 type AgentConfig struct {
 	GitURL     *url.URL
 	BindingURL string
+	AuthURL    string
 }
 
 func LoadAgent() (AgentConfig, error) {
@@ -20,5 +21,6 @@ func LoadAgent() (AgentConfig, error) {
 	return AgentConfig{
 		GitURL:     gitURL,
 		BindingURL: os.Getenv("PACT_BINDING_URL"),
+		AuthURL:    os.Getenv("PACT_AUTH_URL"),
 	}, nil
 }

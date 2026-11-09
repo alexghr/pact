@@ -7,20 +7,59 @@ Pi conversation. Pi owns the conversation format and model selection.
 ## Host configuration
 
 Every new execution snapshots `~/.pi/agent/auth.json` and
-`~/.pi/agent/models.json` into private temporary files, mounted read-only over
-the session's `/home/pact/.pi/agent` state volume. Missing host files become
-empty snapshots, so a resumed volume cannot supply stale host configuration.
-Cleanup removes the host snapshots. Host `settings.json`, extensions, packages,
-and other Pi files are not copied.
+`~/.pi/agent/models.json` into private temporary files. Models are mounted
+read-only over the session's `/home/pact/.pi/agent` state volume. The access-only
+authentication seed is mounted read-only at `/opt/pact/pi-auth.json` and copied
+to writable native `auth.json` before Pi starts. Missing host files become empty
+snapshots, so a resumed volume cannot supply stale host configuration. Cleanup
+removes the host snapshots. Host `settings.json`, extensions, packages, and
+other Pi files are not copied.
 
 API keys and OAuth access tokens are projected. Renewable OAuth tokens and
-unknown credential fields are excluded. OAuth snapshots retain their native
+unknown credential fields are excluded. OAuth credentials retain their native
 expiry, client ID, and scopes, including the `openai` ChatGPT login format.
-Pi checks for expiry before requests and attempts refresh when fewer than five
-minutes remain. Container refresh cannot succeed: renew credentials on the
-host, exit Pi, and run `pact resume ID` to obtain a new snapshot. Reattaching a
-running execution keeps its existing snapshot. Container `/login` cannot update
-the read-only login file.
+Other OAuth providers still use snapshot-only credentials: renew them on the
+host and start a new execution to obtain an updated snapshot.
+
+### OpenAI ChatGPT renewal
+
+The daemon needs Pi 1.5 or newer available as `pi` on its host PATH. When native
+Pi resolves an OpenAI OAuth credential with fewer than five minutes remaining,
+Pact's extension delegates renewal to `POST /harness/openai-auth` on the existing
+private host bridge. No credential or provider name is accepted from the caller.
+The host runs `pi auth print-bearer-token --provider openai --min-expiry 10m`
+from its Pi configuration directory, never the agent workspace. Native Pi
+coordinates refreshes with other Pact sessions and host Pi processes under its
+credential lock and persists rotated refresh credentials before export.
+
+Pact privately captures secret stdout and verifies it against a complete
+access-only projection with the native expiry. It retries a partial read or
+concurrent host replacement once. Only the OpenAI projection crosses the bridge;
+refresh tokens, unknown fields, native diagnostics and provider error bodies do
+not. Responses are not cacheable. The container's native credential store
+persists the reply before request-auth resolution continues. OAuth derivation,
+subscription model filtering, and API-key authentication remain native; the
+access token is not reclassified as an API key.
+
+This is request-driven, not an idle renewal timer. Detached sessions renew when
+they need credentials; an idle session can safely pass its expiry and renew on
+its next request, including after host sleep. Live delivery updates container-local
+state rather than replacing an already-mounted host file, so it does not depend
+on bind-mount inode replacement or a credential-cache reload hook. OpenAI
+container `/login` directs the operator to host Pi instead of creating renewable
+credentials in the container.
+
+Renewal makes at most two bridge attempts, with a one-second delay, within Pi's
+native refresh deadline. Failures report host network, `pi auth check --provider
+openai`, and host `/login` recovery steps without terminating Pi or replacing the
+conversation. Retry after host recovery; no stop/resume or reattachment is needed.
+A cancelled request does not cancel an in-flight host rotation: shutdown waits
+for its persistence, bounded by a one-minute host export deadline. If a slow
+export outlives the container's wait, a subsequent request can use the persisted
+host credential. No OpenAI refresh-token grant runs inside the container, even
+with a missing or unavailable bridge.
+
+### Custom models
 
 Pact copies `models.json` unchanged, preserving provider URLs, compatibility
 options, sampling settings, and custom model fields. `--model` is an opaque
@@ -60,7 +99,18 @@ The container toolset is pinned in
 
 Run `./shell p-ci` for the normal checks.
 `PACT_TEST_PI=1 ./shell go test ./internal/pi -count=1` additionally exercises
-the real Pi client against a local completion protocol endpoint, without host
-credentials. It covers custom models, initial binding, native navigation,
-extension reload, and saved conversation continuation. It does not verify a
-live ChatGPT login or a real model server.
+the pinned Pi 1.5 client against local protocol endpoints, without real host
+credentials. It covers custom models, initial binding, native navigation, and
+saved conversation continuation. On Linux it also runs two live Pi processes
+through the actual Unix host bridge and shipped relay, with native host OAuth
+renewal against a minimal HTTPS token endpoint. It checks cross-process refresh
+coordination, rotated-credential persistence, access-only delivery through native
+request authentication, delayed replies, exhausted validity, bounded failure and
+recovery, conversation continuity, and cancellation during rotation. The
+development Pi pin matches the shipped container pin.
+
+These are deterministic protocol checks, not live OAuth validation. Docker
+Desktop/macOS file sharing, actual TUI detachment and host sleep/wake, and an
+uninterrupted real OpenAI conversation across real token renewal still require
+separate live validation. Do not record tokens or secret auth-command stdout in
+that validation.

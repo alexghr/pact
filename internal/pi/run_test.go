@@ -109,7 +109,7 @@ func TestPiBindingAndContinuation(t *testing.T) {
 	options := harness.Options{Model: "local-llama/gpt-oss-20b", Effort: "high", MCP: map[string]string{"test": mcp.URL}}
 	start := func() *piRPC {
 		t.Helper()
-		extension, err := writeExtension(t.TempDir(), options, binding.URL)
+		extension, err := writeExtension(t.TempDir(), options, binding.URL, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,7 +185,7 @@ func TestPiBindingAndContinuation(t *testing.T) {
 	}
 	client.close(t)
 	missing := harness.Options{BackendRef: filepath.Join(home, "missing.jsonl")}
-	if err := Run(ctx, missing, "", binding.URL); err == nil {
+	if err := Run(ctx, missing, "", binding.URL, ""); err == nil {
 		t.Fatal("missing saved target started a replacement conversation")
 	}
 }
@@ -221,7 +221,7 @@ func startPiRPC(t *testing.T, ctx context.Context, workspace string, args []stri
 	return client
 }
 
-func (c *piRPC) call(t *testing.T, method string, fields map[string]any) {
+func (c *piRPC) call(t *testing.T, method string, fields map[string]any) string {
 	t.Helper()
 	if fields == nil {
 		fields = make(map[string]any)
@@ -231,10 +231,12 @@ func (c *piRPC) call(t *testing.T, method string, fields map[string]any) {
 		t.Fatal(err)
 	}
 	response, settled := false, method != "prompt"
+	message := ""
 	for c.scanner.Scan() {
 		var event struct {
 			Type, Command, Error string
 			Success              bool
+			Message              struct{ ErrorMessage string }
 		}
 		if err := json.Unmarshal(c.scanner.Bytes(), &event); err != nil {
 			t.Fatalf("invalid Pi record: %s", c.scanner.Bytes())
@@ -245,14 +247,18 @@ func (c *piRPC) call(t *testing.T, method string, fields map[string]any) {
 			}
 			response = true
 		}
+		if event.Type == "message_end" && event.Message.ErrorMessage != "" {
+			message = event.Message.ErrorMessage
+		}
 		if event.Type == "agent_settled" {
 			settled = true
 		}
 		if response && settled {
-			return
+			return message
 		}
 	}
 	t.Fatalf("Pi stopped waiting for %s: %v\n%s", method, c.scanner.Err(), c.logs.String())
+	return ""
 }
 
 func (c *piRPC) close(t *testing.T) {

@@ -49,6 +49,7 @@ type Session struct {
 	configPath                   string
 	bridge                       hostbridge.Bridge
 	broker                       *gitbroker.Broker
+	auth                         *pi.HostAuth
 	containerID                  string
 	backendCleanup               func() error
 	dindCleanup                  func() error
@@ -118,7 +119,12 @@ func (s *Session) StartTerminal(ctx context.Context, terminal Terminal) (runErr 
 	if err != nil {
 		return err
 	}
+	s.auth, err = pi.NewHostAuth()
+	if err != nil {
+		return err
+	}
 	servers = append(servers, hostbridge.Server{Path: gitbroker.HandlerPath, Handler: s.broker},
+		hostbridge.Server{Path: pi.AuthPath, Handler: s.auth},
 		hostbridge.Server{Path: "/harness/binding", Handler: sessionBinding(s.store, s.Record.ID)})
 	s.bridge, err = hostbridge.Start(servers)
 	if err != nil {
@@ -143,7 +149,8 @@ func (s *Session) StartTerminal(ctx context.Context, terminal Terminal) (runErr 
 		Env: []string{"HOST_UID=" + uid, "HOST_GID=" + gid, "PACT_VERSION=" + version.Version,
 			"PACT_GIT_NAME=" + settings.Git.Name, "PACT_GIT_EMAIL=" + settings.Git.Email,
 			"PACT_GIT_URL=" + s.bridge.AgentURL() + gitbroker.HandlerPath,
-			"PACT_BINDING_URL=" + s.bridge.AgentURL() + "/harness/binding"},
+			"PACT_BINDING_URL=" + s.bridge.AgentURL() + "/harness/binding",
+			"PACT_AUTH_URL=" + s.bridge.AgentURL() + pi.AuthPath},
 	}
 	configureStorage(s.nix, &agent)
 	bridgeConfig := s.bridge.ContainerConfig()
@@ -215,6 +222,9 @@ func (s *Session) Cleanup() error {
 	}
 	if s.bridge != nil {
 		s.cleanupErr = errors.Join(s.cleanupErr, s.bridge.Close())
+	}
+	if s.auth != nil {
+		s.auth.Close()
 	}
 	if s.broker != nil {
 		s.cleanupErr = errors.Join(s.cleanupErr, s.broker.Close())

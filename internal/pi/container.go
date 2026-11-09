@@ -13,6 +13,7 @@ import (
 )
 
 const stateDir = "/home/pact/.pi/agent"
+const authSeed = "/opt/pact/pi-auth.json"
 
 // PrepareContainer projects host credentials and model definitions into a
 // session's private Pi state. The caller owns the returned snapshot cleanup.
@@ -32,7 +33,7 @@ func PrepareContainer(config *docker.ContainerConfig, stateVolume string, option
 	}
 	config.Mounts = append(config.Mounts,
 		docker.Mount{Type: "volume", Source: stateVolume, Target: stateDir},
-		docker.Mount{Type: "bind", Source: filepath.Join(snapshots, "auth.json"), Target: stateDir + "/auth.json", ReadOnly: true},
+		docker.Mount{Type: "bind", Source: filepath.Join(snapshots, "auth.json"), Target: authSeed, ReadOnly: true},
 		docker.Mount{Type: "bind", Source: filepath.Join(snapshots, "models.json"), Target: stateDir + "/models.json", ReadOnly: true},
 	)
 	config.Env = append(config.Env, "PI_CODING_AGENT_DIR="+stateDir,

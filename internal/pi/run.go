@@ -20,7 +20,7 @@ import (
 var extension []byte
 
 // Run keeps Pi attached to the container terminal; the daemon owns the PTY.
-func Run(ctx context.Context, options harness.Options, instructions, bindingURL string) error {
+func Run(ctx context.Context, options harness.Options, instructions, bindingURL, authURL string) error {
 	// Let Pi handle terminal interrupts without also terminating its Go parent.
 	// Notify, rather than Ignore, keeps the child's SIGINT disposition intact.
 	interrupts := make(chan os.Signal, 1)
@@ -38,12 +38,24 @@ func Run(ctx context.Context, options harness.Options, instructions, bindingURL 
 			return fmt.Errorf("saved Pi session %q is not a nonempty file", options.BackendRef)
 		}
 	}
+	auth, err := os.ReadFile(authSeed)
+	if err != nil {
+		return fmt.Errorf("read Pi login snapshot: %w", err)
+	}
+	authPath := filepath.Join(stateDir, "auth.json")
+	if err := os.Remove(authPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.WriteFile(authPath, auth, 0600); err != nil {
+		return err
+	}
+
 	dir, err := os.MkdirTemp("", "pact-pi-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	path, err := writeExtension(dir, options, bindingURL)
+	path, err := writeExtension(dir, options, bindingURL, authURL)
 	if err != nil {
 		return err
 	}
@@ -64,11 +76,12 @@ func Run(ctx context.Context, options harness.Options, instructions, bindingURL 
 	return command.Run()
 }
 
-func writeExtension(dir string, options harness.Options, bindingURL string) (string, error) {
+func writeExtension(dir string, options harness.Options, bindingURL, authURL string) (string, error) {
 	data, err := json.Marshal(struct {
 		harness.Options
 		BindingURL string `json:"bindingURL"`
-	}{options, bindingURL})
+		AuthURL    string `json:"authURL"`
+	}{options, bindingURL, authURL})
 	if err != nil {
 		return "", err
 	}

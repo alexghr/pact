@@ -48,5 +48,5 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("read agent instructions: %w", err)
 	}
 
-	return pi.Run(ctx, options, string(instructions), cfg.BindingURL)
+	return pi.Run(ctx, options, string(instructions), cfg.BindingURL, cfg.AuthURL)
 }

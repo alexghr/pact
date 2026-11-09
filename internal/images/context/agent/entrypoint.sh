@@ -21,7 +21,6 @@ if [[ "$(id -u)" == "0" ]]; then
       cp /opt/pact/pi-settings.json "$PACT_AGENT_STATE_DIR/settings.json"
     fi
     chown pact:"$pact_group" "$PACT_AGENT_STATE_DIR"
-    # Host authentication and model snapshots are read-only mounts.
     shopt -s dotglob nullglob
     for entry in "$PACT_AGENT_STATE_DIR"/*; do
       if [[ "$entry" != "${PACT_AGENT_AUTH_FILE:-}" && "$entry" != "${PACT_AGENT_MODELS_FILE:-}" ]]; then

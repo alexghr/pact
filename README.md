@@ -23,9 +23,12 @@ Ctrl-C reaches Pi. Ctrl-] only disconnects the terminal.
 Configure providers on the host in `~/.pi/agent/auth.json` and
 `~/.pi/agent/models.json`. Pact snapshots these files for every new execution;
 host Pi settings, extensions, and packages are not copied. API keys and ChatGPT
-OAuth access tokens are supported. OAuth refresh tokens stay on the host;
-renew expiring credentials there, then exit Pi and run `pact resume ID` to load
-the updated snapshot.
+OAuth access tokens are supported. OpenAI renewal requires Pi 1.5 or newer
+available as `pi` on the daemon's host PATH. ChatGPT credentials renew as
+needed, including while detached; refresh tokens never enter the container.
+If renewal fails, check the host network and `pi auth check --provider openai`,
+reconnect ChatGPT using host Pi `/login` if needed, then retry in the same
+conversation. No stop/resume is required for routine OpenAI renewal.
 
 `--model` passes its value directly to Pi. For a custom provider named
 `local-llama` with a model named `gpt-oss-20b`:
