@@ -35,7 +35,7 @@ func TestRestoreTerminalModes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	socket := filepath.Join(t.TempDir(), "tmux")
-	command := func(args ...string) string {
+	command := func(t *testing.T, args ...string) string {
 		t.Helper()
 		output, err := exec.CommandContext(ctx, tmux, append([]string{"-S", socket}, args...)...).CombinedOutput()
 		if err != nil {
@@ -43,9 +43,9 @@ func TestRestoreTerminalModes(t *testing.T) {
 		}
 		return strings.TrimSpace(string(output))
 	}
-	command("-f", "/dev/null", "new-session", "-d", "-s", "test", "sleep", "60")
+	command(t, "-f", "/dev/null", "new-session", "-d", "-s", "test", "sleep", "60")
 	defer exec.Command(tmux, "-S", socket, "kill-server").Run()
-	terminal, err := os.OpenFile(command("display-message", "-p", "#{pane_tty}"), os.O_RDWR, 0)
+	terminal, err := os.OpenFile(command(t, "display-message", "-p", "#{pane_tty}"), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,30 +54,42 @@ func TestRestoreTerminalModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stty(terminal, "raw", "-echo"); err != nil {
-		t.Fatal(err)
-	}
-	awaitModes := func(want string) {
-		t.Helper()
-		ticker := time.NewTicker(10 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			got := command("display-message", "-p", "#{mouse_any_flag} #{mouse_sgr_flag} #{cursor_flag}")
-			if got == want {
-				return
+	for _, screen := range []string{"main", "alternate"} {
+		t.Run(screen, func(t *testing.T) {
+			if _, err := stty(terminal, "raw", "-echo"); err != nil {
+				t.Fatal(err)
 			}
-			select {
-			case <-ctx.Done():
-				t.Fatalf("terminal modes = %q, want %q", got, want)
-			case <-ticker.C:
+			awaitScreen := func(wantModes, wantContent string) {
+				t.Helper()
+				ticker := time.NewTicker(10 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					modes := command(t, "display-message", "-p", "#{mouse_any_flag} #{mouse_sgr_flag} #{cursor_flag} #{cursor_x} #{cursor_y}")
+					content := command(t, "capture-pane", "-p")
+					if modes == wantModes && content == wantContent {
+						return
+					}
+					select {
+					case <-ctx.Done():
+						t.Fatalf("terminal modes/content = %q / %q, want %q / %q", modes, content, wantModes, wantContent)
+					case <-ticker.C:
+					}
+				}
 			}
-		}
-	}
-	_, _ = terminal.WriteString("\x1b[?1003h\x1b[?1006h\x1b[?25l")
-	awaitModes("1 1 0")
-	restoreTerminal(terminal, saved)
-	awaitModes("0 0 1")
-	if got, err := stty(terminal, "-g"); err != nil || got != saved {
-		t.Fatalf("terminal input settings were not restored: %q, %v", got, err)
+			output := "\x1b[Hstale main screen"
+			if screen == "alternate" {
+				output += "\x1b[?1049h"
+			}
+			output += "\x1b[2J\x1b[3;1Hstale TUI\x1b[?1003h\x1b[?1006h\x1b[?25l"
+			if _, err := terminal.WriteString(output); err != nil {
+				t.Fatal(err)
+			}
+			awaitScreen("1 1 0 9 2", "stale TUI")
+			restoreTerminal(terminal, saved)
+			awaitScreen("0 0 1 0 0", "")
+			if got, err := stty(terminal, "-g"); err != nil || got != saved {
+				t.Fatalf("terminal input settings were not restored: %q, %v", got, err)
+			}
+		})
 	}
 }

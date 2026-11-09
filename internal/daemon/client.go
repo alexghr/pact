@@ -172,8 +172,10 @@ func terminalSize(terminal *os.File) docker.TerminalSize {
 
 func restoreTerminal(terminal *os.File, saved string) {
 	// stty restores input processing, but the TUI also changes emulator modes.
-	// Release mouse/focus/paste capture and restore the shell's screen/cursor.
+	// Release mouse/focus/paste capture and leave the alternate screen. Pi also
+	// renders on the main screen, so reset its scroll region and clear the
+	// visible screen before returning to the shell (without erasing scrollback).
 	_, _ = terminal.WriteString("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l" +
-		"\x1b[?1004l\x1b[?2004l\x1b[?1049l\x1b[?25h\x1b[0m")
+		"\x1b[?1004l\x1b[?2004l\x1b[?1049l\x1b[?25h\x1b[0m\x1b[r\x1b[2J\x1b[H")
 	_, _ = stty(terminal, saved)
 }
