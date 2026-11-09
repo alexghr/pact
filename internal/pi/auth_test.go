@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,11 +72,19 @@ func TestSnapshotsWithoutHostLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(snapshots) })
-	for _, name := range []string{"auth.json", "models.json"} {
-		data, err := os.ReadFile(filepath.Join(snapshots, name))
-		if err != nil || string(data) != "{}" {
-			t.Fatalf("missing %s must produce an empty snapshot: %v", name, err)
-		}
+	auth, err := os.ReadFile(filepath.Join(snapshots, "auth.json"))
+	if err != nil || string(auth) != "{}" {
+		t.Fatalf("missing login must produce empty credentials: %v", err)
+	}
+	if os.Getenv("PACT_TEST_PI") != "1" {
+		t.Skip("set PACT_TEST_PI=1 to validate missing host models with the real Pi client")
+	}
+	t.Setenv("PI_CODING_AGENT_DIR", snapshots)
+	command := exec.CommandContext(t.Context(), "pi", "--list-models")
+	command.Dir = t.TempDir()
+	output, err := command.CombinedOutput()
+	if err != nil || bytes.Contains(output, []byte("models.json")) {
+		t.Fatalf("missing host configuration caused a Pi startup error: %v\n%s", err, output)
 	}
 }
 

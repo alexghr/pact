@@ -50,7 +50,7 @@ func createSnapshots(agentDir string) (string, error) {
 	}
 	models, err := os.ReadFile(filepath.Join(agentDir, "models.json"))
 	if errors.Is(err, fs.ErrNotExist) {
-		models = []byte("{}")
+		models = []byte(`{"providers":{}}`)
 	} else if err != nil {
 		return "", fmt.Errorf("read host Pi models: %w", err)
 	}
