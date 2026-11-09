@@ -105,7 +105,7 @@ be absent at startup; an approval-required call then fails without executing.
 
 `timeoutSeconds` defaults to 60 when omitted or zero and accepts 1 through 3600.
 Config changes take effect on start or resume. With an approval service configured,
-Pact gives Codex the approval timeout plus its usual 60 seconds for MCP execution.
+Pact gives Pi the approval timeout plus 60 seconds for MCP execution.
 
 Pact's HTTP path allows this wait: the host bridge has a five-second request-header
 timeout but no request-body or response-write timeout. The approval transport has
@@ -159,7 +159,7 @@ Pact never needs access to the laptop's desktop or an agent harness approval API
     "executionId": 17,
     "title": "Fix deployment",
     "workspace": "/home/alex/work/project",
-    "backend": "codex"
+    "backend": "pi"
   },
   "call": {
     "server": "forgejo",

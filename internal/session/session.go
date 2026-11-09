@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/alexghr/pact/internal/approval"
-	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/docker"
 	"github.com/alexghr/pact/internal/gitbroker"
 	"github.com/alexghr/pact/internal/harness"
 	"github.com/alexghr/pact/internal/hostbridge"
 	"github.com/alexghr/pact/internal/images"
+	"github.com/alexghr/pact/internal/pi"
 	"github.com/alexghr/pact/internal/state"
 	"github.com/alexghr/pact/internal/version"
 )
@@ -169,7 +169,7 @@ func (s *Session) StartTerminal(ctx context.Context, terminal Terminal) (runErr 
 	for name := range settings.MCP {
 		mcp[name] = s.bridge.AgentURL() + "/mcp/" + name
 	}
-	s.backendCleanup, err = codex.PrepareContainer(&agent, s.Record.Storage.StateVolume, harness.Options{
+	s.backendCleanup, err = pi.PrepareContainer(&agent, s.Record.Storage.StateVolume, harness.Options{
 		Model: s.Record.Settings.Model, Effort: s.Record.Settings.Effort,
 		BackendRef: s.Record.BackendRef, MCP: mcp, MCPApprovalTimeoutSeconds: approvalTimeout,
 	})

@@ -24,7 +24,7 @@
           pkgs.gopls
           pkgs.docker-client
           pkgs.git
-          agents.codex
+          agents.pi
         ];
         env.GOTOOLCHAIN = "local";
 

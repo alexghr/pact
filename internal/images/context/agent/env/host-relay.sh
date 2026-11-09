@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Sourced after dropping privileges. The EXIT trap handles startup failures;
-# after exec'ing Codex, Docker tears down the relay when the container exits.
+# after exec'ing Pi, Docker tears down the relay when the container exits.
 start_host_relay() {
   local socket_path="$1" port="$2" attempt
   if [[ ! -S "$socket_path" ]]; then
@@ -10,7 +10,7 @@ start_host_relay() {
   fi
 
   pact_host_relay_log=$(mktemp "${TMPDIR:-/tmp}/pact-host-relay.XXXXXXXX.log") || return 1
-  # Forked connections can fail while Codex owns the terminal. Keep their
+  # Forked connections can fail while Pi owns the terminal. Keep their
   # diagnostics in the container; only startup failures belong on stderr.
   socat -lf "$pact_host_relay_log" "TCP4-LISTEN:$port,bind=127.0.0.1,reuseaddr,fork" \
     "UNIX-CONNECT:$socket_path" &

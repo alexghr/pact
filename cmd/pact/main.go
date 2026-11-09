@@ -127,7 +127,7 @@ func addNewSessionFlags(flags *flag.FlagSet, cfg *newSessionConfig) {
 	flags.BoolVar(&cfg.hostNet, "hostnet", false, "Run the container on the host's network")
 	flags.StringVar(&cfg.workspace, "workspace", "", "Use an existing workspace directory (default: a fresh managed workspace)")
 	flags.StringVar(&cfg.workspace, "w", "", "Alias for --workspace")
-	flags.StringVar(&cfg.model, "model", "gpt-6.1-sol", "Model to use")
+	flags.StringVar(&cfg.model, "model", "", "Pi model ID or provider/model (default: Pi's model selection)")
 	flags.StringVar(&cfg.model, "m", cfg.model, "Alias for --model")
 	flags.StringVar(&cfg.effort, "effort", "", "Reasoning effort (omit to use the model default)")
 	flags.StringVar(&cfg.effort, "e", cfg.effort, "Alias for --effort")

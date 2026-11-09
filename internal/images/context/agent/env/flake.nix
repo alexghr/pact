@@ -64,7 +64,7 @@
               start
               nix
               devenv
-              agentPackages.codex
+              agentPackages.pi
               graphenePackage
               skills
               bashInteractive

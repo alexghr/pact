@@ -41,7 +41,7 @@ Relevant integration checks are opt-in and are not enabled by `p-ci`:
 
 - Real SSH, when an unprivileged SSH daemon can run:
   `PACT_TEST_SSHD=1 ./shell go test ./internal/gitbroker -run TestGitWorkflow -count=1`
-- Docker Desktop, when its daemon and the local `pact-codex` image are available:
+- Docker Desktop, when its daemon and the local `pact-pi` image are available:
   `PACT_TEST_DOCKER=1 ./shell go test ./internal/hostbridge -run TestTCPAuthenticationAndLifetime -count=1`
 
 Use Conventional Commits. Do not use scopes. Commit body should be empty.

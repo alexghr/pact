@@ -11,7 +11,7 @@ architecture decisions for review and later task breakdown. It implements no
 new behavior and does not specify a final CLI, API, database schema, or UI.
 
 The [session management proposal](session-management.md) describes the existing
-foundation and its original roadmap. [Native Codex discovery](codex-discovery.md)
+foundation and its original roadmap. [Pi integration](pi.md)
 records the current harness integration. This proposal extends that foundation
 with managed workspaces, aggregation, private knowledge, and eventual approvals.
 
@@ -177,7 +177,7 @@ side effects after a crash.
 
 ### Native TUI handoff
 
-Keep native Codex as the interactive interface. `pact attach <N>` and
+Keep native Pi as the interactive interface. `pact attach <N>` and
 `pact resume <N>` join a live daemon session. Once an execution has ended,
 `pact resume <N>` starts another execution against the same workspace and private
 state. Command line prompted execution is currently unavailable; future
@@ -194,8 +194,8 @@ globally latest conversation. An interrupted handoff remains recoverable.
 Live attachment preserves the running execution. A handoff that restarts an
 execution preserves files and conversation history, not running processes or
 an in-memory turn. Later returning to automated execution uses the same ownership
-rules. Future live app-server attachment requires validation against the pinned
-Codex version and must retain Pact's control over writers.
+rules. Future automated attachment requires validation against the pinned
+Pi version and must retain Pact's control over writers.
 
 ## Workspace provisioning
 
@@ -413,20 +413,20 @@ it without a client-supplied token or make notification delivery depend on it.
 Generating progress requires some response-stream handling in the proxy, beyond
 merely delaying forwarding.
 
-[Official Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
-currently documents `tool_timeout_sec`, with a default of 60 seconds. Gated
-connections need an intentional waiting deadline and compatible timeout
-configuration. Progress does not promise an indefinite connection:
+The original proposal researched Codex's `tool_timeout_sec` using the
+[Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+The current Pi integration gives gated connections the approval deadline plus
+60 seconds for execution. Progress does not promise an indefinite connection:
 [MCP timeout rules](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle#timeouts)
 allow progress to reset a timeout while retaining a maximum duration.
 
 [Elicitation](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation)
 and the [MCP Tasks extension](https://tasks.extensions.modelcontextprotocol.io/)
-are candidates for richer or durable waits. The
+are candidates for richer or durable waits. The original proposal also cited the
 [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server#mcp-server-elicitation-requests)
-describes forwarding elicitation requests to its client. These protocol
-descriptions do not establish support or behavior in Pact's pinned binary,
-especially during noninteractive execution with its current approval policy.
+for forwarding elicitation requests to its client. This historical Codex
+research does not establish support or behavior in Pact's pinned Pi binary,
+especially during noninteractive execution.
 Validate capabilities, rendering/routing, cancellation, and timeouts against
 that binary before choosing a mechanism. Do not return task handles to a client
 that has not negotiated support.
@@ -502,7 +502,7 @@ Shared-repository storage and seamless live TUI attachment remain optional.
   before adding richer retrieval or indexing?
 - Which tool-name patterns cover each chosen personal-account integration, and
   how are new or ambiguous tools reviewed as integrations change?
-- What waiting duration is required, and does the pinned Codex support a suitable
+- What waiting duration is required, and does the pinned Pi support a suitable
   durable input mechanism without changing ordinary tool interfaces?
 - How should private drafts be revisited when source issues, PR heads, or target
   permissions have changed since the original investigation or review?
@@ -521,7 +521,7 @@ private artifacts survive workspace cleanup without appearing in code commits;
 and rejected, cancelled, or expired operations never reach the upstream.
 
 Use real protocol clients, sockets, temporary repositories, and the existing
-catalogue. Validate harness-dependent behavior against the pinned Codex, and
+catalogue. Validate harness-dependent behavior against the pinned Pi, and
 upstream publication behavior with suitable test accounts. Report the checks
 actually performed and the limitations of unavailable integrations. Do not
 substitute tests that merely assert schema declarations or expected tool lists.

@@ -74,7 +74,7 @@ to a fixed upstream endpoint and apply host-held credentials. Neither package
 interprets MCP. `internal/mcpproxy` inspects client messages and enforces tool
 permissions before delegating to the HTTP proxy.
 `internal/session/mcp.go` adapts MCP configuration into these handlers; the
-launcher advertises only configured MCP servers to Codex. The Git broker uses
+launcher advertises only configured MCP servers to Pi. The Git broker uses
 the same bridge as an ordinary HTTP handler.
 
 Configured MCP servers use `/mcp/<name>`. Container helpers use `/harness/git`
@@ -91,8 +91,8 @@ route. The internal relay script is `host-relay.sh`.
 
 On Linux, each run creates a private Unix socket under `/tmp/pact-mcp-*` and mounts only
 that socket into the container, read-only. A `socat` relay runs as the agent user
-on container loopback port 8765. Pact supplies invocation-only Codex MCP URLs;
-it does not write these registrations into the persistent Codex configuration.
+on container loopback port 8765. Pact's invocation-specific Pi extension registers
+the MCP URLs without writing persistent Pi configuration.
 The host listener and active requests close when the run ends, and the container
 owns the relay's lifetime.
 

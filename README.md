@@ -1,6 +1,7 @@
 # Pact
 
-Pact is an agent isolation solution using your existing ChatGPT subscription. 
+Pact runs the [Pi coding agent](https://pi.dev) in isolated containers, using
+your host Pi credentials and custom models.
 
 ## Running sessions
 
@@ -17,7 +18,26 @@ Build with `./shell p-build`, then run `./pact daemon` in a separate terminal
 `pact start` is an alias for starting a new session. Both accept workspace, model,
 effort, config, DinD and host-network flags. Enter prompts in the native TUI;
 `--prompt` and `-p` are unavailable.
-Ctrl-C reaches Codex. Ctrl-] only disconnects the terminal.
+Ctrl-C reaches Pi. Ctrl-] only disconnects the terminal.
+
+Configure providers on the host in `~/.pi/agent/auth.json` and
+`~/.pi/agent/models.json`. Pact snapshots these files for every new execution;
+host Pi settings, extensions, and packages are not copied. API keys and ChatGPT
+OAuth access tokens are supported. OAuth refresh tokens stay on the host;
+renew expiring credentials there, then exit Pi and run `pact resume ID` to load
+the updated snapshot.
+
+`--model` passes its value directly to Pi. For a custom provider named
+`local-llama` with a model named `gpt-oss-20b`:
+
+```sh
+./pact --model local-llama/gpt-oss-20b --hostnet
+```
+
+`--hostnet` lets Pi reach a model server bound to host loopback, such as
+`http://127.0.0.1:8080/v1`. Docker Desktop requires host networking to be enabled.
+Omit `--model` to use Pi's model selection. See [Pi integration](docs/pi.md)
+for configuration and credential lifetime details.
 
 The daemon keeps live sessions in memory and replays up to 1 MiB of raw
 terminal output on attachment. Screen restoration, especially after a resize,
@@ -69,16 +89,19 @@ A Pact session binds once to the agent's initial native conversation. Run
 from any directory, or `pact resume 42` to select a session. If it is still running, resume reattaches
 to its native TUI. Otherwise, it starts a new execution using its saved model,
 reasoning effort, Docker-in-Docker and host-network capabilities, workspace, and
-private state. New executions use current host configuration for Git and MCP;
+private state. New executions use current host configuration for Pi, Git and MCP;
 `--config PATH` selects another config file with matching storage locations.
 Live reattachment keeps the execution's existing configuration. Use `pact resume 42 -d` to resume
 without attaching, then enter follow-up prompts after attaching.
 
-Codex is currently the supported backend. Native `/new` and `/resume` navigation
+Pi is the supported backend. Native `/new` and `/resume` navigation
 does not change the Pact session's saved backend reference. Pact does not list
 native threads or select the most recently used native conversation. A session
 with no backend reference starts its first conversation on its next run. An
 unavailable saved conversation causes a native resume error.
+
+Sessions created with Codex cannot resume through Pi. Start a new session with
+`pact -w PATH` to reuse their workspace files.
 
 The daemon records execution outcomes and removes temporary agent/DinD
 containers and socket volumes on exit or handled cancellation. Shared Nix
@@ -94,17 +117,17 @@ The container includes [Graphene](https://github.com/alexghr/graphene) and its
 in `internal/images/context/agent/env/flake.lock`.
 
 Bundled skills are listed in `internal/images/context/agent/env/flake.nix` and exposed through
-`/etc/codex/skills`. To add or remove one, edit the `skills` list (and add any
+`/etc/pi/skills`. To add or remove one, edit the `skills` list (and add any
 required tools to `pact-tools`), then rebuild the launcher with `./shell p-build`.
 Each agent starts in a Nix shell using its pinned toolset. Sessions share cached
 package outputs, while each container keeps its own tools and skills. Tool updates
 apply to newly started containers and do not change the daemon image.
 
 Project skills in `.agents/skills` inside the Git clone remain available through
-Codex's normal skill discovery.
+Pi's normal skill discovery.
 
 To review a PR, start `pact` and enter
-`Use $review-pr to review https://forge.example.com/team/project/pulls/123`.
+`Use the review-pr skill to review https://forge.example.com/team/project/pulls/123`.
 The bundled review skills use the target repository's review policy. Include
 “publish findings” to post a review through your configured forge connection.
 See [code review](docs/code-review.md) for policy setup and review behavior.

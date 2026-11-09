@@ -4,7 +4,7 @@ Start `pact`, then enter a PR URL and the bundled `review-pr` skill in the nativ
 TUI:
 
 ```text
-Use $review-pr to review https://forge.alexghr.me/ag/pact/pulls/125
+Use the review-pr skill to review https://forge.alexghr.me/ag/pact/pulls/125
 ```
 
 Add “publish findings” to authorize posting the review. Issue creation is a
@@ -21,7 +21,7 @@ publication. It starts in empty workspaces as well as existing clones.
 `review-design`, `review-tests`, and
 `review-docs` supply reusable investigation methods. These bundled skills live
 under `internal/images/context/agent/env/skills/` and are exposed through the
-existing `/etc/codex/skills` mechanism.
+existing `/etc/pi/skills` mechanism.
 
 Repository conventions and learned patterns focus investigations. Point to a
 review skill from the repository's `AGENTS.md`, and keep its references under

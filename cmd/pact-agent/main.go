@@ -11,9 +11,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/alexghr/pact/internal/codex"
 	"github.com/alexghr/pact/internal/config"
 	"github.com/alexghr/pact/internal/harness"
+	"github.com/alexghr/pact/internal/pi"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	if len(args) != 2 || args[0] != "codex" {
+	if len(args) != 2 || args[0] != "pi" {
 		return fmt.Errorf("expected backend and JSON launch options")
 	}
 
@@ -48,7 +48,5 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("read agent instructions: %w", err)
 	}
 
-	return codex.Run(ctx, options, string(instructions), func(ctx context.Context, ref string) error {
-		return harness.PublishBinding(ctx, cfg.BindingURL, ref)
-	})
+	return pi.Run(ctx, options, string(instructions), cfg.BindingURL)
 }

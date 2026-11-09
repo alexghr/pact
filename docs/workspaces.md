@@ -3,7 +3,7 @@
 `pact` and `pact start` allocate a new empty
 directory under the configured `workspaceRoot`, defaulting to
 `~/.local/state/pact/workspaces` (`$XDG_STATE_HOME/pact/workspaces` when set). Each launch
-gets its own directory and private Codex state volume. The client prints the session ID; use
+gets its own directory and private Pi state volume. The client prints the session ID; use
 `pact sessions show ID` to find its workspace and `pact resume ID` to return to it.
 
 For a fresh managed session, only its directory is mounted as

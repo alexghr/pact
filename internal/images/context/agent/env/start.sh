@@ -6,7 +6,7 @@ hostRelay=$2
 gitIdentity=$3
 shift 3
 
-ln -sfn "$skills" /etc/codex/skills
+ln -sfn "$skills" /etc/pi/skills
 
 if [[ -n "${PACT_MCP_SOCKET:-}" ]]; then
   source "$hostRelay"

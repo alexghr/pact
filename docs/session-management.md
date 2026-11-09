@@ -83,10 +83,10 @@ native conversation reference; the catalogue saves it once. Later reports cannot
 change the binding or choose another Pact session. The bridge handler is bound
 to the host-selected session ID; the container supplies only an opaque reference.
 
-For Codex, the adapter observes the first globally broadcast active-thread
-status after user input. Empty TUI threads do not become resume targets. Later
-native `/new` or `/resume` navigation stays within Codex and leaves Pact's binding
-unchanged. See [Codex integration](codex-discovery.md).
+For Pi, an invocation-specific extension reports the first durable session
+file. Empty conversations do not become resume targets. Later native `/new`,
+`/resume`, or `/reload` navigation leaves Pact's binding unchanged.
+See [Pi integration](pi.md).
 
 `pact resume [ID]` resumes the stored reference. Omitting the ID selects the Pact
 session with the most recently started execution across all workspaces, ordered
@@ -114,10 +114,10 @@ been removed.
 - `internal/state`: SQLite connections, migrations, transactions, and record
   queries/updates for sessions, workspaces, storage, executions, and bindings.
   It does not inspect paths or manage directories.
-- `internal/harness`: Pact-owned launch intent, binding payload, and binding
-  publication. Native protocol shapes stay inside the backend adapter.
-- `internal/codex`: native state/authentication mounts, login projection, CLI
-  invocation, interactive supervision/resume preparation, and binding observation.
+- `internal/harness`: Pact-owned launch intent and binding payload.
+  Native protocol shapes stay inside the backend adapter.
+- `internal/pi`: native state/configuration mounts, login projection, CLI
+  invocation, MCP registration, and binding publication through a Pi extension.
   It does not import the catalogue.
 - `internal/hostbridge`: private HTTP transport, routing, access control, and
   listener lifetime. It does not interpret backend payloads.
@@ -132,9 +132,11 @@ root paths; it has no independent lifecycle. Old physical root paths retain the
 
 ## Authentication and boundaries
 
-The host login snapshot includes only native ChatGPT login fields, with the
-refresh token cleared. Its owner-only temporary file is mounted read-only over
-the private native state volume. Session cleanup removes the host copy.
+Host Pi authentication and model snapshots are mounted read-only over the
+private native state volume. API keys and OAuth access tokens are projected;
+OAuth refresh tokens stay on the host. Native expiry checks remain active, so
+renew expiring credentials on the host and start another execution to load them.
+Session cleanup removes the owner-only temporary snapshots.
 Git private keys and upstream MCP credentials remain on the host behind the
 bridge. The Nix daemon has no workspace, private agent state, or credential mounts.
 DinD shares only the workspace and its private socket volume.
@@ -156,10 +158,13 @@ become `settings.capabilities.dind` and `settings.capabilities.hostNetwork`.
 The obsolete environment repair/GC commands have been removed; session startup
 prepares its retained resources. Orphaned resources require manual removal.
 
-Run `./shell p-ci` for formatting, vet, tests, and launcher builds. Native Codex
-checks are opt-in: `PACT_TEST_CODEX=1 ./shell go test ./internal/codex -count=1`.
-They use real subprocesses with an unavailable loopback provider, without
-credentials or model requests. `PACT_CODEX_BINARY` selects a particular binary.
+Codex sessions remain in the catalogue but cannot resume with Pi. Start a new
+Pi session with `pact -w PATH` to reuse their workspace files.
+
+Run `./shell p-ci` for formatting, vet, tests, and launcher builds. Native Pi
+checks are opt-in: `PACT_TEST_PI=1 ./shell go test ./internal/pi -count=1`.
+They use real subprocesses and a local completion protocol endpoint without
+host credentials or a real model service.
 Docker/Nix checks remain opt-in under `PACT_TEST_DOCKER=1`; the storage scenario
 now lives in `internal/session`.
 

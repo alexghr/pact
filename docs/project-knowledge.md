@@ -158,7 +158,7 @@ knowledge model.
 Enable the experiment with an explicit Pact context setting. When enabled:
 
 1. Resolve the catalogue workspace and acquire the existing execution ownership.
-2. Start the scoped bridge and container. Before launching Codex, run the local
+2. Start the scoped bridge and container. Before launching Pi, run the local
    scanner to refresh the structural index against the mounted working tree.
 3. Supply a small, fixed startup instruction telling the agent to run
    `pact-context boot` before repository work. That command returns global

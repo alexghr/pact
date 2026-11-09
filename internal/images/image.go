@@ -20,7 +20,7 @@ var (
 )
 
 const (
-	agentImage = "pact-codex"
+	agentImage = "pact-pi"
 	nixImage   = "pact-nix"
 )
 

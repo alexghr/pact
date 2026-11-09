@@ -1,6 +1,6 @@
 # Build from the repository root:
 #   ./shell p-harness-build
-#   docker build --tag pact-codex internal/images/context/agent
+#   docker build --tag pact-pi internal/images/context/agent
 FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 ARG TARGETARCH
@@ -12,7 +12,7 @@ RUN apt-get update && \
     mkdir -p /home/pact/workspace /opt/pact /etc/nix && \
     chown pact:pact /home/pact/workspace
 
-RUN mkdir -p /etc/codex
+RUN mkdir -p /etc/pi
 # Both commands use cmd/git-client; argv[0] selects transport or signing.
 COPY --chmod=0755 bin/pact-git-client-linux-${TARGETARCH} /usr/local/bin/pact-git-sign
 RUN ln -s pact-git-sign /usr/local/bin/pact-git-ssh

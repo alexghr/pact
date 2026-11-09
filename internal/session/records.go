@@ -17,9 +17,9 @@ import (
 // createRecord records resource identities before allocating a managed workspace.
 func createRecord(ctx context.Context, store *state.Store, workspaceRoot string, options Options) (state.Session, error) {
 	if options.Backend == "" {
-		options.Backend = "codex"
+		options.Backend = "pi"
 	}
-	if options.Backend != "codex" {
+	if options.Backend != "pi" {
 		return state.Session{}, fmt.Errorf("unsupported backend %q", options.Backend)
 	}
 	workspace := state.Workspace{Owner: "uid:" + strconv.Itoa(os.Getuid()), Managed: options.Workspace == "", Status: "ready"}
@@ -69,7 +69,7 @@ func restoreRecord(ctx context.Context, store *state.Store, id int64) (state.Ses
 	if err != nil {
 		return state.Session{}, err
 	}
-	if record.Backend != "codex" {
+	if record.Backend != "pi" {
 		return state.Session{}, fmt.Errorf("unsupported backend %q", record.Backend)
 	}
 	workspace, err := store.Workspace(ctx, record.WorkspaceID)

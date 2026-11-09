@@ -24,7 +24,7 @@ func TestResumeSelectsLiveOrSavedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	saved, err := store.CreateSession(t.Context(), state.Workspace{Path: t.TempDir(), Status: "ready"}, state.Session{Backend: "codex"})
+	saved, err := store.CreateSession(t.Context(), state.Workspace{Path: t.TempDir(), Status: "ready"}, state.Session{Backend: "pi"})
 	if err != nil {
 		t.Fatal(err)
 	}

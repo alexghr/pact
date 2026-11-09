@@ -8,7 +8,7 @@ import (
 func createSession(t *testing.T, store *Store, path string) Session {
 	t.Helper()
 	record, err := store.CreateSession(t.Context(), Workspace{Path: path, Owner: "operator", Status: "ready"},
-		Session{Backend: "codex", Storage: Storage{Key: rand.Text(), StateVolume: "private"}})
+		Session{Backend: "pi", Storage: Storage{Key: rand.Text(), StateVolume: "private"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestSessionAllocation(t *testing.T) {
 		go func() {
 			<-start
 			record, err := store.CreateSession(t.Context(), Workspace{Path: workspace, Owner: "operator", Status: "ready"},
-				Session{Backend: "codex", Storage: Storage{Key: rand.Text()}})
+				Session{Backend: "pi", Storage: Storage{Key: rand.Text()}})
 			results <- result{record, err}
 		}()
 	}

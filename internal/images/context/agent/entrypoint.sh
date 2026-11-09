@@ -14,14 +14,14 @@ if [[ "$(id -u)" == "0" ]]; then
   fi
 
   pact_group="$(id --group --name pact)"
-  chown pact:"$pact_group" /home/pact /etc/codex
+  chown pact:"$pact_group" /home/pact /etc/pi
   if [[ -n "${PACT_AGENT_STATE_DIR:-}" ]]; then
     mkdir -p "$PACT_AGENT_STATE_DIR"
     chown pact:"$pact_group" "$PACT_AGENT_STATE_DIR"
-    # The adapter's authentication file is a read-only host mount.
+    # Host authentication and model snapshots are read-only mounts.
     shopt -s dotglob nullglob
     for entry in "$PACT_AGENT_STATE_DIR"/*; do
-      if [[ "$entry" != "${PACT_AGENT_AUTH_FILE:-}" ]]; then
+      if [[ "$entry" != "${PACT_AGENT_AUTH_FILE:-}" && "$entry" != "${PACT_AGENT_MODELS_FILE:-}" ]]; then
         chown -R pact:"$pact_group" "$entry"
       fi
     done

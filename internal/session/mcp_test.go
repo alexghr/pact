@@ -244,7 +244,7 @@ func TestMCPApprovals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := approval.Session{ID: 42, Key: "session-key", ExecutionID: 17, Title: "Fix deployment", Workspace: t.TempDir(), Backend: "codex"}
+	session := approval.Session{ID: 42, Key: "session-key", ExecutionID: 17, Title: "Fix deployment", Workspace: t.TempDir(), Backend: "pi"}
 	newProxy := func(settings config.Approvals) http.Handler {
 		t.Helper()
 		client, err := approval.New(settings, session)

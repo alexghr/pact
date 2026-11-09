@@ -70,23 +70,26 @@ func TestSharedStorage(t *testing.T) {
 	}
 	client := func(env state.Storage, script string) (string, error) {
 		config := docker.ContainerConfig{Image: image, Remove: true,
-			Mounts: []docker.Mount{{Type: "volume", Source: env.StateVolume, Target: "/home/pact/.codex"}},
+			Mounts: []docker.Mount{{Type: "volume", Source: env.StateVolume, Target: "/home/pact/.pi/agent"}},
 			Env: []string{"HOST_UID=" + strconv.Itoa(os.Getuid()), "HOST_GID=" + strconv.Itoa(os.Getgid()),
-				"PACT_AGENT_STATE_DIR=/home/pact/.codex", "PACT_TEST_STATE=" + env.Key},
+				"PACT_AGENT_STATE_DIR=/home/pact/.pi/agent", "PACT_TEST_STATE=" + env.Key},
 			Command: []string{"bash", "-euc", script},
 		}
 		configureStorage(nix, &config)
-		var output strings.Builder
-		err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &output})
+		var output, diagnostics strings.Builder
+		err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &diagnostics})
+		if err != nil {
+			err = fmt.Errorf("%w: %s", err, diagnostics.String())
+		}
 		return strings.TrimSpace(output.String()), err
 	}
 	build := `
-if test -e /home/pact/.codex/history; then
-  test "$(cat /home/pact/.codex/history)" = "$PACT_TEST_STATE"
+if test -e /home/pact/.pi/agent/history; then
+  test "$(cat /home/pact/.pi/agent/history)" = "$PACT_TEST_STATE"
 fi
-printf '%s' "$PACT_TEST_STATE" > /home/pact/.codex/history
-test -r /etc/codex/skills/graphene-stacked-prs/SKILL.md
-codex --version >&2
+printf '%s' "$PACT_TEST_STATE" > /home/pact/.pi/agent/history
+test -r /etc/pi/skills/graphene-stacked-prs/SKILL.md
+pi --version >&2
 if touch /nix/store/forbidden 2>/dev/null; then exit 1; fi
 if touch /nix/var/nix/gcroots/forbidden 2>/dev/null; then exit 1; fi
 export PACT_TEST_TOOLS="$(dirname "$(dirname "$(command -v bash)")")"
@@ -190,7 +193,7 @@ nix build --impure --file default.nix --no-link --print-out-paths
 		if err := prepare(env); err != nil {
 			t.Fatalf("missing shared cache was not recreated: %v", err)
 		}
-		if _, err := client(env, `test "$(cat /home/pact/.codex/history)" = "$PACT_TEST_STATE"; codex --version`); err != nil {
+		if _, err := client(env, `test "$(cat /home/pact/.pi/agent/history)" = "$PACT_TEST_STATE"; pi --version`); err != nil {
 			t.Fatalf("cache recovery lost private state or tools: %v", err)
 		}
 		if _, err := client(env, build); err != nil {
