@@ -13,6 +13,7 @@ jobs:
     env:
       DEVENV_PROFILE: ci
       PACT_CI_BASE: ${{ forgejo.event.pull_request.base.sha || forgejo.event.before }}
+      CI: 1
     outputs:
       outcome: ${{ steps.checks.outcome }}
       checks: ${{ steps.report.outputs.checks }}

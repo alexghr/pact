@@ -66,9 +66,7 @@
         pkgs.openssh
         pkgs.socat
       ];
-      exec = ''
-        go test ./...
-      '';
+      exec = builtins.readFile ./test.sh;
     };
 
     p-lint = {
