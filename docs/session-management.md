@@ -162,11 +162,10 @@ Codex sessions remain in the catalogue but cannot resume with Pi. Start a new
 Pi session with `pact -w PATH` to reuse their workspace files.
 
 Run `./shell p-ci` for formatting, vet, tests, and launcher builds. Native Pi
-checks are opt-in: `PACT_TEST_PI=1 ./shell go test ./internal/pi -count=1`.
-They use real subprocesses and a local completion protocol endpoint without
-host credentials or a real model service.
-Docker/Nix checks remain opt-in under `PACT_TEST_DOCKER=1`; the storage scenario
-now lives in `internal/session`.
+checks run as part of the suite using real subprocesses and a local completion
+protocol endpoint without host credentials or a real model service.
+The suite does not require a Docker daemon; container lifecycle and shared Nix
+storage still require separate live validation.
 
 Future backends implement the native startup, identity capture, and resume
 mapping for this lifecycle. Additional backend interfaces or capabilities should

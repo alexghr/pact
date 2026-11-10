@@ -20,7 +20,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,9 +35,6 @@ import (
 // Real pinned Pi processes, native refresh/persistence/locking, and the shipped
 // Unix bridge/relay. Only OAuth and completion HTTP endpoints are synthetic.
 func TestLiveOAuthRenewal(t *testing.T) {
-	if os.Getenv("PACT_TEST_PI") != "1" || runtime.GOOS != "linux" {
-		t.Skip("set PACT_TEST_PI=1 on Linux for native OAuth over the Unix bridge")
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	var exchanges, failure atomic.Int32

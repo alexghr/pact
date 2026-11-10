@@ -92,8 +92,8 @@ Retire old resources manually after the sessions using them have stopped.
 
 ## Validation
 
-`PACT_TEST_DOCKER=1 ./shell go test ./internal/session -run TestSharedStorage -count=1`
-uses disposable real Docker volumes and embedded images. It checks initial and
-nested Nix shells, source builds through the daemon, shared package reuse,
-private state, read-only store mounts, daemon compatibility, and rebuilding a
-deleted package cache. It removes only its own disposable resources.
+The CI suite does not run Docker/Nix storage integration checks. Validate live
+storage changes with disposable Docker volumes: check initial and nested Nix
+shells, source builds through the daemon, shared package reuse, private state,
+read-only store mounts, daemon compatibility, and rebuilding a deleted package
+cache. Remove only the disposable resources created for validation.

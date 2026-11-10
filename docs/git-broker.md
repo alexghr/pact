@@ -201,9 +201,5 @@ live updates, empty lists and connection failures. The Git workflow also checks
 that host config edits grant and revoke transport access, rotate keys and
 known-hosts paths, and change the signing identity without a broker restart.
 Invalid Git config must fail without starting a host process.
-Tests do not require a privileged SSH daemon.
-
-On a host where an unprivileged OpenSSH daemon can run,
-`PACT_TEST_SSHD=1 ./shell go test ./internal/gitbroker -run TestGitWorkflow -count=1`
-runs the same workflow over real SSH and verifies rejection of an unknown host
-key. The temporary daemon listens only on loopback and uses generated test keys.
+Real SSH authentication and host-key checks require separate live validation;
+the suite does not start an SSH daemon.

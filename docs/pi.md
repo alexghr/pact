@@ -97,12 +97,11 @@ The container toolset is pinned in
 
 ## Validation
 
-Run `./shell p-ci` for the normal checks.
-`PACT_TEST_PI=1 ./shell go test ./internal/pi -count=1` additionally exercises
-the pinned Pi 1.5 client against local protocol endpoints, without real host
-credentials. It covers custom models, initial binding, native navigation, and
-saved conversation continuation. On Linux it also runs two live Pi processes
-through the actual Unix host bridge and shipped relay, with native host OAuth
+Run `./shell p-ci` for all checks, including the pinned Pi 1.5 client against
+local protocol endpoints without real host credentials. It covers custom models,
+initial binding, native navigation, and saved conversation continuation. On Linux
+it also runs two live Pi processes through the actual Unix host bridge and
+shipped relay, with native host OAuth
 renewal against a minimal HTTPS token endpoint. It checks cross-process refresh
 coordination, rotated-credential persistence, access-only delivery through native
 request authentication, delayed replies, exhausted validity, bounded failure and

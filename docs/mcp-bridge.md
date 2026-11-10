@@ -127,5 +127,6 @@ Then run `./pact -w /path/to/workspace -p 'Use example to perform a read-only op
 with an appropriate tool request. After each run, check that its container has
 exited and its `/tmp/pact-mcp-*` socket directory has been removed.
 
-To check TCP connectivity through Docker Desktop using the built Pact image, run
-`PACT_TEST_DOCKER=1 ./shell go test ./internal/hostbridge -run TestTCPAuthenticationAndLifetime`.
+The suite checks TCP bridge authentication and shutdown over host loopback.
+Container-to-host TCP connectivity through Docker Desktop requires separate live
+validation.

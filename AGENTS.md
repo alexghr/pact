@@ -37,12 +37,12 @@ Checks own their policy and diagnostics. The shared exit-code contract is
 and captures non-success output as the reason; keep it free of check-specific
 decisions and messages.
 
-Relevant integration checks are opt-in and are not enabled by `p-ci`:
-
-- Real SSH, when an unprivileged SSH daemon can run:
-  `PACT_TEST_SSHD=1 ./shell go test ./internal/gitbroker -run TestGitWorkflow -count=1`
-- Docker Desktop, when its daemon and the local `pact-pi` image are available:
-  `PACT_TEST_DOCKER=1 ./shell go test ./internal/hostbridge -run TestTCPAuthenticationAndLifetime -count=1`
+`p-test` uses Go's test cache locally and in CI. When `CI` is nonempty, it
+rejects output containing `SKIP`. Its Nix dependencies include Pi, OpenSSH,
+socat, and tmux so native-client, Git, bridge, and terminal checks run in CI
+without opt-ins. The Unix-bridge OAuth test runs on Linux.
+Tests that require a Docker daemon are not part of the suite; do not add
+optional tests that CI cannot run.
 
 Use Conventional Commits. Do not use scopes. Commit body should be empty.
 Commit titles should be concise.
@@ -128,8 +128,8 @@ Before adding a test:
   a distinct failure. Keep fixtures, helpers, and case tables small.
 - Use `t.TempDir`, `t.Cleanup`, and `t.Context` where appropriate.
   Synchronize on events or readiness; avoid fixed sleeps.
-- Report validation actually performed, including skipped integration
-  checks and their limitations.
+- Report validation actually performed and any limitations. All retained tests
+  must run in CI; remove tests that cannot run there instead of skipping them.
 
 ## Project conventions
 

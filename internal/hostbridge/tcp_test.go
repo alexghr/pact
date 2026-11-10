@@ -1,18 +1,11 @@
 package hostbridge
 
 import (
-	"bytes"
-	"context"
 	"net/http"
 	"net/url"
-	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/alexghr/pact/internal/docker"
-	"github.com/alexghr/pact/internal/images"
 )
 
 func TestTCPAuthenticationAndLifetime(t *testing.T) {
@@ -68,29 +61,6 @@ func TestTCPAuthenticationAndLifetime(t *testing.T) {
 	}
 	if calls.Load() != int32(len(endpoints)) {
 		t.Fatalf("handler called %d times", calls.Load())
-	}
-	// Opt in when a local Docker Desktop daemon and the Pact image are available.
-	if os.Getenv("PACT_TEST_DOCKER") == "1" {
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
-		defer cancel()
-		image, err := images.BuildAgentImage(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		target, err := url.Parse(bridge.AgentURL() + "/mcp/example")
-		if err != nil {
-			t.Fatal(err)
-		}
-		config := docker.ContainerConfig{Image: image, Remove: true, Entrypoint: "/bin/bash",
-			Command: []string{"-ec", `exec 3<>/dev/tcp/"$1"/"$2"
-printf 'GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n' "$3" "$1" >&3
-IFS= read -r status <&3
-[[ "$status" == 'HTTP/1.1 204 '* ]] || { printf '%s\n' "$status"; exit 1; }
-`, "bridge-check", target.Hostname(), target.Port(), target.RequestURI()}}
-		var output bytes.Buffer
-		if err := docker.RunContainer(ctx, config, docker.Streams{Stdout: &output, Stderr: &output}); err != nil {
-			t.Fatalf("Docker Desktop bridge: %v: %s", err, strings.ReplaceAll(output.String(), base.Path, "/<token>"))
-		}
 	}
 	if err := bridge.Close(); err != nil {
 		t.Fatal(err)

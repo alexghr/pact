@@ -1,4 +1,12 @@
-{ pkgs, lib, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  ...
+}:
+let
+  agents = import inputs.agents { inherit pkgs; };
+in
 {
   scripts = {
     p-fmt = {
@@ -65,6 +73,8 @@
         pkgs.git
         pkgs.openssh
         pkgs.socat
+        pkgs.tmux
+        agents.pi
       ];
       exec = builtins.readFile ./test.sh;
     };

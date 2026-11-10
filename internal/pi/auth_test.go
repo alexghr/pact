@@ -76,9 +76,6 @@ func TestSnapshotsWithoutHostLogin(t *testing.T) {
 	if err != nil || string(auth) != "{}" {
 		t.Fatalf("missing login must produce empty credentials: %v", err)
 	}
-	if os.Getenv("PACT_TEST_PI") != "1" {
-		t.Skip("set PACT_TEST_PI=1 to validate missing host models with the real Pi client")
-	}
 	t.Setenv("PI_CODING_AGENT_DIR", snapshots)
 	command := exec.CommandContext(t.Context(), "pi", "--list-models")
 	command.Dir = t.TempDir()

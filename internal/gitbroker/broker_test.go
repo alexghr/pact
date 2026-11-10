@@ -6,13 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -183,8 +181,8 @@ func testGitWorkflow(t *testing.T, suffix string) {
 		t.Fatal(err)
 	}
 
-	// Run real Git wire services against a separate bare repository. The SSH
-	// fixture replaces only the network hop, so this test needs no privileged sshd.
+	// Run real Git wire services against a separate bare repository.
+	// The fixture connects the broker directly to those services without SSH.
 	git, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatal(err)
@@ -202,11 +200,7 @@ func testGitWorkflow(t *testing.T, suffix string) {
 		"  \"git-receive-pack '/team/repo"+suffix+"'\") exec '"+git+"' receive-pack '"+remoteDir+"';;\n"+
 		"  *) exit 99;;\nesac\n", 0700)
 	remoteURL := "ssh://git@forge.test:2222/team/repo"
-	if os.Getenv("PACT_TEST_SSHD") == "1" {
-		remoteURL = startSSHD(t, cfg, fixture)
-	} else {
-		b.ssh = fixture
-	}
+	b.ssh = fixture
 
 	// Exercise the production bridge and the container's Unix-to-HTTP relay.
 	bridge, err := hostbridge.Start([]hostbridge.Server{{Path: HandlerPath, Handler: b}})
@@ -294,15 +288,8 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	}
 	// Rotate all credential settings without restarting the broker. The old
 	// identity must stop signing, and the new key must sign and authenticate.
-	oldKey := cfg.SSHKey
 	cfg.SSHKey = filepath.Join(host, "rotated-key")
 	runCommand(t, host, nil, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", cfg.SSHKey)
-	publicKey, err := os.ReadFile(cfg.SSHKey + ".pub")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The real sshd fixture reads its authorized key from this original path.
-	writeFile(t, oldKey+".pub", string(publicKey), 0600)
 	hosts, err := os.ReadFile(cfg.KnownHosts)
 	if err != nil {
 		t.Fatal(err)
@@ -332,14 +319,6 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	gitRun(checkout, "push", "origin", "main")
 	gitRun(second, "fetch", "origin")
 	gitRun(second, "verify-commit", "origin/main")
-	if os.Getenv("PACT_TEST_SSHD") == "1" {
-		writeFile(t, cfg.KnownHosts, "", 0600)
-		cmd = exec.Command(bash, "-ec", "source \"$1\"; git ls-remote origin", "git", script)
-		cmd.Dir, cmd.Env = checkout, env
-		if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "Host key verification failed") {
-			t.Fatalf("unknown SSH host was not rejected: %v, %s", err, output)
-		}
-	}
 	cfg.AllowedRemotes = nil
 	writeConfig(t, b.configPath, cfg)
 	denied(checkout, "fetch", "origin")
@@ -355,69 +334,6 @@ func testGitWorkflow(t *testing.T, suffix string) {
 	if err := cmd.Run(); err == nil {
 		t.Fatal("signing succeeded after bridge revocation")
 	}
-}
-
-// Opt-in real SSH authentication/host-key smoke test. The regular suite uses
-// the same Git services without depending on sshd's platform privilege setup.
-func startSSHD(t *testing.T, cfg config.Git, service string) string {
-	t.Helper()
-	host := filepath.Dir(cfg.SSHKey)
-	hostKey := filepath.Join(host, "server-key")
-	runCommand(t, host, nil, "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", hostKey)
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	publicKey, err := os.ReadFile(hostKey + ".pub")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, cfg.KnownHosts, fmt.Sprintf("[127.0.0.1]:%d %s", port, publicKey), 0600)
-	path := filepath.Join(host, "sshd_config")
-	writeFile(t, path, fmt.Sprintf(`ListenAddress 127.0.0.1
-Port %d
-HostKey %s
-AuthorizedKeysFile %s.pub
-StrictModes no
-UsePAM no
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PidFile %s/pid
-ForceCommand %s
-`, port, hostKey, cfg.SSHKey, host, service), 0600)
-	sshd, err := exec.LookPath("sshd")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, sshd, "-D", "-e", "-f", path)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
-	cmd.WaitDelay = time.Second
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cancel(); _ = cmd.Wait() })
-	for deadline := time.Now().Add(5 * time.Second); ; {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("test sshd did not start")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	current, err := user.Current()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return fmt.Sprintf("ssh://%s@127.0.0.1:%d/team/repo", current.Username, port)
 }
 
 func TestTransportCancellation(t *testing.T) {

@@ -22,9 +22,6 @@ import (
 // Exercise the pinned native client, including persistence and extension reloads,
 // without credentials or a model service. The endpoint speaks only completion SSE.
 func TestPiBindingAndContinuation(t *testing.T) {
-	if os.Getenv("PACT_TEST_PI") != "1" {
-		t.Skip("set PACT_TEST_PI=1 for the real Pi integration")
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 	requests := make(chan []byte, 8)

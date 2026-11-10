@@ -30,7 +30,7 @@ func TestMissingDaemonHint(t *testing.T) {
 func TestRestoreTerminalModes(t *testing.T) {
 	tmux, err := exec.LookPath("tmux")
 	if err != nil {
-		t.Skip("tmux is required to check actual terminal modes")
+		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
