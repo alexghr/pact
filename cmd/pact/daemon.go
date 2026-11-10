@@ -17,6 +17,7 @@ import (
 type startConfig struct {
 	newSessionConfig
 	detach bool
+	prompt string
 }
 
 func serveDaemon(ctx context.Context, args []string, hostCfg config.HostConfig) error {
@@ -44,7 +45,7 @@ func startSession(ctx context.Context, cfg startConfig, configPath string) error
 		return err
 	}
 	return daemon.Start(ctx, session.Options{
-		Workspace: workspace, Title: "Interactive session", Model: cfg.model, Effort: cfg.effort,
+		Workspace: workspace, Title: "Interactive session", Model: cfg.model, Effort: cfg.effort, Prompt: cfg.prompt,
 		ConfigPath: configPath, Capabilities: session.Capabilities{DIND: cfg.dind, HostNetwork: cfg.hostNet},
 	}, cfg.detach)
 }
@@ -52,6 +53,8 @@ func startSession(ctx context.Context, cfg startConfig, configPath string) error
 func addStartFlags(flags *flag.FlagSet, cfg *startConfig) {
 	addNewSessionFlags(flags, &cfg.newSessionConfig)
 	addDetachFlags(flags, &cfg.detach)
+	flags.StringVar(&cfg.prompt, "prompt", "", "Initial task input (not replayed on resume)")
+	flags.StringVar(&cfg.prompt, "p", "", "Alias for --prompt")
 }
 
 func addDetachFlags(flags *flag.FlagSet, detach *bool) {
@@ -65,8 +68,8 @@ func parseStartArgs(args []string, output io.Writer) (startConfig, error) {
 	flags.SetOutput(output)
 	addStartFlags(flags, &cfg)
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pact [--config PATH] start [--detach] [--workspace PATH] [--model MODEL] [--effort EFFORT]")
-		fmt.Fprintln(output, "Enter prompts in the native TUI; detach with Ctrl-].")
+		fmt.Fprintln(output, "Usage: pact [--config PATH] start [--detach] [--prompt TEXT] [--workspace PATH] [--model MODEL] [--effort EFFORT]")
+		fmt.Fprintln(output, "Continue in the native TUI; detach with Ctrl-].")
 		flags.PrintDefaults()
 	}
 

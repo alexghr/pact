@@ -98,7 +98,7 @@ func parseArgs(args []string, output io.Writer) (runConfig, []string, error) {
 	flags.StringVar(&cfg.configPath, "config", "", "Config file (default: $XDG_CONFIG_HOME/pact/config.json or ~/.config/pact/config.json)")
 
 	flags.Usage = func() {
-		fmt.Fprintln(output, "Usage: pact [--config PATH] [--detach] [--workspace PATH] [--model MODEL] [--effort EFFORT]")
+		fmt.Fprintln(output, "Usage: pact [--config PATH] [--detach] [--prompt TEXT] [--workspace PATH] [--model MODEL] [--effort EFFORT]")
 		fmt.Fprintln(output, "       pact [--config PATH] sessions list | show SESSION_ID")
 		fmt.Fprintln(output, "       pact [--config PATH] resume [SESSION_ID] [--detach]")
 		fmt.Fprintln(output, "       pact [--config PATH] daemon | start [--detach] [OPTIONS] | attach SESSION_ID")

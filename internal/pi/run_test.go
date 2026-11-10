@@ -123,8 +123,11 @@ func TestPiBindingAndContinuation(t *testing.T) {
 		t.Fatalf("empty session became a resume target: %s", ref)
 	default:
 	}
+	client.close(t)
 	const original = "The project codename is cobalt-otter."
-	client.call(t, "prompt", map[string]any{"message": original})
+	options.Prompt = original
+	client = start()
+	client.wait(t, "")
 	select {
 	case options.BackendRef = <-bindings:
 	default:
@@ -141,7 +144,7 @@ func TestPiBindingAndContinuation(t *testing.T) {
 		}
 	}
 	request := readRequest()
-	if !bytes.Contains(request, []byte(`"model":"gpt-oss-20b"`)) || !bytes.Contains(request, []byte(original)) {
+	if !bytes.Contains(request, []byte(`"model":"gpt-oss-20b"`)) || bytes.Count(request, []byte(original)) != 1 {
 		t.Fatalf("custom provider did not receive the selected model and prompt: %s", request)
 	}
 	var payload struct {
@@ -166,18 +169,21 @@ func TestPiBindingAndContinuation(t *testing.T) {
 	}
 	client.call(t, "new_session", nil)
 	client.call(t, "prompt", map[string]any{"message": "A separate native conversation."})
-	readRequest()
+	if request := readRequest(); bytes.Contains(request, []byte(original)) {
+		t.Fatalf("native navigation replayed the initial assignment: %s", request)
+	}
 	select {
 	case ref := <-bindings:
 		t.Fatalf("native navigation redirected the Pact binding to %s", ref)
 	default:
 	}
 	client.close(t)
+	options.Prompt = ""
 	client = start()
 	const continuation = "Continue using the project codename."
 	client.call(t, "prompt", map[string]any{"message": continuation})
 	request = readRequest()
-	if !bytes.Contains(request, []byte(original)) || !bytes.Contains(request, []byte(continuation)) || bytes.Contains(request, []byte("separate native conversation")) {
+	if bytes.Count(request, []byte(original)) != 1 || !bytes.Contains(request, []byte(continuation)) || bytes.Contains(request, []byte("separate native conversation")) {
 		t.Fatalf("cold resume did not restore the bound conversation: %s", request)
 	}
 	client.close(t)
@@ -227,7 +233,13 @@ func (c *piRPC) call(t *testing.T, method string, fields map[string]any) string 
 	if err := json.NewEncoder(c.input).Encode(fields); err != nil {
 		t.Fatal(err)
 	}
-	response, settled := false, method != "prompt"
+	return c.wait(t, method)
+}
+
+// An empty method waits only for the startup turn, which has no RPC response.
+func (c *piRPC) wait(t *testing.T, method string) string {
+	t.Helper()
+	response, settled := method == "", method != "" && method != "prompt"
 	message := ""
 	for c.scanner.Scan() {
 		var event struct {

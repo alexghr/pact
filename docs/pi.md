@@ -91,6 +91,22 @@ in the session volume. Existing Codex sessions retain their records and files
 but cannot resume with Pi; use `pact -w PATH` to start a new Pi session in their
 workspace.
 
+## Initial task input
+
+`pact start -d -p TEXT` (also `pact -d --prompt TEXT`) sends an initial user
+message through the invocation's extension using `pi.sendUserMessage()` on
+`session_start` with reason `startup`. The daemon still owns the ordinary native
+TUI and returns the Pact ID without waiting for the turn. Attachment does not
+submit input, replace the runtime, or cancel work.
+
+The prompt is transient execution input, not a retained setting. New executions
+created by `pact resume` do not carry it; native `/new`, `/resume`, `/fork`, and
+`/reload` do not resubmit it either. Text is passed as a user message without CLI
+file expansion or slash-command/template expansion. Pi's input hooks still apply.
+Startup and submission errors remain visible in the allocated session's terminal;
+attach to inspect them. Process failures also retain the normal execution outcome.
+There is no durable prompt queue, cross-request deduplication, or crash replay.
+
 The container toolset is pinned in
 `internal/images/context/agent/env/flake.lock`. Bundled skills are supplied with
 `--skill /etc/pi/skills`; project skills use Pi's normal discovery.
@@ -99,9 +115,9 @@ The container toolset is pinned in
 
 Run `./shell p-ci` for all checks, including the pinned Pi 1.5 client against
 local protocol endpoints without real host credentials. It covers custom models,
-initial binding, native navigation, and saved conversation continuation. On Linux
-it also runs two live Pi processes through the actual Unix host bridge and
-shipped relay, with native host OAuth
+initial task input, binding, native navigation without resubmission, and saved
+conversation continuation. On Linux it also runs two live Pi processes through
+the actual Unix host bridge and shipped relay, with native host OAuth
 renewal against a minimal HTTPS token endpoint. It checks cross-process refresh
 coordination, rotated-credential persistence, access-only delivery through native
 request authentication, delayed replies, exhausted validity, bounded failure and

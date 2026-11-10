@@ -30,6 +30,7 @@ type Options struct {
 	Backend      string       `json:"backend,omitempty"`
 	Model        string       `json:"model"`
 	Effort       string       `json:"effort,omitempty"`
+	Prompt       string       `json:"prompt,omitempty"`
 	ConfigPath   string       `json:"configPath,omitempty"`
 	Capabilities Capabilities `json:"capabilities"`
 }
@@ -47,6 +48,7 @@ type Session struct {
 	store                        *state.Store
 	nix                          Nix
 	configPath                   string
+	prompt                       string
 	bridge                       hostbridge.Bridge
 	broker                       *gitbroker.Broker
 	auth                         *pi.HostAuth
@@ -63,7 +65,12 @@ func New(ctx context.Context, store *state.Store, nix Nix, workspaceRoot string,
 	if err != nil {
 		return nil, err
 	}
-	return prepare(ctx, store, nix, record, options.ConfigPath)
+	s, err := prepare(ctx, store, nix, record, options.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	s.prompt = options.Prompt
+	return s, nil
 }
 
 func Restore(ctx context.Context, store *state.Store, nix Nix, id int64, configPath string) (*Session, error) {
@@ -177,7 +184,7 @@ func (s *Session) StartTerminal(ctx context.Context, terminal Terminal) (runErr 
 		mcp[name] = s.bridge.AgentURL() + "/mcp/" + name
 	}
 	s.backendCleanup, err = pi.PrepareContainer(&agent, s.Record.Storage.StateVolume, harness.Options{
-		Model: s.Record.Settings.Model, Effort: s.Record.Settings.Effort,
+		Model: s.Record.Settings.Model, Effort: s.Record.Settings.Effort, Prompt: s.prompt,
 		BackendRef: s.Record.BackendRef, MCP: mcp, MCPApprovalTimeoutSeconds: approvalTimeout,
 	})
 	if err != nil {

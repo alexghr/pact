@@ -85,5 +85,12 @@ export default function (pi: ExtensionAPI) {
   // Pi persists the first user message before constructing the provider request.
   // Empty sessions have no file and must not become Pact's resume target.
   pi.on("before_provider_request", async (_event, ctx) => { await bind(ctx); });
-  pi.on("session_start", async (_event, ctx) => { await bind(ctx); });
+  pi.on("session_start", async (event, ctx) => {
+    await bind(ctx);
+    // Native navigation and /reload also start sessions, but are not launches.
+    // sendUserMessage treats the assignment as task input, not CLI files or commands.
+    if (event.reason === "startup" && options.prompt) {
+      pi.sendUserMessage(options.prompt);
+    }
+  });
 }

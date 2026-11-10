@@ -13,11 +13,16 @@ Build with `./shell p-build`, then run `./pact daemon` in a separate terminal
 # Enter a prompt, then press Ctrl-] to detach while it works.
 ./pact attach 42            # Reattach using the printed Pact session ID
 ./pact -d                   # Create a session without attaching yet (--detach)
+./pact start -d -p "Review PR <link>" # Start work before attaching
 ```
 
 `pact start` is an alias for starting a new session. Both accept workspace, model,
-effort, config, DinD and host-network flags. Enter prompts in the native TUI;
-`--prompt` and `-p` are unavailable.
+effort, config, DinD and host-network flags. Add `--prompt TEXT` (or `-p TEXT`)
+to submit an initial task in the native Pi TUI, with or without `--detach`.
+Detached starts return the Pact ID without waiting for the model. Attach to the
+same session to inspect startup errors or continue the conversation. The initial
+task is not replayed on resume or native navigation. Prompt text is task input,
+not a Pi slash command or `@file` argument.
 Ctrl-C reaches Pi. Ctrl-] only disconnects the terminal.
 
 Configure providers on the host in `~/.pi/agent/auth.json` and

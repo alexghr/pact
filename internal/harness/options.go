@@ -4,6 +4,7 @@ package harness
 type Options struct {
 	Model                     string            `json:"model"`
 	Effort                    string            `json:"effort,omitempty"`
+	Prompt                    string            `json:"prompt,omitempty"`
 	BackendRef                string            `json:"backendRef,omitempty"`
 	MCP                       map[string]string `json:"mcp,omitempty"`
 	MCPApprovalTimeoutSeconds int               `json:"mcpApprovalTimeoutSeconds,omitempty"`

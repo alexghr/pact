@@ -20,9 +20,10 @@ validates their layout.
 `state.Open` accepts an explicit database path and applies migrations.
 
 `session.Options` contains the workspace, initial title, backend, model, effort,
-current config path, and capabilities. `Capabilities` currently contains `DIND`
-and `HostNetwork`. Restoring a session retains its saved settings; it uses current
-host credentials and service endpoints.
+current config path, capabilities, and optional initial prompt. The prompt is
+execution input and is not persisted with launch settings. `Capabilities`
+currently contains `DIND` and `HostNetwork`. Restoring a session retains its saved
+settings; it uses current host credentials and service endpoints.
 
 The daemon selects `databasePath` and `workspaceRoot` at startup. Start and
 resume requests load their selected config and reject storage paths that differ
@@ -40,7 +41,9 @@ and validates the recorded workspace. It does not search native history or choos
 private HTTP bridge, starts DinD when requested, and asks the backend to prepare native
 state/authentication mounts and a launch request. It creates the agent container
 and attaches its terminal streams. Sessions use the native terminal UI; command
-line prompted execution is unavailable.
+line `--prompt`/`-p` task input is submitted by the Pi extension during startup,
+including when detached. It is not a print-mode execution and is never replayed
+on resume. Startup and delivery errors are visible on attachment to that session.
 
 `Cleanup` removes the agent container, private DinD container/socket volume,
 bridge, broker temporary files, and login snapshot, then records the outcome.
