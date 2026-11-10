@@ -2,11 +2,13 @@
 set -euo pipefail
 
 skills=$1
-hostRelay=$2
-gitIdentity=$3
-shift 3
+extensions=$2
+hostRelay=$3
+gitIdentity=$4
+shift 4
 
 ln -sfn "$skills" /etc/pi/skills
+ln -sfn "$extensions" /etc/pi/extensions.json
 
 if [[ -n "${PACT_MCP_SOCKET:-}" ]]; then
   source "$hostRelay"

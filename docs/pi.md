@@ -109,7 +109,13 @@ There is no durable prompt queue, cross-request deduplication, or crash replay.
 
 The container toolset is pinned in
 `internal/images/context/agent/env/flake.lock`. Bundled skills are supplied with
-`--skill /etc/pi/skills`; project skills use Pi's normal discovery.
+`--skill /etc/pi/skills`. The flake's `extensions` list contains absolute extension
+entrypoints; `pact-start` exposes its immutable JSON manifest at
+`/etc/pi/extensions.json`, and the launcher supplies each entry with `--extension`.
+List entrypoints rather than package roots to avoid implicitly loading a package's
+prompts or skills. Dependencies belong in the Nix closure, not a runtime npm install.
+Project skills and `.pi/extensions` use Pi's normal discovery and project trust;
+Pact does not disable or pre-approve it.
 
 ## Validation
 

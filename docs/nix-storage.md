@@ -43,9 +43,10 @@ There is no launcher-side tool build, source copy into the daemon, or shared too
 profile. Sessions using different toolsets can coexist; starting a session does
 not change tools in running agents.
 
-`pact-start` exposes that toolset's skills at `/etc/pi/skills`, starts the host
-relay and Git integration, and executes the requested agent command. This link
-is private to the container. Tools and skills are pinned together. Updating them
+`pact-start` exposes that toolset's skills at `/etc/pi/skills` and extension
+manifest at `/etc/pi/extensions.json`, starts the host relay and Git integration,
+and executes the requested agent command. These links are private to the
+container. Tools, skills, and extension entrypoints are pinned together. Updating them
 requires rebuilding the launcher and starting a new agent container, but does
 not change the daemon image.
 

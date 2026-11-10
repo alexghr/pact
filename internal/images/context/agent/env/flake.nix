@@ -52,10 +52,14 @@
             }
           ];
 
+          # Absolute extension entrypoints only: do not expose package prompts or
+          # skills implicitly, or fetch packages when a session starts.
+          extensions = pkgs.writeText "pact-extensions.json" (builtins.toJSON [ ]);
+
           # agent entrypoint
           start = pkgs.writeShellScriptBin "pact-start" ''
             exec ${pkgs.bash}/bin/bash ${./start.sh} \
-              ${skills}/share/pact/skills ${./host-relay.sh} ${./git-identity.sh} "$@"
+              ${skills}/share/pact/skills ${extensions} ${./host-relay.sh} ${./git-identity.sh} "$@"
           '';
 
           tools = pkgs.buildEnv {

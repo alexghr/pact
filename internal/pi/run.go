@@ -59,7 +59,19 @@ func Run(ctx context.Context, options harness.Options, instructions, bindingURL,
 	if err != nil {
 		return err
 	}
+	bundled, err := os.ReadFile("/etc/pi/extensions.json")
+	if err != nil {
+		return fmt.Errorf("read bundled Pi extensions: %w", err)
+	}
+	var extensions []string
+	if err := json.Unmarshal(bundled, &extensions); err != nil {
+		return fmt.Errorf("decode bundled Pi extensions: %w", err)
+	}
+
 	args := []string{"--extension", path, "--skill", "/etc/pi/skills", "--append-system-prompt", instructions}
+	for _, extension := range extensions {
+		args = append(args, "--extension", extension)
+	}
 	if options.Model != "" {
 		args = append(args, "--model", options.Model)
 	}

@@ -118,7 +118,7 @@ containers and unfinished records: stop/remove stray resources manually with
 `docker rm -f` and `docker volume rm` before resuming. Pact does not lock writers
 or recover previous executions; interrupted prompts are not replayed.
 
-## System skills
+## Bundled skills and extensions
 
 The container includes [Graphene](https://github.com/alexghr/graphene) and its
 `graphene-stacked-prs` skill. Nix pins the CLI and skill to the same source revision
@@ -127,6 +127,11 @@ in `internal/images/context/agent/env/flake.lock`.
 Bundled skills are listed in `internal/images/context/agent/env/flake.nix` and exposed through
 `/etc/pi/skills`. To add or remove one, edit the `skills` list (and add any
 required tools to `pact-tools`), then rebuild the launcher with `./shell p-build`.
+Bundled Pi extension entrypoints are declared in the adjacent `extensions` list
+and loaded from immutable Nix store paths. Host extensions, settings, and packages
+are not copied. Project extensions in `.pi/extensions` retain Pi's native discovery
+and project-trust checks.
+
 Each agent starts in a Nix shell using its pinned toolset. Sessions share cached
 package outputs, while each container keeps its own tools and skills. Tool updates
 apply to newly started containers and do not change the daemon image.
